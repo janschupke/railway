@@ -84,9 +84,12 @@ describe("ContainerRow", () => {
     const user = userEvent.setup();
     renderRow({ managed: false, displayName: "postgres" });
 
-    const info = screen.getByRole("button", {
-      name: /why can't postgres be destroyed/i,
-    });
+    /*
+     * The accessible name must be the visible text. It used to be overridden with
+     * "Why can't postgres be destroyed?", which shares no words with the label on
+     * screen — WCAG 2.5.3, and unusable by voice control.
+     */
+    const info = screen.getByRole("button", { name: "Not managed here" });
     // Radix Tooltip opens on hover or focus, not click.
     await user.hover(info);
 

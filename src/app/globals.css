@@ -13,6 +13,7 @@
   --color-subtle: var(--rc-subtle);
   --color-border: var(--rc-border);
   --color-border-strong: var(--rc-border-strong);
+  --color-overlay: var(--rc-overlay);
 
   --color-text: var(--rc-text);
   --color-text-muted: var(--rc-text-muted);

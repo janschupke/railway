@@ -21,6 +21,7 @@ export async function injectFaults(
     refreshFails: boolean;
     accessTokenTtl: number;
     deploymentsFail: boolean;
+    slowMs: number;
   }>,
 ) {
   await page.request.post(`${FIXTURE_URL}/__test/faults`, { data: faults });

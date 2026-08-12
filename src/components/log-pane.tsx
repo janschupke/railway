@@ -63,7 +63,7 @@ export function LogPane({
             {lines.map((line, index) => (
               <div
                 key={`${line.timestamp}-${index}`}
-                className="text-text/90 whitespace-pre"
+                className="text-text whitespace-pre"
               >
                 <span className="text-text-subtle mr-2 select-none">
                   {/* `||`, not `??`: an empty timestamp slices to "" and must

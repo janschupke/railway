@@ -1,5 +1,5 @@
 import { Container } from "lucide-react";
-import { Button } from "./ui/button";
+import { SignOutButton } from "./sign-out-button";
 import { ThemeToggle } from "./ui/theme-toggle";
 
 export function DashboardHeader({ name, email }: { name?: string; email?: string }) {
@@ -18,11 +18,7 @@ export function DashboardHeader({ name, email }: { name?: string; email?: string
             {name ?? email ?? "Signed in"}
           </span>
           <ThemeToggle />
-          <form action="/api/auth/logout" method="post">
-            <Button type="submit" variant="ghost" size="sm">
-              Sign out
-            </Button>
-          </form>
+          <SignOutButton />
         </div>
       </div>
     </header>

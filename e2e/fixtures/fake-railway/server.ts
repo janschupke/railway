@@ -91,6 +91,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (url.pathname === "/graphql/v2" && req.method === "POST") {
+    if (store.faults.slowMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, store.faults.slowMs));
+    }
+
     const fault = takeFault();
     if (fault) return json(res, fault.status, fault.body);
 

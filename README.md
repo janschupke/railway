@@ -202,6 +202,32 @@ styling: the destroy confirmation gets a focus trap, Escape handling and focus r
 action feedback moves to an announced toast region; the raw Railway status enum moves
 out of a `title` attribute, where keyboard and screen-reader users never saw it.
 
+Appearance is enforced, not just documented. ESLint rejects raw palette utilities
+(`bg-emerald-500/10`), hex literals and `[var(--…)]` arbitrary values in any `className`
+outside `src/components/ui/**`, because each of those bypasses the semantic layer and
+with it the light theme and the contrast test.
+
+### Busy state
+
+`Button` owns it: `pending` blocks activation, renders a spinner and sets `aria-busy`,
+and `pendingLabel` swaps the text. Two details are load-bearing:
+
+- **`disabled` does nothing to a link.** Under `asChild` the primitive renders through
+  Radix `Slot`, and a slotted `<a>` ignores `disabled` entirely — it neither dims nor
+  stops responding to Enter. The primitive uses `aria-disabled` and cancels the click
+  instead, so no caller has to remember. It stays focusable: moving focus to `<body>`
+  mid-action is worse than a focused control that declines to act.
+- **The label swap is silent.** Assistive tech does not re-read the accessible name of
+  the element it is already on, so progress goes through `PendingStatus`, a live region
+  that stays mounted while idle — mounting the region and its text together is the
+  classic way to have an announcement dropped.
+
+Controls that hand the page to the browser (sign in, sign out, re-authorize) are full
+document navigations, so `useFormStatus` and `useTransition` see nothing. They use
+`useNavigationPending`, which raises the flag on activation and clears it on `pageshow`
+— otherwise returning via bfcache, after declining Railway's consent screen, restores a
+button that spins forever.
+
 ---
 
 ## Tests
@@ -219,7 +245,13 @@ Four tiers, each answering something the others cannot.
 across `src/**`. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
 are excluded and covered end-to-end instead — counting them would either inflate the
 number or invite render tests that assert nothing. E2E does not feed the figure, so
-component tests have to carry the UI. Current: 350 tests, ~94% lines.
+component tests have to carry the UI. Current: 360 tests, ~94% lines.
+
+One deliberate split: the sign-in button's busy state is a component test, not an e2e
+one. It exists only between the click and the browser committing the next document, and
+against the fixture that whole OAuth chain finishes in under 120ms — while forcing a
+window open, by holding or aborting the request, makes Chrome tear down the document and
+destroy the state under test.
 
 ### The fake Railway
 
@@ -232,8 +264,9 @@ log streaming are real rather than snapshots.
 The app runs unmodified against it — `RAILWAY_ISSUER` / `RAILWAY_API_URL` /
 `RAILWAY_WS_URL` are the only difference — so PKCE, the token exchange and refresh-token
 rotation are all exercised, rather than stubbed away by seeding a session cookie.
-`POST /__test/faults` injects rate limits, revoked authorizations and failed builds, so
-the unhappy paths are tested instead of asserted.
+`POST /__test/faults` injects rate limits, revoked authorizations, failed builds and a
+`slowMs` delay — busy state only exists while a request is in flight, so a spec that
+means to assert on it slows the API down rather than racing it.
 
 Playwright runs `workers: 1`: the fixture holds shared state that each spec resets.
 
@@ -252,6 +285,11 @@ WCAG 2.1 AA, checked three ways because each misses what the others catch:
 3. **Keyboard specs** (`e2e/keyboard.spec.ts`) for focus traps, focus restore, roving
    tabindex, Escape and live-region politeness. Axe cannot see any of that — and they
    are what make replacing a native `<select>` with a Radix one defensible.
+
+Axe misses more than timing. The unmanaged-container control passed every scan while
+showing "Not managed here" under an accessible name of "Why can't postgres be
+destroyed?" — no shared words, so voice control could not address the thing on screen
+(WCAG 2.5.3 Label in Name). Nothing automated flagged it.
 
 Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
 

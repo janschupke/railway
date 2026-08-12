@@ -1,0 +1,30 @@
+"use client";
+
+import { useNavigationPending } from "@/hooks/use-navigation-pending";
+import { Button } from "./ui/button";
+
+/**
+ * A native form POST, so sign-out survives a failed hydration. `useFormStatus` reports
+ * nothing here — it only tracks React action submissions — hence the explicit flag.
+ *
+ * Disabling in the submit handler is safe: the browser has already committed to the
+ * navigation by the time React re-renders, so this blocks the second click without
+ * cancelling the first.
+ */
+export function SignOutButton() {
+  const { pending, start } = useNavigationPending();
+
+  return (
+    <form action="/api/auth/logout" method="post" onSubmit={start}>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        pending={pending}
+        pendingLabel="Signing out…"
+      >
+        Sign out
+      </Button>
+    </form>
+  );
+}

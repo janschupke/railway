@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import type { RailwayProject } from "@/lib/railway/types";
+import { PendingStatus } from "./ui/misc";
 import { Select } from "./ui/select";
 
 /**
@@ -29,11 +30,16 @@ export function ProjectPicker({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    /*
+     * The selects stay enabled while the route transition runs. Disabling the control
+     * the user just committed removes it from the a11y tree and drops focus to <body>;
+     * aria-busy says the same thing without stealing focus, and React supersedes the
+     * earlier navigation if they change their mind mid-flight.
+     */
+    <div className="flex flex-wrap items-center gap-3" aria-busy={pending || undefined}>
       <Select
         label="Project"
         value={projectId ?? undefined}
-        disabled={pending}
         options={projects.map((p) => ({ value: p.id, label: p.name }))}
         onValueChange={(id) => {
           const next = new URLSearchParams(params);
@@ -47,7 +53,7 @@ export function ProjectPicker({
       <Select
         label="Environment"
         value={environmentId ?? undefined}
-        disabled={pending || !selected}
+        disabled={!selected}
         options={
           selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
         }
@@ -57,6 +63,8 @@ export function ProjectPicker({
           navigate(next);
         }}
       />
+
+      <PendingStatus label={pending ? "Loading containers…" : undefined} />
     </div>
   );
 }

@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 export const AlertDialogRoot = Primitive.Root;
 export const AlertDialogTrigger = Primitive.Trigger;
 export const AlertDialogCancel = Primitive.Cancel;
-export const AlertDialogAction = Primitive.Action;
 
 export function AlertDialogContent({
   className,
@@ -22,7 +21,7 @@ export function AlertDialogContent({
 }: React.ComponentProps<typeof Primitive.Content>) {
   return (
     <Primitive.Portal>
-      <Primitive.Overlay className="animate-overlay fixed inset-0 z-50 bg-black/60" />
+      <Primitive.Overlay className="animate-overlay bg-overlay fixed inset-0 z-50" />
       <Primitive.Content
         className={cn(
           "border-border bg-raised animate-content fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))]",

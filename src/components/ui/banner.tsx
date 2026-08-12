@@ -13,8 +13,7 @@ const bannerVariants = cva("rounded-md px-3 py-2 text-sm", {
   defaultVariants: { tone: "info" },
 });
 
-export type BannerProps = React.ComponentProps<"p"> &
-  VariantProps<typeof bannerVariants>;
+type BannerProps = React.ComponentProps<"p"> & VariantProps<typeof bannerVariants>;
 
 /**
  * Inline, persistent message tied to a region of the page. Transient feedback about an

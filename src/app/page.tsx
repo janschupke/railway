@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Container, ShieldCheck } from "lucide-react";
 import { getSession } from "@/lib/auth/server";
+import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -50,12 +51,7 @@ export default async function LandingPage({
       {message && <Banner tone="error">{message}</Banner>}
 
       <Card className="space-y-4 p-5">
-        <a
-          href="/api/auth/login"
-          className="focus-ring bg-accent text-accent-fg hover:bg-accent-hover flex w-full items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition-colors"
-        >
-          Sign in with Railway
-        </a>
+        <SignInButton variant="primary" size="lg" className="w-full" />
         <p className="text-text-subtle flex items-start gap-2 text-xs">
           <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>

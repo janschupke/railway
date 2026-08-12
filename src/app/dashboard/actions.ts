@@ -11,8 +11,6 @@ import {
 import { toManagedName } from "@/lib/railway/managed";
 import { spinDownSchema, spinUpSchema } from "@/lib/validation";
 
-export type { ActionResult };
-
 export async function spinUp(
   _prev: ActionResult | null,
   formData: FormData,

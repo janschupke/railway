@@ -4,7 +4,7 @@ import { Select as Primitive } from "radix-ui";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type SelectOption = { value: string; label: string };
+type SelectOption = { value: string; label: string };
 
 /**
  * Styled single-select on Radix.

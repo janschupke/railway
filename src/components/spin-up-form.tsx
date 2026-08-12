@@ -1,13 +1,15 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import { spinUp, type ActionResult } from "@/app/dashboard/actions";
+import { spinUp } from "@/app/dashboard/actions";
+import type { ActionResult } from "@/lib/action-result";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
+import { PendingStatus } from "./ui/misc";
 import { ToggleGroup } from "./ui/toggle-group";
 import { useToast } from "./ui/toast";
 
@@ -41,6 +43,7 @@ export function SpinUpForm({
     null,
   );
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
+  const imageGroupId = useId();
   // Uncontrolled: nothing else reads the name, so clearing it on success is a DOM
   // write rather than a setState inside an effect.
   const nameRef = useRef<HTMLInputElement>(null);
@@ -66,8 +69,11 @@ export function SpinUpForm({
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="environmentId" value={environmentId} />
 
-        <div className="space-y-2">
-          <p className="text-text text-sm font-medium">Image</p>
+        {/* The heading is visual grouping; role+labelledby makes it programmatic too. */}
+        <div className="space-y-2" role="group" aria-labelledby={imageGroupId}>
+          <p id={imageGroupId} className="text-text text-sm font-medium">
+            Image
+          </p>
           <ToggleGroup
             label="Preset images"
             value={image}
@@ -114,15 +120,26 @@ export function SpinUpForm({
         </Field>
 
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="primary" disabled={pending || disabled}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={disabled}
+            pending={pending}
+            pendingLabel="Spinning up…"
+          >
             <Plus aria-hidden />
-            {pending ? "Spinning up…" : "Spin up container"}
+            Spin up container
           </Button>
           {disabled && (
             <span className="text-text-subtle text-xs">
               Select a project and environment first.
             </span>
           )}
+          {/* The button's own label change is not announced; this is. */}
+          <PendingStatus
+            className="sr-only"
+            label={pending ? "Spinning up container…" : undefined}
+          />
         </div>
       </form>
     </Card>

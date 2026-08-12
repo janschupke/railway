@@ -1,22 +1,55 @@
-import { Separator as SeparatorPrimitive } from "radix-ui";
+import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function Separator({
+/**
+ * Busy indicator.
+ *
+ * Deliberately decorative: `prefers-reduced-motion` freezes every animation globally
+ * (see globals.css), so a frozen spinner would be the only signal left. The meaning has
+ * to live in adjacent text — which is why `Button` pairs this with `pendingLabel`
+ * rather than relying on the spin alone.
+ */
+export function Spinner({ className }: { className?: string }) {
+  return <LoaderCircle aria-hidden className={cn("animate-spin", className)} />;
+}
+
+/**
+ * Polite announcement for work in flight.
+ *
+ * Swapping a button's label mid-action is not reliably announced — assistive tech does
+ * not re-read the accessible name of the element it is already sitting on — so progress
+ * gets its own region. The region stays mounted and empty when idle: injecting the
+ * element and its text together is the classic way to have an announcement dropped.
+ *
+ * Pass `className="sr-only"` where the surrounding UI already shows the state visually.
+ */
+export function PendingStatus({
+  label,
   className,
-  orientation = "horizontal",
 }: {
+  /** Rendered and announced only while set. */
+  label?: string | undefined;
   className?: string;
-  orientation?: "horizontal" | "vertical";
 }) {
   return (
-    <SeparatorPrimitive.Root
-      orientation={orientation}
-      className={cn(
-        "bg-border",
-        orientation === "horizontal" ? "h-px w-full" : "h-full w-px",
-        className,
-      )}
-    />
+    <span
+      /*
+       * A bare live region, deliberately without role="status": toasts and Banner
+       * already claim that role, and a third source would make every status assertion
+       * in the suite ambiguous. aria-live + aria-atomic announces identically.
+       */
+      aria-live="polite"
+      aria-atomic="true"
+      data-pending-status={label ? "" : undefined}
+      className={cn("text-text-subtle flex items-center gap-1.5 text-xs", className)}
+    >
+      {label ? (
+        <>
+          <Spinner className="size-3.5" />
+          {label}
+        </>
+      ) : null}
+    </span>
   );
 }
 

@@ -99,12 +99,14 @@ export function ContainerRow({
             disabled={state === "removing"}
           />
         ) : (
+          /*
+           * No aria-label here. Overriding the name with a differently-worded question
+           * left the accessible name sharing no words with the visible text, so voice
+           * control could not address the control it can see (WCAG 2.5.3 Label in
+           * Name). The tooltip supplies the explanation as a description instead.
+           */
           <Tooltip content="Only services created in this app can be destroyed here.">
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Why can't ${container.displayName} be destroyed?`}
-            >
+            <Button variant="ghost" size="sm">
               <Info aria-hidden />
               Not managed here
             </Button>
@@ -112,27 +114,33 @@ export function ContainerRow({
         )}
       </div>
 
-      {expanded && (
-        <div id={panelId} className="space-y-2 px-4 pb-4">
-          {stream.error && <Banner tone="error">{stream.error}</Banner>}
-          {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
-          {container.deploymentId ? (
-            <LogPane
-              lines={stream.logs}
-              connected={stream.connected}
-              emptyLabel={
-                isTransitioning(state)
-                  ? "Waiting for output…"
-                  : "No log output for this deployment."
-              }
-            />
-          ) : (
-            <Banner tone="info">
-              This service has no deployment yet, so there is nothing to stream.
-            </Banner>
-          )}
-        </div>
-      )}
+      {/*
+        Always rendered, toggled with `hidden`: aria-controls must point at an element
+        that exists in both states, and the collapsed panel had no node to point at.
+      */}
+      <div id={panelId} hidden={!expanded} className="space-y-2 px-4 pb-4">
+        {expanded && (
+          <>
+            {stream.error && <Banner tone="error">{stream.error}</Banner>}
+            {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
+            {container.deploymentId ? (
+              <LogPane
+                lines={stream.logs}
+                connected={stream.connected}
+                emptyLabel={
+                  isTransitioning(state)
+                    ? "Waiting for output…"
+                    : "No log output for this deployment."
+                }
+              />
+            ) : (
+              <Banner tone="info">
+                This service has no deployment yet, so there is nothing to stream.
+              </Banner>
+            )}
+          </>
+        )}
+      </div>
     </li>
   );
 }

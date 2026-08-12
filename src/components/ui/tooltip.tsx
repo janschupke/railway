@@ -33,7 +33,7 @@ export function Tooltip({
             )}
           >
             {content}
-            <Primitive.Arrow className="fill-[var(--rc-raised)]" />
+            <Primitive.Arrow className="fill-raised" />
           </Primitive.Content>
         </Primitive.Portal>
       </Primitive.Root>

@@ -45,6 +45,14 @@ export type Faults = {
   accessTokenTtl: number;
   /** Newly created deployments fail their build. */
   deploymentsFail: boolean;
+  /**
+   * Hold every GraphQL response for this many ms.
+   *
+   * Busy state is, by definition, only observable while a request is in flight. Against
+   * an instant fixture that window is a few milliseconds and any assertion on it is a
+   * race, so a spec that means to check the spinner slows the API down first.
+   */
+  slowMs: number;
 };
 
 export class Store {
@@ -73,6 +81,7 @@ export class Store {
     refreshFails: false,
     accessTokenTtl: 3600,
     deploymentsFail: false,
+    slowMs: 0,
   };
 
   #seq = 0;
@@ -170,6 +179,7 @@ export class Store {
       refreshFails: false,
       accessTokenTtl: 3600,
       deploymentsFail: false,
+      slowMs: 0,
     };
     this.addService({
       name: "postgres",

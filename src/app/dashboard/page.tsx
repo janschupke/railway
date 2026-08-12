@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ContainerRow } from "@/components/container-row";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
+import { SignInButton } from "@/components/sign-in-button";
 import { SpinUpForm } from "@/components/spin-up-form";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
@@ -41,12 +42,7 @@ export default async function DashboardPage({
               title="No projects shared with this app"
               description="Railway's consent screen controls which projects are visible here. Sign in again and select at least one project."
               action={
-                <a
-                  href="/api/auth/login"
-                  className="focus-ring border-border hover:bg-subtle inline-block rounded-md border px-3 py-1.5 text-sm"
-                >
-                  Choose projects
-                </a>
+                <SignInButton label="Choose projects" variant="secondary" size="sm" />
               }
             />
           </Card>

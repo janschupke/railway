@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Banner } from "./banner";
 import { Button } from "./button";
 import { Card } from "./card";
-import { EmptyState, Separator, Skeleton } from "./misc";
+import { EmptyState, PendingStatus, Skeleton } from "./misc";
 import { ScrollArea } from "./scroll-area";
 import { Select } from "./select";
 import { ToggleGroup } from "./toggle-group";
@@ -52,6 +52,67 @@ describe("Button", () => {
     await user.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it("marks itself busy and swaps the label while pending", () => {
+    render(
+      <Button pending pendingLabel="Spinning up…">
+        Spin up container
+      </Button>,
+    );
+
+    const button = screen.getByRole("button");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Spinning up…");
+    expect(button).not.toHaveTextContent("Spin up container");
+  });
+
+  it("falls back to the children when no pending label is given", () => {
+    render(<Button pending>Save</Button>);
+    expect(screen.getByRole("button")).toHaveTextContent("Save");
+  });
+
+  it("declines activation of a pending link, which cannot be disabled", async () => {
+    /*
+     * The regression this locks: `disabled` on a Slot-rendered <a> does nothing at all,
+     * so a pending sign-in link stayed clickable and could fire a second OAuth round
+     * trip. aria-disabled plus a suppressed click is the only shape that holds.
+     */
+    render(
+      <Button asChild pending>
+        <a href="/api/auth/login">Sign in</a>
+      </Button>,
+    );
+
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).not.toHaveAttribute("disabled");
+
+    /*
+     * Slot runs the child's own handler before the slot's, so a pending Button cannot
+     * suppress it — what it can do is cancel the default, which is what stops a second
+     * navigation. That cancellation is the actual guarantee, so assert on it.
+     */
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+  });
+
+  it("still calls through when a link is not pending", async () => {
+    const onClick = vi.fn((e: React.MouseEvent) => e.preventDefault());
+    const user = userEvent.setup();
+    render(
+      <Button asChild>
+        <a href="/somewhere" onClick={onClick}>
+          Go
+        </a>
+      </Button>,
+    );
+
+    await user.click(screen.getByRole("link"));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Banner", () => {
@@ -71,12 +132,21 @@ describe("Card", () => {
   });
 });
 
-describe("Separator, Skeleton, EmptyState", () => {
-  it("renders a separator with an orientation", () => {
-    const { container } = render(<Separator orientation="vertical" />);
-    expect(container.querySelector("[data-orientation='vertical']")).not.toBeNull();
-  });
+describe("PendingStatus", () => {
+  it("keeps the live region mounted while idle so the announcement is not missed", () => {
+    // Injecting the region and its text in the same commit is the classic way to have
+    // an announcement dropped; the element has to be there first.
+    const { container, rerender } = render(<PendingStatus />);
+    const region = container.querySelector("[aria-live='polite']");
+    expect(region).toBeEmptyDOMElement();
 
+    rerender(<PendingStatus label="Spinning up…" />);
+    expect(region).toHaveTextContent("Spinning up…");
+    expect(region).toHaveAttribute("data-pending-status");
+  });
+});
+
+describe("Skeleton, EmptyState", () => {
   it("hides skeletons from assistive technology", () => {
     // The surrounding region already carries aria-busy; announcing shimmer is noise.
     const { container } = render(<Skeleton className="h-4" />);

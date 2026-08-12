@@ -8,6 +8,7 @@ import { useToast } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
+import { PendingStatus } from "./ui/misc";
 import {
   AlertDialogCancel,
   AlertDialogContent,
@@ -105,9 +106,17 @@ export function DestroyContainerDialog({
             )}
           </Field>
 
+          <PendingStatus
+            className="sr-only"
+            label={pending ? `Destroying ${displayName}…` : undefined}
+          />
+
           <AlertDialogFooter>
             <AlertDialogCancel asChild>
-              <Button variant="ghost">Cancel</Button>
+              {/* Dismissing mid-flight unmounts the form and strands the request. */}
+              <Button variant="ghost" disabled={pending}>
+                Cancel
+              </Button>
             </AlertDialogCancel>
             {/*
               Deliberately not an AlertDialogAction: that closes the dialog on click,
@@ -116,9 +125,11 @@ export function DestroyContainerDialog({
             <Button
               type="submit"
               variant="danger"
-              disabled={confirmText.trim() !== displayName || pending}
+              disabled={confirmText.trim() !== displayName}
+              pending={pending}
+              pendingLabel="Destroying…"
             >
-              {pending ? "Destroying…" : "Destroy permanently"}
+              Destroy permanently
             </Button>
           </AlertDialogFooter>
         </form>
