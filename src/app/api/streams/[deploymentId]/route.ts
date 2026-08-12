@@ -8,7 +8,7 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import { requestContext, runWithRequestContext } from "@/lib/log/context";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
-import { DEPLOYMENT_ID_PATTERN } from "@/lib/validation";
+import { RAILWAY_ID_PATTERN } from "@/lib/validation";
 import type { RailwaySession } from "@/lib/auth/session";
 
 // `ws` needs Node, and this is a long-lived response.
@@ -52,7 +52,7 @@ async function handle(
 
   // Before anything expensive: an unbounded identifier from the URL used to reach the
   // GraphQL layer and open an upstream socket on the strength of nothing.
-  if (!DEPLOYMENT_ID_PATTERN.test(deploymentId)) {
+  if (!RAILWAY_ID_PATTERN.test(deploymentId)) {
     /*
      * The id itself is not logged. It is an unbounded, attacker-controlled string
      * straight off the URL — the suite feeds this branch "../../etc/passwd" — and putting

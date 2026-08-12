@@ -282,12 +282,31 @@ body {
  * tooltip animation.
  */
 [data-state="open"].animate-content,
+[data-state="open"].animate-content-enter,
 [data-state="delayed-open"].animate-content,
-[data-state="instant-open"].animate-content {
+[data-state="delayed-open"].animate-content-enter,
+[data-state="instant-open"].animate-content,
+[data-state="instant-open"].animate-content-enter {
   animation: content-in var(--duration-fast) ease-out;
   /* Grows from the edge nearest its trigger rather than from its own middle. */
   transform-origin: var(--radix-popper-transform-origin, center);
 }
+/*
+ * `.animate-content-enter` is deliberately absent from the exit rule, and Select carries
+ * neither class at all. Both are findings rather than oversights.
+ *
+ * Radix Select is a modal layer: while its content is mounted it holds a focus scope, a
+ * scroll lock and `aria-hidden` on the rest of the document, and Presence keeps a closing
+ * node mounted for as long as an animation runs on it. Animating select content at all —
+ * enter alone was enough — left that layer alive past its own close, and every subsequent
+ * Escape went there rather than to whatever the user was looking at. Open the project
+ * dropdown, dismiss it, open the destroy dialog: that dialog could no longer be dismissed.
+ * Established by elimination, and pinned by e2e/motion.spec.ts and e2e/security.spec.ts.
+ *
+ * The select loses nothing that matters. The reported bug was that it painted in the
+ * viewport's top-left corner for a frame, and the fix for that is the rule above — the
+ * popup now simply appears where it belongs, immediately.
+ */
 [data-state="closed"].animate-content {
   animation: content-out var(--duration-fast) ease-in;
 }

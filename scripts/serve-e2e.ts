@@ -66,6 +66,8 @@ start("pnpm", ["exec", "next", "start", "-p", String(APP_PORT)], {
   RAILWAY_CLIENT_SECRET: "e2e-secret",
   SESSION_SECRET: "e2e-session-secret-at-least-32-characters",
   MANAGED_PREFIX: "spun-",
+  // Matches playwright.config.ts, so a manually served app watches at the same rate.
+  WATCH_POLL_MS: "1000",
   RAILWAY_ISSUER: FIXTURE_URL,
   RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
   RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,

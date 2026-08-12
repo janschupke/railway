@@ -46,8 +46,11 @@ export function Tooltip({
              * targeted the popper wrapper, which every Radix popper shares. Note that
              * Radix Tooltip's content is never data-state="open" — it is delayed-open or
              * instant-open, which globals.css covers.
+             *
+             * Enter only: a tooltip dismisses nothing, so an exit animation would buy a
+             * fade at the cost of a node that outlives its own close.
              */
-            "animate-content",
+            "animate-content-enter",
           )}
         >
           {content}

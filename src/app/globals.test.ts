@@ -54,9 +54,24 @@ describe("popper animation", () => {
   });
 
   it("is opted into by each portalled surface, rather than applied to all of them", () => {
-    for (const file of ["select.tsx", "tooltip.tsx", "alert-dialog.tsx"]) {
+    for (const file of ["tooltip.tsx", "alert-dialog.tsx", "combobox.tsx"]) {
       expect(ui(file), file).toContain("animate-content");
     }
+  });
+
+  it("never animates the select popup, in either direction", () => {
+    /*
+     * Radix Select is a modal layer: while its content is mounted it holds a focus
+     * scope, a scroll lock and `aria-hidden` on the rest of the document, and Presence
+     * keeps a closing node mounted for as long as an animation runs on it. Animating it
+     * at all — an enter animation alone was enough — kept that layer alive past its own
+     * close and took Escape with it: dismissing the project dropdown left the destroy
+     * dialog impossible to dismiss.
+     *
+     * Nothing is lost. The reported bug was the popup painting in the viewport corner
+     * for a frame, and the wrapper rule above is what fixes that.
+     */
+    expect(ui("select.tsx")).not.toContain("animate-content");
   });
 });
 

@@ -125,6 +125,29 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
    * generated credential reached Railway *and* that it never reached the browser, and it
    * cannot do both if the only way to see it is to render it.
    */
+  if (url.pathname === "/__test/services" && req.method === "POST") {
+    /*
+     * Creates a service the way Railway's own dashboard would — behind this app's back.
+     * That is exactly the case the project watcher exists for, and there is no other way
+     * to produce it from a spec: driving the app's own form would be the app noticing
+     * its own change.
+     */
+    const input = JSON.parse((await readBody(req)) || "{}") as {
+      name: string;
+      projectId?: string;
+      environmentId?: string;
+      image?: string;
+    };
+    const service = store.addService({
+      name: input.name,
+      projectId: input.projectId ?? "proj_demo",
+      environmentId: input.environmentId ?? "env_prod",
+      image: input.image ?? "redis:7-alpine",
+      deployed: true,
+    });
+    return json(res, 200, service);
+  }
+
   if (url.pathname === "/__test/services") {
     return json(res, 200, [...store.services.values()]);
   }

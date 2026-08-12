@@ -76,8 +76,6 @@ export function Select({
               className={cn(
                 "border-border bg-raised z-50 max-h-64 min-w-[var(--radix-select-trigger-width)]",
                 "overflow-hidden rounded-md border shadow-lg",
-                // On the Content, never on the positioning wrapper — see globals.css.
-                "animate-content",
               )}
             >
               <Primitive.Viewport className="p-1">

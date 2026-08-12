@@ -54,6 +54,18 @@ const schema = z.object({
    * ownership marker that gates destructive actions — see lib/railway/managed.ts.
    */
   MANAGED_PREFIX: z.string().min(1).default("spun-"),
+  /**
+   * How often the project watcher asks Railway whether anything changed, in ms.
+   *
+   * Configurable because the right answer depends on the plan behind the token: the
+   * default of 15s is 240 requests/hour against Hobby's 1000, and an account with more
+   * headroom can reasonably go faster. Bounded below at one second so a typo cannot turn
+   * a watcher into a denial of service against the user's own quota.
+   *
+   * The end-to-end suite sets it low so a spec can observe a change without waiting out
+   * a production interval.
+   */
+  WATCH_POLL_MS: z.coerce.number().int().min(1_000).default(15_000),
 
   /*
    * Railway endpoints are configurable so the end-to-end suite can point the whole

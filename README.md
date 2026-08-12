@@ -133,9 +133,10 @@ upgrades in a route handler, and the data only flows one way. No custom server n
 
 **Status is the honest exception.** Railway exposes log subscriptions but no
 deployment-status subscription, so status is polled — bounded to one deployment, only
-while it is transitioning, with the whole stream closing at a terminal state. That is a
-different cost profile from a dashboard-wide poll, which would burn a Hobby plan's
-1000 requests/hour quickly.
+while it is transitioning, with the whole stream closing at a terminal state.
+
+The dashboard as a whole is polled too, and deliberately: see ADR-10, which covers the
+cost of that and why it is paid on the server rather than in the browser.
 
 ### ADR-4 — No database
 
@@ -215,7 +216,10 @@ browser-side GraphQL here to give them to, and it would put ~35 kB gzip into a b
 that is gated at 209 kB.
 
 **A normalized cache would be actively wrong.** The dashboard shows infrastructure that
-changes underneath the user; every request is `cache: "no-store"` on purpose.
+changes underneath the user; every request is `cache: "no-store"` on purpose. There are
+two SSE endpoints now and neither carries application state — the second one carries a
+single bit (ADR-10), so there would be nothing for a cache to normalize even if one
+were wanted.
 
 **The subscription path is not Apollo-shaped.** App Router route handlers cannot accept
 WebSocket upgrades, so logs arrive over `graphql-ws` upstream and leave over SSE
@@ -297,6 +301,71 @@ access log and this app has no business duplicating it.
 string, because Railway's log viewer colours on one and that is the actual reader today.
 The OTel bridge's severity mapping may prefer the number. It is one line in one file and
 the field name is the same either way.
+
+### Known non-issues
+
+**"The resource … was preloaded using link preload but not used within a few seconds
+from the window's load event."** Development only, and not this app's. `next dev` emits
+exactly one `<link rel=preload>`, and it is Turbopack's HMR client — which the dev
+runtime loads through its own machinery rather than as a plain script, so the browser
+reports it unused. A production build emits one preload (Next's error-boundary chunk, at
+`fetchPriority=low`) and the browser does not complain about that one at all.
+
+`e2e/console.spec.ts` asserts this rather than assuming it: it captures the console over
+CDP — `page.on("console")` never receives engine-generated messages like this one — with
+an empty allow-list, so any _new_ warning fails CI.
+
+### ADR-10 — The dashboard watches; it does not poll from the browser
+
+A container created, redeployed or destroyed in Railway's own dashboard did not appear
+here until someone pressed Refresh. The app was one-way.
+
+**There is nothing to subscribe to.** Railway publishes `deploymentLogs` and `buildLogs`,
+both keyed to a single deployment id, and no project, service or deployment-status
+subscription — `pnpm verify:schema` introspects the live API and would say otherwise if
+that changed. So closing the loop means polling. The only real question is who polls.
+
+**The server does.** `/api/watch/[projectId]` runs one `PROJECT_QUERY` per interval,
+hashes the result, and pushes a `changed` event when the hash moves. The browser answers
+it with `router.refresh()` and the page re-renders through the normal RSC path.
+
+That beats a `setInterval` in the browser on three counts. It is one Railway request per
+user regardless of how many components would have asked. The access token never leaves
+the server, which a client-side poll of Railway would require. And `document.visibilityState`
+gating costs _literally_ nothing when nobody is looking: the client closes the connection
+when the tab is hidden and reopens it on the way back, so a dashboard left open in a
+background tab makes no requests at all.
+
+**The payload is one bit.** This endpoint never carries application state — see ADR-8 on
+why a normalized cache would be wrong here. The client is told _that_ something changed,
+never _what_, which keeps rendering in the one place that knows how.
+
+**The arithmetic.** `WATCH_POLL_MS` defaults to 15s, which is 240 requests/hour against
+Hobby's documented 1000 — a quarter of the budget for a tab someone is actually watching.
+It is an env var rather than a constant because the right value depends on the plan
+behind the token, and the schema floors it at one second so a typo cannot turn a watcher
+into a denial of service against the user's own quota.
+
+**What the fingerprint deliberately misses.** It covers the service set and each one's
+identity, source, state and deployment id. It excludes `updatedAt`, which Railway bumps
+on every deployment tick — including it would refresh the whole page every interval for
+the length of a build, a window the row's own deployment stream already owns and already
+refreshes at the end of. The cost: redeploying the same image to the same state changes
+only `updatedAt` and will not be noticed until something else does. That is the trade,
+and `watch-fingerprint.test.ts` pins both halves of it.
+
+**The connection budget, which is what forced a change elsewhere.** Browsers allow six
+connections per origin over HTTP/1.1, and `next start` speaks HTTP/1.1. One is now the
+watcher and one is reserved for RSC navigation and Server Action fetches, which share the
+same pool — so `STREAM.MAX_CONCURRENT_PER_USER` came down from 8 to 4. It was above the
+browser's own limit before, which meant the cap that actually applied was invisible: the
+seventh EventSource did not fail, it queued, with nothing on the wire and nothing in any
+log.
+
+**Not done, and named rather than left implicit:** a client-side connection registry that
+defers streams past the limit instead of letting the browser queue them silently. Lowering
+the server cap makes the refusal legible; it does not make the browser's own queueing go
+away.
 
 ---
 

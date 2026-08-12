@@ -1,4 +1,13 @@
-import { button, expect, onlyVisible, signIn, spinUp, test, toast } from "./support";
+import {
+  button,
+  expect,
+  onlyVisible,
+  openDestroyDialog,
+  signIn,
+  spinUp,
+  test,
+  toast,
+} from "./support";
 
 /*
  * The one suite that must NOT run under reduced motion.
@@ -103,6 +112,33 @@ test.describe("popup motion", () => {
         .filter(Boolean),
     );
     expect(exiting).toContain("content-out");
+  });
+
+  test("dismissing a dropdown leaves Escape working everywhere else", async ({
+    page,
+  }) => {
+    /*
+     * The regression that adding exit animations introduced, caught by security.spec
+     * and pinned here.
+     *
+     * Radix Presence keeps a closing node mounted for as long as an animation runs on
+     * it, and a mounted Select holds a focus scope, a scroll lock and `aria-hidden` on
+     * the rest of the document. An animated exit therefore kept that layer alive past
+     * its own close — and every Escape after it went there instead of to whatever the
+     * user was actually looking at. Dismissing the project dropdown left the destroy
+     * dialog impossible to dismiss.
+     */
+    await onlyVisible(page.getByRole("combobox", { name: "Project" })).click();
+    await expect(
+      onlyVisible(page.getByRole("option", { name: "Demo Project" })),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await spinUp(page, "cache");
+    const dialog = await openDestroyDialog(page, "cache");
+    await page.keyboard.press("Escape");
+
+    await expect(dialog).toHaveCount(0);
   });
 
   test("expanding a container row animates the panel open", async ({ page }) => {

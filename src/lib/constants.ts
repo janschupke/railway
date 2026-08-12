@@ -62,6 +62,32 @@ export const STREAM = {
   UNSETTLED_POLLS_BEFORE_STOP: 8,
 } as const;
 
+/**
+ * The project watcher.
+ *
+ * Separate from STREAM because the cost profile is different: one long-lived connection
+ * per visible tab, polling a single query, rather than one per expanded row carrying an
+ * upstream socket.
+ */
+export const WATCH = {
+  /*
+   * The poll interval itself is not here — it is WATCH_POLL_MS in env.ts, because the
+   * right value depends on the plan behind the token. One request per tick per *visible*
+   * tab: the 15s default is 240/hour against Hobby's 1000, and zero for a tab nobody is
+   * looking at, since the client holds no connection while hidden.
+   */
+  /** Spread, so several tabs opened together do not align on the same second. */
+  JITTER: 0.2,
+  /** Backoff ceiling after repeated Railway failures. */
+  MAX_POLL_MS: 120_000,
+  /**
+   * Watchers one user may hold. Two, because switching projects re-establishes the
+   * watcher while the old one is still closing — the same reason STREAM's cap sits above
+   * its own honest working set.
+   */
+  MAX_PER_USER: 2,
+} as const;
+
 /** Session cookie and token lifetimes. */
 export const SESSION = {
   /** Refresh this far ahead of expiry. Railway access tokens live one hour. */

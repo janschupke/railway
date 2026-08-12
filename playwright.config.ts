@@ -56,6 +56,10 @@ export default defineConfig({
         RAILWAY_CLIENT_SECRET: "e2e-secret",
         SESSION_SECRET: "e2e-session-secret-at-least-32-characters",
         MANAGED_PREFIX: "spun-",
+        // The floor the env schema allows. The production default is 15s, which no spec
+        // can wait out — and a watcher spec that sleeps that long is a watcher spec
+        // nobody runs.
+        WATCH_POLL_MS: "1000",
         RAILWAY_ISSUER: FIXTURE_URL,
         RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
         RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,

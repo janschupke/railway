@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { ContainerSectionSkeleton } from "@/components/dashboard-skeletons";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
+import { ProjectWatcher } from "@/components/project-watcher";
 import { RefreshButton } from "@/components/refresh-button";
 import { SignInButton } from "@/components/sign-in-button";
 import { SpinUpForm } from "@/components/spin-up-form";
@@ -176,6 +177,19 @@ export default async function DashboardPage({
                   projectId={project?.id ?? null}
                   environmentId={environment?.id ?? null}
                 />
+
+                {/*
+                  Renders nothing. Holds the connection that notices a container created,
+                  redeployed or destroyed in Railway's own dashboard — which this app used
+                  to learn about only when the user pressed Refresh. Mounted here so a
+                  project switch remounts it, and absent when there is nothing to watch.
+                */}
+                {project && environment && (
+                  <ProjectWatcher
+                    projectId={project.id}
+                    environmentId={environment.id}
+                  />
+                )}
 
                 <SpinUpForm
                   projectId={project?.id ?? ""}

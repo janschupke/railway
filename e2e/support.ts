@@ -178,6 +178,16 @@ export async function spinUp(page: Page, name: string, preset = "Redis") {
   await button(page, /spin up container/i).click();
 }
 
+/**
+ * Creates a service behind the app's back, as Railway's own dashboard would.
+ *
+ * The only way to produce the case the project watcher exists for: driving this app's
+ * own form would be the app noticing a change it made itself.
+ */
+export async function createServiceOutOfBand(page: Page, name: string) {
+  await page.request.post(`${FIXTURE_URL}/__test/services`, { data: { name } });
+}
+
 /** Service records from the fixture, including the environment each was created with. */
 export async function fixtureServices(
   page: Page,

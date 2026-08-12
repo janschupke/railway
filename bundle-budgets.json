@@ -2,11 +2,19 @@
   "$comment": [
     "First-load JS per route, gzipped, in kilobytes. Checked by scripts/check-bundle-budget.ts.",
     "Seeded from a real build with ~3% headroom: tight enough that a stray import fails,",
-    "loose enough that a dependency patch does not. Raise a number only with a reason."
+    "loose enough that a dependency patch does not. Raise a number only with a reason.",
+    "",
+    "/dashboard 209 -> 215: the image field became an editable combobox on Radix Popover.",
+    "Replacing the preset chips was expected to pay for it and did not — ThemeToggle imports",
+    "ToggleGroup from radix-ui directly, so that dependency stays in the graph on every route",
+    "however many components stop using the wrapper. Popover is therefore purely additive",
+    "(~1.5 kB; its popper, portal, presence and dismissable-layer are already in via Select),",
+    "alongside the combobox's own keyboard and ARIA state machine and the project watcher.",
+    "Measured at 209.1 kB, set at actual + ~3% as above."
   ],
   "routes": {
     "/": 166,
-    "/dashboard": 209,
+    "/dashboard": 215,
     "/_not-found": 146
   }
 }
