@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { UI } from "@/lib/constants";
+import type { StreamStatus } from "@/hooks/use-deployment-stream";
 import type { LogLine } from "@/lib/railway/types";
 import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
@@ -16,11 +17,12 @@ import { Text } from "./ui/text";
  */
 export function LogPane({
   lines,
-  connected,
+  status,
   emptyLabel,
 }: {
   lines: LogLine[];
-  connected: boolean;
+  status: StreamStatus;
+  /** What "connected and quiet" means here; ignored in the other two states. */
   emptyLabel?: string;
 }) {
   const t = useTranslations("containers");
@@ -59,7 +61,18 @@ export function LogPane({
       >
         {lines.length === 0 ? (
           <Text asChild variant="mono" tone="muted">
-            <p>{connected ? (emptyLabel ?? t("waitingForOutput")) : t("connecting")}</p>
+            {/*
+              Three states, not two. A stream that closed having emitted nothing has
+              finished its job — saying "Connecting…" there is a lie that never resolves,
+              which is exactly what a successful deployment with no log output produced.
+            */}
+            <p>
+              {status === "connecting"
+                ? t("connecting")
+                : status === "closed"
+                  ? t("noLogOutput")
+                  : (emptyLabel ?? t("waitingForOutput"))}
+            </p>
           </Text>
         ) : (
           // The mono variant carries its own leading, so these rows, the empty state above

@@ -10,7 +10,7 @@ export function Input({
       // Communicates the error to assistive technology, not just to the eye.
       aria-invalid={invalid || undefined}
       className={cn(
-        "focus-ring border-border bg-surface text-text text-body h-9 w-full rounded-md border px-2.5",
+        "focus-ring border-border bg-surface text-text text-body h-control-md px-control-md w-full rounded-md border",
         "placeholder:text-text-subtle disabled:cursor-not-allowed disabled:opacity-50",
         invalid && "border-danger-border",
         className,

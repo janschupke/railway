@@ -33,7 +33,7 @@ export async function Footer() {
           */}
           <Text asChild variant="caption" tone="subtle">
             <a
-              className="focus-ring hover:text-text rounded-sm transition-colors"
+              className="focus-ring link hover:text-text"
               href={LINKS.REPOSITORY}
               target="_blank"
               rel="noreferrer"
@@ -43,7 +43,7 @@ export async function Footer() {
           </Text>
           <Text asChild variant="caption" tone="subtle">
             <a
-              className="focus-ring hover:text-text rounded-sm transition-colors"
+              className="focus-ring link hover:text-text"
               href={LINKS.RAILWAY_HOME}
               target="_blank"
               rel="noreferrer"

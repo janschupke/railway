@@ -10,13 +10,13 @@ import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operati
 import { createLogClient, streamLogs } from "./subscribe";
 import {
   isTerminal,
+  isTransitioning,
   toContainerState,
   type ContainerState,
   type LogLine,
+  type LogPhase,
 } from "./types";
 import type { MessageDescriptor } from "@/lib/messages";
-
-export type LogPhase = "build" | "deploy";
 
 export type MonitorEvent =
   | { type: "ready"; deploymentId: string; phase: LogPhase; backfilled: number }
@@ -117,6 +117,7 @@ export async function* monitorDeployment(
   }
 
   let missingPolls = 0;
+  let unsettledPolls = 0;
   let consecutiveFailures = 0;
 
   const pollStatus = async () => {
@@ -164,7 +165,29 @@ export async function* monitorDeployment(
           queue.push({ type: "done", deploymentId, state });
           stop();
         }, STREAM.DRAIN_MS);
+        return;
       }
+
+      /*
+       * Neither settled nor moving. Only `unknown` reaches here, and it means Railway
+       * reported a status this app does not map — so there is no transition to wait for
+       * and no terminal state to declare. Left unbounded it polled for the full ceiling
+       * and then closed with no frame at all, which the browser answers by redialling.
+       */
+      if (!isTransitioning(state)) {
+        if (++unsettledPolls >= STREAM.UNSETTLED_POLLS_BEFORE_STOP) {
+          log.warn("railway.deployment.unsettled", {
+            deployment_id: deploymentId,
+            state,
+            raw_status: deployment.status,
+            polls: unsettledPolls,
+          });
+          queue.push({ type: "done", deploymentId, state });
+          stop();
+        }
+        return;
+      }
+      unsettledPolls = 0;
     } catch (error) {
       if (error instanceof RailwayApiError && error.kind === "auth") {
         queue.push({

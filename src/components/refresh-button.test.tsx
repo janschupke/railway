@@ -20,6 +20,7 @@ describe("RefreshButton", () => {
 
   it("passes the button's own variants through", async () => {
     render(<RefreshButton label="Check again" pendingLabel="Checking…" size="sm" />);
-    expect(screen.getByRole("button")).toHaveClass("text-caption");
+    // The size is what varies between steps; the type size deliberately does not.
+    expect(screen.getByRole("button")).toHaveClass("h-control-sm");
   });
 });

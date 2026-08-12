@@ -31,13 +31,15 @@ export async function DashboardHeader({
 
         <div className="flex items-center gap-3">
           {/*
-            The caption variant, matching the Sign out button's own label size. These two
-            sit side by side, so a body-sized name beside a caption-sized button read as
-            a mistake — which it was: neither had chosen a size, they had each reached
-            for a different Tailwind step.
+            Matched to the Sign out button's own label size. These two sit side by side,
+            so a name at a different step read as a mistake — which it was: neither had
+            chosen a size, they had each reached for a different Tailwind step. The step
+            is `body` because that is what every control label is now, at every height:
+            a button that shrinks its text along with its box reads as a different kind
+            of control, so the text no longer moves and the name follows it.
           */}
           {identity && (
-            <Text variant="caption" tone="muted" className="hidden sm:inline">
+            <Text variant="body" tone="muted" className="hidden sm:inline">
               {identity}
             </Text>
           )}

@@ -11,7 +11,7 @@ const streamState = {
   state: null as string | null,
   rawStatus: null as string | null,
   logs: [] as Array<{ timestamp: string; message: string }>,
-  connected: false,
+  status: "connecting" as "connecting" | "live" | "closed",
   done: false,
   warning: null as string | null,
   error: null as string | null,
@@ -156,5 +156,63 @@ describe("ContainerRow", () => {
     await user.click(disclosure());
 
     expect(useDeploymentStream).toHaveBeenLastCalledWith("dep_1", "deploy", true);
+  });
+
+  it("reads build logs for a queued deployment, not deploy logs", () => {
+    /*
+     * A queued deployment's next stop is BUILDING, and build output is what the person
+     * watching is waiting for. Nothing re-renders the row from the server mid-flight, so
+     * guessing "deploy" on the strength of a stale QUEUED status meant the pane stayed
+     * empty through the entire build.
+     */
+    renderRow({ state: "pending" });
+    expect(useDeploymentStream).toHaveBeenLastCalledWith("dep_1", "build", true);
+  });
+
+  it("follows the stream's own state when it disagrees with the server render", () => {
+    // The server render is as old as the page; the stream is not.
+    streamState.state = "building";
+    try {
+      renderRow({ state: "running" });
+      expect(useDeploymentStream).toHaveBeenLastCalledWith("dep_1", "build", false);
+    } finally {
+      streamState.state = null;
+    }
+  });
+
+  it("names a stream the browser refused to open, rather than waiting on it", async () => {
+    /*
+     * A 400, a 401 or the per-user slot cap all reach EventSource as an unlabelled
+     * failure. Silence there is a pane that waits forever on a connection nobody is
+     * making, which is indistinguishable from a slow build.
+     */
+    const user = userEvent.setup();
+    streamState.status = "closed";
+    try {
+      renderRow({ state: "running" });
+      await user.click(disclosure());
+
+      expect(screen.getByText(/log stream could not be opened/i)).toBeInTheDocument();
+    } finally {
+      streamState.status = "connecting";
+    }
+  });
+
+  it("says nothing about the connection once the stream has finished normally", async () => {
+    const user = userEvent.setup();
+    streamState.status = "closed";
+    streamState.done = true;
+    try {
+      renderRow({ state: "running" });
+      await user.click(disclosure());
+
+      expect(screen.queryByText(/log stream could not be opened/i)).toBeNull();
+      expect(
+        screen.getByText("No log output for this deployment."),
+      ).toBeInTheDocument();
+    } finally {
+      streamState.status = "connecting";
+      streamState.done = false;
+    }
   });
 });

@@ -44,6 +44,36 @@
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
 
+  /*
+   * Control geometry, as `h-control-*` and `px-control-*` utilities.
+   *
+   * The namespace names are load-bearing and non-obvious: Tailwind resolves `h-*` against
+   * `--height-*` before falling back to `--spacing`, and `px-*` against `--padding-*`.
+   * Declaring these as `--control-h-*` here would generate no utility at all and fail
+   * silently — the same class of mistake type-scale.test.ts exists to catch, which is why
+   * motion-tokens.test.ts pins these too.
+   */
+  --height-control-sm: var(--control-h-sm);
+  --height-control-md: var(--control-h-md);
+  --height-control-lg: var(--control-h-lg);
+
+  --padding-control-sm: var(--control-px-sm);
+  --padding-control-md: var(--control-px-md);
+  --padding-control-lg: var(--control-px-lg);
+
+  /*
+   * Motion durations. Tailwind's `duration-*` utility reads `--transition-duration-*`,
+   * not `--duration-*`, so the token name and the theme key differ on purpose.
+   *
+   * `--default-transition-duration` is what tokenises the bare `transition-colors` call
+   * sites without editing any of them: they ran at Tailwind's stock 150ms, a number that
+   * appears nowhere in this design system.
+   */
+  --transition-duration-fast: var(--duration-fast);
+  --transition-duration-base: var(--duration-base);
+  --transition-duration-slow: var(--duration-slow);
+  --default-transition-duration: var(--duration-fast);
+
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
@@ -100,6 +130,26 @@ body {
   /* Flush focus ring — visible on both themes, no offset gap. */
   .focus-ring {
     @apply focus-visible:ring-accent outline-none focus-visible:ring-2;
+  }
+
+  /*
+   * Text links.
+   *
+   * A utility rather than a Link component: every call site is already wrapped in
+   * `<Text asChild>` inside a Server Component, so a component would be a third element
+   * in that stack for no gain, and `focus-ring` above is the established precedent for
+   * exactly this kind of cross-cutting affordance.
+   *
+   * It also means opting *out* needs no machinery. A control that happens to be an
+   * anchor — `Button asChild`, as in "Open Railway" — simply never writes `link`, and
+   * underlining it would make a navigation link and a button read as the same thing.
+   *
+   * Underlined on focus as well as hover: hover-only is the usual half-implementation,
+   * and it gives a keyboard user no affordance at all.
+   */
+  .link {
+    @apply rounded-sm underline-offset-2 transition-colors hover:underline focus-visible:underline;
+    text-decoration-thickness: from-font;
   }
 }
 
@@ -188,9 +238,31 @@ body {
   }
 }
 
-[data-radix-popper-content-wrapper],
-[data-state="open"].animate-content {
+/*
+ * Animate the CONTENT, never the positioning wrapper.
+ *
+ * Radix positions a popper by writing an inline `transform: translate3d(…)` onto
+ * [data-radix-popper-content-wrapper], which is `position: fixed; left: 0; top: 0`. A
+ * running CSS animation outranks an inline style, so `animation: content-in` on that
+ * element replaced the positioning transform for its whole duration: every dropdown and
+ * every tooltip painted at the top-left corner of the viewport and snapped into place
+ * 120ms later.
+ *
+ * Reduced motion collapsed the animation to 0.01ms and hid it, which is why the axe suite
+ * — which forces reduced motion — never saw it. e2e/motion.spec.ts must not.
+ *
+ * Radix's own PopperContent sets `animation: none` on the inner content until it has been
+ * measured and placed, so the content element is the one the library intends you to
+ * animate. `delayed-open` and `instant-open` are Tooltip's spellings of open; it has no
+ * "open" state at all, so a rule keyed only on [data-state="open"] silently drops every
+ * tooltip animation.
+ */
+[data-state="open"].animate-content,
+[data-state="delayed-open"].animate-content,
+[data-state="instant-open"].animate-content {
   animation: content-in var(--duration-fast) ease-out;
+  /* Grows from the edge nearest its trigger rather than from its own middle. */
+  transform-origin: var(--radix-popper-transform-origin, center);
 }
 [data-state="open"].animate-overlay {
   animation: overlay-in var(--duration-fast) ease-out;

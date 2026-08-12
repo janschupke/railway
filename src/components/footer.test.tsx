@@ -23,6 +23,19 @@ describe("Footer", () => {
     }
   });
 
+  it("carries the shared text-link affordance", async () => {
+    /*
+     * These were distinguished from the caption beside them by colour alone. The rule
+     * itself lives in globals.css — jsdom applies no Tailwind, so the class is what can
+     * be asserted here, and globals.test.ts checks the rule exists.
+     */
+    render(await Footer());
+
+    for (const name of [/source on github/i, /built on railway/i]) {
+      expect(screen.getByRole("link", { name })).toHaveClass("link");
+    }
+  });
+
   it("says the app is not Railway", async () => {
     // The app is styled after Railway and talks to Railway's API from the user's own
     // account; leaving that unstated is the sort of thing a reasonable person misreads.

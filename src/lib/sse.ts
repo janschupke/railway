@@ -92,39 +92,58 @@ export function sseResponse(
     async start(streamController) {
       let closed = false;
 
+      /*
+       * Declared before `enqueue`, which is what lets a failed write funnel through it.
+       * The single funnel for every teardown path, which is what makes onClose
+       * exactly-once without a second guard.
+       */
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        onClose?.({
+          reason: reason ?? "producer",
+          durationMs: Date.now() - startedAt,
+        });
+        clearTimeout(deadline);
+        clearInterval(keepalive);
+        controller.abort();
+        try {
+          streamController.close();
+        } catch {
+          // Already closed by the runtime.
+        }
+      };
+
       const enqueue = (chunk: string) => {
         if (closed) return;
         try {
           streamController.enqueue(encoder.encode(chunk));
         } catch {
-          // The consumer went away between the check and the write.
-          closed = true;
+          /*
+           * The consumer went away between the check and the write.
+           *
+           * This used to set the `closed` flag and return, which silenced the transport
+           * but ran no teardown: onClose never fired, so the caller's slot was never
+           * released, the keepalive kept firing and the producer kept polling Railway
+           * for the full duration ceiling. Eight of those and the user is 429'd
+           * permanently — which presents as a log pane that never connects.
+           */
+          claim("client-abort");
+          close();
         }
       };
 
+      /*
+       * Declared after the two closures that reference it. Safe because nothing calls
+       * either of them synchronously before this line, and it keeps the binding const —
+       * an interval handle that could be reassigned is a second way to leak one.
+       */
       const keepalive = setInterval(() => enqueue(": keepalive\n\n"), keepaliveMs);
 
       const emit: SseEmitter = {
         send: (event, data) =>
           enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
-        close: () => {
-          if (closed) return;
-          closed = true;
-          // The single funnel for every teardown path, which is what makes onClose
-          // exactly-once without a second guard.
-          onClose?.({
-            reason: reason ?? "producer",
-            durationMs: Date.now() - startedAt,
-          });
-          clearTimeout(deadline);
-          clearInterval(keepalive);
-          controller.abort();
-          try {
-            streamController.close();
-          } catch {
-            // Already closed by the runtime.
-          }
-        },
+        close,
       };
 
       /*
@@ -133,7 +152,7 @@ export function sseResponse(
        * `produce` started, a client that vanished during the first tick would abort
        * before anything was listening and teardown would never run.
        */
-      controller.signal.addEventListener("abort", emit.close, { once: true });
+      controller.signal.addEventListener("abort", close, { once: true });
 
       try {
         await produce(emit, controller.signal);

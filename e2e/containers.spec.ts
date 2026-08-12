@@ -38,6 +38,24 @@ test.describe("container lifecycle", () => {
     await expect(log).toContainText("[fake-railway]", { timeout: 20_000 });
   });
 
+  test("says a finished deployment had no output, instead of connecting forever", async ({
+    page,
+  }) => {
+    /*
+     * The seeded postgres service is SUCCESS with zero log lines — a deployment that
+     * finished before anyone attached. The pane knew only connected/not-connected, and
+     * `done` set connected to false, so this rendered "Connecting…" permanently: HTTP
+     * 200, stream closed cleanly, nothing in the console, nothing failed in the network
+     * panel, and a spinner that resolved to nothing.
+     */
+    const postgres = row(page, "postgres");
+    await onlyVisible(postgres.getByRole("button", { name: /^postgres/ })).click();
+
+    const log = postgres.getByRole("log");
+    await expect(log).toContainText("No log output for this deployment.");
+    await expect(log).not.toContainText("Connecting…");
+  });
+
   test("shows the image and strips the ownership prefix from the name", async ({
     page,
   }) => {

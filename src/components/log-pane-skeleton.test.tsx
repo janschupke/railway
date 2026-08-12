@@ -21,7 +21,7 @@ describe("LogPaneSkeleton", () => {
     expect(screen.getByRole("log")).toHaveClass("h-64");
     unmount();
 
-    render(<LogPane lines={[]} connected={false} />);
+    render(<LogPane lines={[]} status="connecting" />);
     // LogPane puts the height on ScrollArea's root, one level above the log viewport.
     expect(screen.getByRole("log").parentElement).toHaveClass("h-64");
   });

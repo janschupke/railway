@@ -41,6 +41,13 @@ export function Tooltip({
           className={cn(
             "border-border bg-raised text-text z-50 rounded-md border px-2 py-1",
             "text-caption shadow-md",
+            /*
+             * Explicit, because tooltips used to animate only by accident: the old rule
+             * targeted the popper wrapper, which every Radix popper shares. Note that
+             * Radix Tooltip's content is never data-state="open" — it is delayed-open or
+             * instant-open, which globals.css covers.
+             */
+            "animate-content",
           )}
         >
           {content}

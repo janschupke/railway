@@ -241,9 +241,19 @@ describe("GET /api/streams/[deploymentId]", () => {
     }
     expect(open.every((r) => r.status === 200)).toBe(true);
 
+    /*
+     * The refusal is a 200 SSE carrying a named error, not a 429.
+     *
+     * A 429 is the honest HTTP answer, but EventSource exposes no status code — it
+     * reaches the client as an unlabelled failure, indistinguishable from a 400 or a
+     * dropped socket. This is the one refusal the reader can act on, so it gets a
+     * sentence instead of silence.
+     */
     const refused = await stream(request("/api/streams/dep_1"), params("dep_1"));
-    expect(refused.status).toBe(429);
-    expect(refused.headers.get("retry-after")).toBe("5");
+    expect(refused.status).toBe(200);
+    expect(await readEvents(refused)).toContain("event: error");
+    // Named, but still a refusal: no monitor, no upstream socket, no slot taken.
+    expect(monitorDeployment).toHaveBeenCalledTimes(STREAM.MAX_CONCURRENT_PER_USER);
 
     // Releasing one frees exactly one slot — the counter is not one-way.
     await open[0]!.body!.cancel();

@@ -77,8 +77,8 @@ export function Select({
             id={id}
             aria-describedby={describedBy}
             className={cn(
-              "focus-ring border-border bg-surface text-text inline-flex h-9 items-center gap-2",
-              "text-body rounded-md border px-2.5",
+              "focus-ring border-border bg-surface text-text inline-flex items-center gap-2",
+              "text-body h-control-md px-control-md rounded-md border",
               "hover:bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
             )}
           >
@@ -95,6 +95,8 @@ export function Select({
               className={cn(
                 "border-border bg-raised z-50 max-h-64 min-w-[var(--radix-select-trigger-width)]",
                 "overflow-hidden rounded-md border shadow-lg",
+                // On the Content, never on the positioning wrapper — see globals.css.
+                "animate-content",
               )}
             >
               <Primitive.Viewport className="p-1">

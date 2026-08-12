@@ -4,11 +4,21 @@ import { useEffect, useState } from "react";
 import { STREAM } from "@/lib/constants";
 import type { ContainerState, LogLine } from "@/lib/railway/types";
 
+/**
+ * Where the connection stands, as three states rather than one boolean.
+ *
+ * `connected: boolean` could not tell "the browser has not attached yet" from "the
+ * server said its piece and hung up", and the log pane rendered both as "Connecting…".
+ * A deployment that succeeded with no log output therefore sat on "Connecting…" forever,
+ * with a clean 200, no console error and no failed request to look at.
+ */
+export type StreamStatus = "connecting" | "live" | "closed";
+
 export type StreamState = {
   state: ContainerState | null;
   rawStatus: string | null;
   logs: LogLine[];
-  connected: boolean;
+  status: StreamStatus;
   done: boolean;
   warning: string | null;
   error: string | null;
@@ -18,7 +28,7 @@ const INITIAL: StreamState = {
   state: null,
   rawStatus: null,
   logs: [],
-  connected: false,
+  status: "connecting",
   done: false,
   warning: null,
   error: null,
@@ -32,8 +42,8 @@ const INITIAL: StreamState = {
  * the gap rather than leaving a hole. It must be closed explicitly on `done`, though,
  * or the browser would keep redialling a stream the server intends to end.
  *
- * State is stored tagged with the stream it belongs to, and a mismatched tag reads as
- * INITIAL. That way switching containers needs no reset-on-change effect: every
+ * State is stored tagged with the deployment it belongs to, and a mismatched tag reads
+ * as INITIAL. That way switching containers needs no reset-on-change effect: every
  * setState here happens inside an EventSource callback, never in the effect body.
  */
 export function useDeploymentStream(
@@ -41,12 +51,41 @@ export function useDeploymentStream(
   phase: "build" | "deploy",
   enabled: boolean,
 ): StreamState {
-  const key = enabled && deploymentId ? `${deploymentId}:${phase}` : null;
+  /*
+   * Identity is the deployment, NOT the phase.
+   *
+   * A build that finishes flips the row to `deploying`, which re-dials this stream
+   * against a different subscription — but the two phases are one continuous log to the
+   * person reading it, and tagging the state with the phase discarded everything the
+   * build had emitted at exactly the moment it became interesting.
+   */
+  const key = enabled && deploymentId ? deploymentId : null;
 
   const [snapshot, setSnapshot] = useState<{
     key: string | null;
     state: StreamState;
   }>({ key: null, state: INITIAL });
+
+  /*
+   * Discarding this attachment's state is its own effect, keyed on the deployment alone.
+   *
+   * That is what separates "the row collapsed, throw everything away" from "same
+   * deployment, other log phase" without either one having to know about the other:
+   * React only runs this cleanup when `key` actually changes, so a phase re-dial leaves
+   * the accumulated lines exactly where they are.
+   *
+   * The discard is needed at all because the tag is stable across a collapse and
+   * re-expand of the same row. Without it the previous attachment's state came back on
+   * the way in: the server's 200-line backfill was appended to logs that were already
+   * there, and `done` flipped false → true again, firing the settle-refresh in
+   * container-row.tsx a second time. Guarded on the key so a teardown that has already
+   * been superseded by the next attachment cannot clobber it.
+   */
+  useEffect(
+    () => () =>
+      setSnapshot((prev) => (prev.key === key ? { key: null, state: INITIAL } : prev)),
+    [key],
+  );
 
   useEffect(() => {
     if (!key || !deploymentId) return;
@@ -71,7 +110,7 @@ export function useDeploymentStream(
     };
 
     source.addEventListener("ready", () => {
-      update((s) => ({ ...s, connected: true, error: null }));
+      update((s) => ({ ...s, status: "live", error: null }));
     });
 
     source.addEventListener("log", (event) => {
@@ -98,35 +137,38 @@ export function useDeploymentStream(
 
     source.addEventListener("error", (event) => {
       const payload = parse<{ message: string }>(event);
-      // A payload means the server reported a real error; a bare event is a transport
-      // blip that EventSource will retry on its own.
+      // A payload means the server reported a real error and will send nothing else.
       if (payload?.message) {
-        update((s) => ({ ...s, error: payload.message, connected: false }));
+        update((s) => ({ ...s, error: payload.message, status: "closed" }));
         source.close();
-      } else {
-        update((s) => (s.done ? s : { ...s, connected: false }));
+        return;
       }
+
+      /*
+       * A bare error carries no status code — EventSource does not expose one — but it
+       * does expose readyState, and that is the difference that matters. CONNECTING means
+       * the transport blipped and the browser is already redialling. CLOSED means the
+       * browser gave up, which is what it does for any non-2xx: a 400 from the id
+       * validator, a 401 from an expired session, a 429 from the slot cap.
+       *
+       * Every one of those used to be treated as a retryable blip, so the pane sat on
+       * "Connecting…" indefinitely waiting for a reconnection that was never coming.
+       */
+      if (source.readyState === EventSource.CLOSED) {
+        update((s) => (s.done ? s : { ...s, status: "closed" }));
+        return;
+      }
+      update((s) => (s.done ? s : { ...s, status: "connecting" }));
     });
 
     source.addEventListener("done", () => {
-      update((s) => ({ ...s, done: true, connected: false }));
+      update((s) => ({ ...s, done: true, status: "closed" }));
       source.close();
     });
 
-    return () => {
-      source.close();
-      /*
-       * Detaching discards this stream's state.
-       *
-       * The tag is stable across a collapse and re-expand of the same row, so without
-       * this the previous attachment's state came back on the way in: the server's
-       * 200-line backfill was appended to logs that were already there, and `done`
-       * flipped false → true again, firing the settle-refresh in container-row.tsx a
-       * second time. Guarded on the key so a teardown that has already been superseded
-       * by the next stream cannot clobber it.
-       */
-      setSnapshot((prev) => (prev.key === key ? { key: null, state: INITIAL } : prev));
-    };
+    // Only the connection. Whether the accumulated state survives is the effect above's
+    // decision, and it is keyed differently on purpose.
+    return () => source.close();
   }, [key, deploymentId, phase]);
 
   return snapshot.key === key ? snapshot.state : INITIAL;

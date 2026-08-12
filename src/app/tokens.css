@@ -109,6 +109,26 @@
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
+
+  /*
+   * ---- Controls ----
+   *
+   * One height and one inline inset per size step, shared by everything that sits on a
+   * form row: Button, Input, the Select trigger, the Combobox, and the skeletons standing
+   * in for them.
+   *
+   * They were four independent `h-9`s and two different insets, plus a preset chip with
+   * no height class at all — its 26px came out of the caption line-height, so it sat ten
+   * pixels short of the input directly beneath it and would have moved again the next
+   * time the type scale was touched. Height is a decision, not a side effect.
+   */
+  --control-h-sm: 2rem; /* 32px — dense row actions */
+  --control-h-md: 2.25rem; /* 36px — the form-row baseline */
+  --control-h-lg: 2.5rem; /* 40px — a page's single call to action */
+
+  --control-px-sm: 0.625rem; /* 10px */
+  --control-px-md: 0.75rem; /* 12px */
+  --control-px-lg: 1rem; /* 16px */
 }
 
 /* ---------- SEMANTIC: dark (default) ---------- */

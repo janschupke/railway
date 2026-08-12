@@ -93,10 +93,23 @@ async function handle(
       limit: STREAM.MAX_CONCURRENT_PER_USER,
       deployment_id: deploymentId,
     });
-    return new Response("Too Many Streams", {
-      status: 429,
-      headers: { "retry-after": "5" },
-    });
+    /*
+     * 200 with a named error, not 429.
+     *
+     * A 429 is the honest HTTP answer, but it reaches the browser as an unlabelled
+     * EventSource failure: there is no status code on the event, so the client can tell
+     * the refusal is fatal and nothing more. This is the one refusal with an action
+     * attached to it — close a log panel — and it is worth a sentence.
+     *
+     * 400 and 401 keep their status codes. Neither is the user's to fix, and the
+     * readyState guard in use-deployment-stream stops both from hanging.
+     */
+    return sseResponse(
+      async (emit) => {
+        emit.send("error", { message: t("errors.streamLimit") });
+      },
+      { clientSignal: request.signal },
+    );
   }
 
   const accessToken = session.accessToken;

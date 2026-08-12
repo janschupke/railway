@@ -6,7 +6,13 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Info } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
-import { isTerminal, isTransitioning, type Container } from "@/lib/railway/types";
+import {
+  isTerminal,
+  isTransitioning,
+  type Container,
+  type ContainerState,
+  type LogPhase,
+} from "@/lib/railway/types";
 import { cn, relativeTime } from "@/lib/utils";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
@@ -34,6 +40,11 @@ const LogPane = dynamic(() => import("./log-pane").then((m) => m.LogPane), {
   // own first frame, so expanding a row shows one continuous region rather than a gap.
   loading: () => <LogPaneSkeleton />,
 });
+
+/** Which of Railway's two log subscriptions a given state should be reading. */
+function phaseFor(state: ContainerState): LogPhase {
+  return state === "building" || state === "pending" ? "build" : "deploy";
+}
 
 /**
  * One container in the list.
@@ -63,12 +74,33 @@ export function ContainerRow({
    */
   const shouldStream =
     Boolean(container.deploymentId) && (expanded || isTransitioning(container.state));
-  const phase = container.state === "building" ? "build" : "deploy";
 
+  /*
+   * Phase follows the *stream's* view of the state, not the server render's.
+   *
+   * `container.state` is as old as the page. A container that Railway had only queued
+   * when this page rendered is `pending`, and nothing re-renders the row from the server
+   * mid-flight — so the row subscribed to deployment logs and sat empty through the whole
+   * build, which is the output the person watching actually wanted.
+   *
+   * `pending` counts as build for the same reason: a queued deployment's next stop is
+   * BUILDING, and guessing deploy on the strength of a stale queue status is how the row
+   * ended up on the wrong subscription to begin with.
+   */
+  const [phase, setPhase] = useState<LogPhase>(() => phaseFor(container.state));
   const stream = useDeploymentStream(container.deploymentId, phase, shouldStream);
 
   // The stream is fresher than the last server render; prefer it once it has spoken.
   const state = stream.state ?? container.state;
+
+  /*
+   * Adjusted during render rather than in an effect. An effect would commit one render
+   * on the wrong phase first, which opens an EventSource — and therefore takes one of a
+   * handful of per-origin connections — only to close it on the next tick. React discards
+   * this render instead and re-runs with the corrected phase before anything is attached.
+   */
+  const nextPhase = phaseFor(state);
+  if (nextPhase !== phase) setPhase(nextPhase);
 
   /*
    * Pull the authoritative list once the deployment settles, so sources refresh.
@@ -165,14 +197,20 @@ export function ContainerRow({
         {expanded && (
           <>
             {stream.error && <Banner tone="error">{stream.error}</Banner>}
+            {/*
+              The browser refused to open the stream and named nothing — a 400, a 401 or
+              the per-user slot cap. It used to be indistinguishable from "still dialling",
+              which is a pane that waits forever on a connection nobody is making.
+            */}
+            {!stream.error && stream.status === "closed" && !stream.done && (
+              <Banner tone="error">{t("streamUnavailable")}</Banner>
+            )}
             {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
             {container.deploymentId ? (
               <LogPane
                 lines={stream.logs}
-                connected={stream.connected}
-                emptyLabel={
-                  isTransitioning(state) ? t("waitingForOutput") : t("noLogOutput")
-                }
+                status={stream.status}
+                emptyLabel={t("waitingForOutput")}
               />
             ) : (
               <Banner tone="info">{t("noDeployment")}</Banner>

@@ -20,6 +20,7 @@ export type MessageKey =
   | "errors.logBackfillFailed"
   | "errors.deploymentNotFound"
   | "errors.streamInterrupted"
+  | "errors.streamLimit"
   | "errors.api.auth"
   | "errors.api.notAuthorized"
   | "errors.api.missingScope"

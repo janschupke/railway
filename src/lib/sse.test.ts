@@ -379,6 +379,49 @@ describe("sseResponse", () => {
       expect(seen[0]?.durationMs).toBeGreaterThanOrEqual(500);
     });
 
+    it("names a write that failed, and tears down instead of going quiet", async () => {
+      /*
+       * The consumer can vanish between `closed`'s check and the write itself, and some
+       * runtimes signal that by failing the write rather than by calling cancel(). That
+       * branch used to set the `closed` flag and return: the transport went silent, but
+       * onClose never ran, so the caller's stream slot was never released, the keepalive
+       * kept firing and the producer polled Railway for the full duration ceiling. Eight
+       * of those and the user is 429'd out of their own log panes permanently.
+       *
+       * Simulated at the encoder rather than the controller, because a ReadableStream
+       * cannot be driven into "enqueue throws" from the outside without going through
+       * cancel() — which is a different teardown path, already covered above.
+       */
+      const { seen, onClose } = closeInfo();
+      let writes = 0;
+      const encode = vi
+        .spyOn(TextEncoder.prototype, "encode")
+        .mockImplementation((() => {
+          writes += 1;
+          throw new Error("socket gone");
+        }) as unknown as TextEncoder["encode"]);
+
+      const response = sseResponse(
+        async (emit, signal) => {
+          emit.send("status", { state: "building" });
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          );
+        },
+        { onClose, keepaliveMs: 100 },
+      );
+
+      await readAll(response).catch(() => {});
+      const writesAtClose = writes;
+      // The keepalive must be cleared by the teardown, not left ticking on a dead socket.
+      await vi.advanceTimersByTimeAsync(500);
+      encode.mockRestore();
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.reason).toBe("client-abort");
+      expect(writes).toBe(writesAtClose);
+    });
+
     it("names a consumer cancellation", async () => {
       const { seen, onClose } = closeInfo();
       const response = sseResponse(

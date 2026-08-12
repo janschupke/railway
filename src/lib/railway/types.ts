@@ -40,9 +40,25 @@ export function toContainerState(status: string | null | undefined): ContainerSt
   return STATUS_MAP[status.toUpperCase()] ?? "unknown";
 }
 
-/** No further transitions expected — the log stream can close. */
+/**
+ * No further transitions expected — the log stream can close.
+ *
+ * `sleeping` belongs here: a sleeping deployment has settled, and it used to be in
+ * neither this predicate nor `isTransitioning`, so the monitor never emitted `done`, the
+ * stream ran to the fifteen-minute ceiling, closed with no frame, and the browser
+ * redialled it — a silent fifteen-minute cycle holding a poll and an upstream socket.
+ *
+ * `unknown` is deliberately still in neither. It means Railway sent an enum member this
+ * app does not model, and closing a stream on that guess would go wrong the week they add
+ * one. The monitor bounds it by poll count instead — see STREAM.UNSETTLED_POLLS_BEFORE_STOP.
+ */
 export function isTerminal(state: ContainerState): boolean {
-  return state === "running" || state === "failed" || state === "removed";
+  return (
+    state === "running" ||
+    state === "failed" ||
+    state === "removed" ||
+    state === "sleeping"
+  );
 }
 
 /** Work is in flight; the UI shows motion and keeps the stream open. */
@@ -96,3 +112,11 @@ export type LogLine = {
   message: string;
   severity?: string | null;
 };
+
+/**
+ * Which of Railway's two log subscriptions a deployment is read through.
+ *
+ * Lives here rather than beside the monitor because the client picks it too — the row
+ * decides from the state it can see, and the monitor is `server-only`.
+ */
+export type LogPhase = "build" | "deploy";

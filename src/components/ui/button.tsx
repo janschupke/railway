@@ -29,10 +29,16 @@ const buttonVariants = cva(
         danger: "border-danger-border text-danger bg-surface hover:bg-danger-bg border",
         ghost: "text-text-muted hover:bg-subtle hover:text-text",
       },
+      /*
+       * Height and inset come from the shared control tokens, so a button, an input and
+       * a select trigger on the same row cannot disagree — which they did, at three
+       * heights and two insets. Type size stays `body` at every step: a control that
+       * shrinks its text as it shrinks its box reads as a different kind of control.
+       */
       size: {
-        sm: "h-8 px-2.5 text-caption [&_svg]:size-3.5",
-        md: "h-9 px-3 text-body [&_svg]:size-4",
-        lg: "h-10 px-4 text-body [&_svg]:size-4",
+        sm: "h-control-sm px-control-sm text-body [&_svg]:size-3.5",
+        md: "h-control-md px-control-md text-body [&_svg]:size-4",
+        lg: "h-control-lg px-control-lg text-body [&_svg]:size-4",
       },
     },
     defaultVariants: { variant: "secondary", size: "md" },

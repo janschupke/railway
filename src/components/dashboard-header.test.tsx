@@ -30,9 +30,7 @@ describe("DashboardHeader", () => {
     // neither had chosen a size — they had each reached for a different Tailwind step.
     render(await DashboardHeader({ name: "Ada Lovelace" }));
 
-    expect(screen.getByText("Ada Lovelace")).toHaveClass("text-caption");
-    expect(screen.getByRole("button", { name: /sign out/i })).toHaveClass(
-      "text-caption",
-    );
+    expect(screen.getByText("Ada Lovelace")).toHaveClass("text-body");
+    expect(screen.getByRole("button", { name: /sign out/i })).toHaveClass("text-body");
   });
 });

@@ -19,6 +19,13 @@ import { Heading, Text } from "./ui/text";
 /** How many rows the list stands in for before its real length is known. */
 const PLACEHOLDER_ROWS = 3;
 
+/*
+ * Control placeholders take their height from the same `--control-h-*` tokens the real
+ * controls do, so a skeleton cannot drift a few pixels away from the thing it stands in
+ * for — which is what e2e/skeleton.spec.ts measures. The bare `h-4`/`h-5` placeholders
+ * below stand in for *text*, not controls, and are sized from the type scale instead.
+ */
+
 /**
  * The icon and product name need no data, so they render for real: the header is the
  * one part of the page that must not move when the session lands.
@@ -35,8 +42,8 @@ export function DashboardHeaderSkeleton({ appName }: { appName: string }) {
         <div className="flex items-center gap-3">
           {/* The signed-in name is hidden below sm, exactly as in DashboardHeader. */}
           <Skeleton className="hidden h-4 w-24 sm:block" />
-          <Skeleton shape="control" className="h-8 w-21" />
-          <Skeleton shape="control" className="h-8 w-18" />
+          <Skeleton shape="control" className="h-control-sm w-21" />
+          <Skeleton shape="control" className="h-control-sm w-18" />
         </div>
       </div>
     </header>
@@ -46,8 +53,8 @@ export function DashboardHeaderSkeleton({ appName }: { appName: string }) {
 export function ProjectPickerSkeleton() {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <Skeleton shape="control" className="h-9 w-48" />
-      <Skeleton shape="control" className="h-9 w-48" />
+      <Skeleton shape="control" className="h-control-md w-48" />
+      <Skeleton shape="control" className="h-control-md w-48" />
     </div>
   );
 }
@@ -66,16 +73,16 @@ export function SpinUpFormSkeleton() {
         </div>
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-5 w-20" />
-          <Skeleton shape="control" className="h-9 w-full" />
+          <Skeleton shape="control" className="h-control-md w-full" />
         </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Skeleton className="h-5 w-16" />
-        <Skeleton shape="control" className="h-9 w-full" />
+        <Skeleton shape="control" className="h-control-md w-full" />
       </div>
 
-      <Skeleton shape="control" className="h-9 w-40" />
+      <Skeleton shape="control" className="h-control-md w-40" />
     </Card>
   );
 }
@@ -94,7 +101,7 @@ function ContainerRowSkeleton() {
         </div>
         <Skeleton shape="pill" className="h-5 w-20" />
         <Skeleton className="h-3 w-20 shrink-0" />
-        <Skeleton shape="control" className="h-8 w-24" />
+        <Skeleton shape="control" className="h-control-sm w-24" />
       </div>
     </div>
   );

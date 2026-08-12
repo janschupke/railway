@@ -9,9 +9,16 @@ import { useDeploymentStream } from "./use-deployment-stream";
  */
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  /** Mirrors the real constants; the hook reads them to tell fatal from retryable. */
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+
   readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>();
   closed = false;
   onerror: (() => void) | null = null;
+  /** What the browser would report; CONNECTING means it is already redialling. */
+  readyState = FakeEventSource.CONNECTING;
 
   constructor(readonly url: string) {
     FakeEventSource.instances.push(this);
@@ -48,15 +55,17 @@ class FakeEventSource {
 function Probe({
   deploymentId,
   enabled = true,
+  phase = "deploy",
 }: {
   deploymentId: string | null;
   enabled?: boolean;
+  phase?: "build" | "deploy";
 }) {
-  const stream = useDeploymentStream(deploymentId, "deploy", enabled);
+  const stream = useDeploymentStream(deploymentId, phase, enabled);
   return (
     <div>
       <span data-testid="state">{stream.state ?? "none"}</span>
-      <span data-testid="connected">{String(stream.connected)}</span>
+      <span data-testid="status">{stream.status}</span>
       <span data-testid="done">{String(stream.done)}</span>
       <span data-testid="logs">{stream.logs.map((l) => l.message).join(",")}</span>
       <span data-testid="warning">{stream.warning ?? ""}</span>
@@ -100,7 +109,7 @@ describe("useDeploymentStream", () => {
       source.emit("status", { state: "building", rawStatus: "BUILDING" });
     });
 
-    expect(text("connected")).toBe("true");
+    expect(text("status")).toBe("live");
     expect(text("logs")).toBe("one,two");
     expect(text("state")).toBe("building");
   });
@@ -129,7 +138,7 @@ describe("useDeploymentStream", () => {
     act(() => source.emit("done", { state: "running" }));
 
     expect(text("done")).toBe("true");
-    expect(text("connected")).toBe("false");
+    expect(text("status")).toBe("closed");
     expect(source.closed).toBe(true);
   });
 
@@ -139,11 +148,53 @@ describe("useDeploymentStream", () => {
 
     act(() => source.emitRaw("error", "not json"));
     expect(text("error")).toBe("");
+    expect(text("status")).toBe("connecting");
     expect(source.closed).toBe(false);
 
     act(() => source.emit("error", { message: "Authorization revoked" }));
     expect(text("error")).toBe("Authorization revoked");
     expect(source.closed).toBe(true);
+  });
+
+  it("stops waiting when the browser gives up on the connection", () => {
+    /*
+     * EventSource never exposes a status code, so a 400, a 401 and a 429 all arrive as
+     * the same bare error event. What it does expose is readyState: CONNECTING means it
+     * is already redialling, CLOSED means it has given up. Both used to be read as a
+     * blip, so any non-2xx left the pane waiting on a reconnection nobody was making —
+     * no console error, no failed request visible, forever.
+     */
+    render(<Probe deploymentId="dep_1" />);
+    const source = FakeEventSource.latest();
+
+    act(() => {
+      source.readyState = FakeEventSource.CLOSED;
+      source.emitRaw("error", "");
+    });
+
+    expect(text("status")).toBe("closed");
+    expect(text("done")).toBe("false");
+  });
+
+  it("keeps the build output when the same deployment switches to deploy logs", () => {
+    /*
+     * Build and deploy are one continuous log to the person reading it. Tagging the
+     * state with the phase discarded everything the build had emitted at exactly the
+     * moment the build finished — which is when it becomes worth reading.
+     */
+    const { rerender } = render(<Probe deploymentId="dep_1" phase="build" />);
+    act(() =>
+      FakeEventSource.latest().emit("log", {
+        line: { timestamp: "t", message: "compiling" },
+      }),
+    );
+    const build = FakeEventSource.latest();
+
+    rerender(<Probe deploymentId="dep_1" phase="deploy" />);
+
+    expect(build.closed).toBe(true);
+    expect(FakeEventSource.latest().url).toContain("phase=deploy");
+    expect(text("logs")).toBe("compiling");
   });
 
   it("surfaces warnings without ending the stream", () => {

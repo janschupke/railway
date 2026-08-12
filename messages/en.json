@@ -65,6 +65,7 @@
     "waitingForOutput": "Waiting for output…",
     "noLogOutput": "No log output for this deployment.",
     "connecting": "Connecting…",
+    "streamUnavailable": "The log stream could not be opened. Close another open log panel, or reload the page.",
     "logsLabel": "Container logs",
     "jumpToLatest": "Jump to latest",
     "noTimestamp": "--:--:--",
@@ -140,6 +141,7 @@
     "logBackfillFailed": "Could not load earlier logs",
     "deploymentNotFound": "That deployment no longer exists, so there is nothing to stream.",
     "streamInterrupted": "Log stream interrupted. Reference {incident}.",
+    "streamLimit": "Too many log panels are open at once. Close one and expand this row again.",
     "api": {
       "auth": "Railway rejected your credentials, so the authorization is no longer valid. Signing in again will restore it. Reference {incident}.",
       "notAuthorized": "Railway refused this request for your account. The authorization is live but does not cover what the app asked for, so retrying will not help — authorize again and approve access. Reference {incident}.",

@@ -34,8 +34,15 @@ describe("state predicates", () => {
     expect(isTerminal("running")).toBe(true);
     expect(isTerminal("failed")).toBe(true);
     expect(isTerminal("removed")).toBe(true);
+    // Settled, and it used to be in neither predicate: the monitor never emitted `done`,
+    // the stream ran to the fifteen-minute ceiling and the browser redialled it forever.
+    expect(isTerminal("sleeping")).toBe(true);
     expect(isTerminal("building")).toBe(false);
+    // Deliberately in neither. It means Railway sent a status this app does not map, and
+    // guessing "settled" would close a stream on the week they add one. The monitor
+    // bounds it by poll count instead.
     expect(isTerminal("unknown")).toBe(false);
+    expect(isTransitioning("unknown")).toBe(false);
   });
 
   it("keeps the stream open while work is in flight", () => {

@@ -154,6 +154,40 @@ describe("monitorDeployment", () => {
     // itself the proof that stop() cleared the interval.
   });
 
+  it("gives up on a status it cannot map, instead of polling for 15 minutes", async () => {
+    /*
+     * Railway can add a DeploymentStatus member at any time, and an unmapped one is
+     * neither terminal nor transitioning — so there was no condition under which this
+     * stream ever ended. It polled every 2.5s and held an upstream socket for the full
+     * ceiling, then closed with no frame at all, which the browser answers by redialling:
+     * a silent fifteen-minute cycle, repeating.
+     *
+     * `unknown` is still not treated as settled — closing on a status we do not
+     * understand would be a guess. It is bounded by poll count instead.
+     */
+    const events = await drain(
+      monitorDeployment(
+        params(),
+        deps({
+          getDeployment: vi.fn(async () => ({
+            id: "dep_1",
+            status: "HIBERNATING_PENDING_REVIEW",
+            updatedAt: null,
+          })),
+        }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(
+          STREAM.STATUS_POLL_MS * (STREAM.UNSETTLED_POLLS_BEFORE_STOP + 1),
+        );
+      },
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: "done", state: "unknown" });
+    const polls = events.filter((e) => e.type === "status").length;
+    expect(polls).toBeLessThanOrEqual(STREAM.UNSETTLED_POLLS_BEFORE_STOP);
+  });
+
   it("tolerates the eventual consistency of a just-created deployment", async () => {
     // The first poll fires milliseconds after the deploy mutation returns; a null there
     // is normal, and treating it as fatal would break every real spin-up.

@@ -31,12 +31,21 @@ export const STREAM = {
   /** Bound on the browser-side buffer; a chatty container must not grow the tab. */
   MAX_BUFFERED_LINES: 1000,
   /**
-   * Concurrent streams one user may hold. One per expanded row — but a reload briefly
-   * needs two per row, because the browser opens the new connection before the server
-   * observes the old one closing, so this sits well above the honest working set. A
-   * false 429 presents as a log pane that never connects and never says why.
+   * Concurrent log streams one user may hold.
+   *
+   * Bounded by the BROWSER, not by this server. Chrome and Firefox allow six connections
+   * per origin over HTTP/1.1, and `next start` speaks HTTP/1.1 — so a seventh EventSource
+   * does not fail, it queues, with nothing on the wire, nothing in any log, and a pane
+   * that sits on "Connecting…". This was 8, which meant the cap that actually applied was
+   * the invisible one.
+   *
+   *   6 − 1 (the project watcher, api/watch) − 1 (reserved for RSC navigation and Server
+   *   Action fetches, which share the same pool) = 4.
+   *
+   * A refused stream now says so — see containers.streamUnavailable — rather than
+   * presenting as silence.
    */
-  MAX_CONCURRENT_PER_USER: 8,
+  MAX_CONCURRENT_PER_USER: 4,
   /**
    * Status polls tolerated before concluding a deployment does not exist. Railway is
    * eventually consistent, so the first poll after a deploy legitimately returns null;
@@ -44,6 +53,13 @@ export const STREAM = {
    * alive for the full MAX_DURATION_MS.
    */
   MISSING_POLLS_BEFORE_STOP: 3,
+  /**
+   * Polls tolerated in a state that is neither terminal nor transitioning before the
+   * stream gives up. `unknown` is the only such state, and it means Railway added an
+   * enum member this app does not map — which must not pin a connection, an upstream
+   * socket and a 2.5s poll for the full duration ceiling.
+   */
+  UNSETTLED_POLLS_BEFORE_STOP: 8,
 } as const;
 
 /** Session cookie and token lifetimes. */
