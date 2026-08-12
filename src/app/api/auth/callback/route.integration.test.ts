@@ -109,6 +109,7 @@ describe("GET /api/auth/callback", () => {
   });
 
   it("reports a failed token exchange without leaking the cause", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     authorizationCodeGrant.mockImplementation(async () => {
       throw new Error("invalid_client: bad secret");
     });
@@ -117,6 +118,35 @@ describe("GET /api/auth/callback", () => {
 
     expect(errorParam(response)).toBe("token_exchange_failed");
     expect(response.headers.get("location")).not.toContain("bad secret");
+    // The reason has to reach the server log, or the failure is undiagnosable from
+    // the outside — which is how an id_token alg mismatch once passed for a
+    // redirect-URI problem.
+    expect(logged).toHaveBeenCalledWith(
+      "token exchange failed:",
+      "invalid_client: bad secret",
+      "",
+    );
+    logged.mockRestore();
+  });
+
+  it("logs the OAuth error body when the token endpoint rejects the request", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    authorizationCodeGrant.mockImplementation(async () => {
+      throw Object.assign(new Error("server responded with an error"), {
+        error: "invalid_grant",
+        error_description: "code is expired",
+        status: 400,
+      });
+    });
+
+    expect(errorParam(await GET(request("?code=abc&state=st")))).toBe(
+      "token_exchange_failed",
+    );
+    expect(logged).toHaveBeenCalledWith(
+      "token exchange rejected: invalid_grant (HTTP 400)",
+      "code is expired",
+    );
+    logged.mockRestore();
   });
 
   it("rejects a response with no identity claims", async () => {

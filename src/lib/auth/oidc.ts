@@ -1,37 +1,8 @@
 import * as client from "openid-client";
 import { env } from "@/env";
+import { railwayMetadata } from "@/lib/auth/oidc-metadata";
 
-/**
- * Railway's OpenID Connect metadata, derived from the issuer.
- *
- * Verified live at https://backboard.railway.com/oauth/.well-known/openid-configuration
- * (note the `/oauth` segment — the domain root 404s).
- *
- * It is constructed here rather than discovered at boot for two reasons:
- *  1. The discovery document lives under `/oauth` but declares `issuer` as the bare
- *     domain. RFC 8414 issuer validation rejects that mismatch, so `client.discovery()`
- *     cannot be pointed at it directly.
- *  2. No network round-trip on cold start, and no boot-time dependency on Railway
- *     being reachable.
- *
- * `pnpm verify:schema` re-fetches the live document and diffs it against this shape.
- */
-export function railwayMetadata(issuer: string): client.ServerMetadata {
-  return {
-    issuer,
-    authorization_endpoint: `${issuer}/oauth/auth`,
-    token_endpoint: `${issuer}/oauth/token`,
-    userinfo_endpoint: `${issuer}/oauth/me`,
-    jwks_uri: `${issuer}/oauth/jwks`,
-    response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code", "refresh_token"],
-    code_challenge_methods_supported: ["S256"],
-  };
-}
-
-export function discoveryUrl(issuer: string): string {
-  return `${issuer}/oauth/.well-known/openid-configuration`;
-}
+export { discoveryUrl, railwayMetadata } from "@/lib/auth/oidc-metadata";
 
 /**
  * Scopes requested at consent.

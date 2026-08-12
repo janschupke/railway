@@ -32,6 +32,24 @@ describe("railwayMetadata", () => {
       railwayMetadata(RAILWAY_DEFAULTS.ISSUER).code_challenge_methods_supported,
     ).toEqual(["S256"]);
   });
+
+  it("pins ES256 for id_tokens, which sign-in depends on", () => {
+    // Railway signs with ES256 and its JWKS holds one P-256 key. Drop this and
+    // oauth4webapi falls back to demanding RS256, rejecting every id_token — the
+    // failure surfaces as a generic token_exchange_failed with no further detail.
+    expect(
+      railwayMetadata(RAILWAY_DEFAULTS.ISSUER).id_token_signing_alg_values_supported,
+    ).toEqual(["ES256"]);
+  });
+
+  it("does not require the iss authorization-response parameter", () => {
+    // Live discovery declares it supported, but pinning it here would make `iss`
+    // mandatory on the callback — unverifiable without a real sign-in.
+    expect(
+      railwayMetadata(RAILWAY_DEFAULTS.ISSUER)
+        .authorization_response_iss_parameter_supported,
+    ).toBeUndefined();
+  });
 });
 
 describe("discoveryUrl", () => {

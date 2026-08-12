@@ -144,7 +144,7 @@ CI runs the discovery half on every push.
 
 ```bash
 pnpm install
-cp .env.example .env.local     # then fill in the values
+cp .env.example .env           # then fill in the values
 pnpm dev
 ```
 

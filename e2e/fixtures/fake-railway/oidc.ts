@@ -4,11 +4,14 @@ import type { Store } from "./store";
 /**
  * A real OpenID Connect provider, in about 120 lines.
  *
- * The id_token is genuinely signed with RS256 and served through a real JWKS, so
- * openid-client performs full signature and claim validation against it. That is the
- * point of this fixture over a session-seeding shortcut: the PKCE round trip, the
- * token exchange, and refresh-token rotation are all exercised by the E2E suite
- * instead of being stubbed away.
+ * The id_token is genuinely signed with ES256 — the algorithm real Railway uses — and
+ * served through a real JWKS, so openid-client performs full signature and claim
+ * validation against it. That is the point of this fixture over a session-seeding
+ * shortcut: the PKCE round trip, the token exchange, and refresh-token rotation are all
+ * exercised by the E2E suite instead of being stubbed away.
+ *
+ * The algorithm has to match production. oauth4webapi defaults to requiring RS256, so an
+ * RS256 fixture would agree with that default and quietly pass while real sign-ins fail.
  */
 
 const USER = {
@@ -23,12 +26,12 @@ let keys: Keys | undefined;
 
 export async function getKeys(): Promise<Keys> {
   if (keys) return keys;
-  const { privateKey, publicKey } = await generateKeyPair("RS256", {
+  const { privateKey, publicKey } = await generateKeyPair("ES256", {
     extractable: true,
   });
   const jwk = await exportJWK(publicKey);
   jwk.kid = "fixture-key";
-  jwk.alg = "RS256";
+  jwk.alg = "ES256";
   jwk.use = "sig";
   keys = { privateKey, jwks: { keys: [jwk] } };
   return keys;
@@ -73,7 +76,7 @@ export function discoveryDocument(issuer: string) {
       "workspace:viewer",
     ],
     code_challenge_methods_supported: ["S256"],
-    id_token_signing_alg_values_supported: ["RS256"],
+    id_token_signing_alg_values_supported: ["ES256"],
     subject_types_supported: ["public"],
   };
 }
@@ -110,7 +113,7 @@ async function base64UrlSha256(input: string): Promise<string> {
 async function idToken(issuer: string, clientId: string): Promise<string> {
   const { privateKey } = await getKeys();
   return new SignJWT({ ...USER, email_verified: true })
-    .setProtectedHeader({ alg: "RS256", kid: "fixture-key" })
+    .setProtectedHeader({ alg: "ES256", kid: "fixture-key" })
     .setIssuer(issuer)
     .setAudience(clientId)
     .setSubject(USER.sub)

@@ -4,7 +4,7 @@
  * Railway publishes no schema artifact, and their API guides omit several things this
  * app depends on. Rather than assume, this script introspects the live API and checks
  * every root field the app sends, plus re-fetches the OIDC discovery document and
- * diffs it against the metadata pinned in src/lib/auth/oidc.ts.
+ * diffs it against the metadata pinned in src/lib/auth/oidc-metadata.ts.
  *
  *   RAILWAY_TOKEN=<account or workspace token> pnpm verify:schema
  *
@@ -12,18 +12,39 @@
  */
 
 import { OPTIONAL_FIELDS, REQUIRED_FIELDS } from "../src/lib/railway/operations.ts";
+import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
+import { RAILWAY_DEFAULTS } from "../src/env.ts";
 
-const ENDPOINT = "https://backboard.railway.com/graphql/v2";
-const DISCOVERY =
-  "https://backboard.railway.com/oauth/.well-known/openid-configuration";
+const ENDPOINT = RAILWAY_DEFAULTS.API_URL;
+const ISSUER = RAILWAY_DEFAULTS.ISSUER;
+const DISCOVERY = `${ISSUER}/oauth/.well-known/openid-configuration`;
 
-const PINNED = {
-  issuer: "https://backboard.railway.com",
-  authorization_endpoint: "https://backboard.railway.com/oauth/auth",
-  token_endpoint: "https://backboard.railway.com/oauth/token",
-  userinfo_endpoint: "https://backboard.railway.com/oauth/me",
-  jwks_uri: "https://backboard.railway.com/oauth/jwks",
+/*
+ * Derived from the app's own metadata rather than restated, so the two cannot drift.
+ * They did once: the pinned shape omitted `id_token_signing_alg_values_supported`,
+ * oauth4webapi fell back to demanding RS256, and every real sign-in failed while this
+ * script — which only compared endpoint URLs — reported all clear.
+ */
+const METADATA = railwayMetadata(ISSUER) as Record<string, unknown>;
+
+const PINNED_URLS = [
+  "issuer",
+  "authorization_endpoint",
+  "token_endpoint",
+  "userinfo_endpoint",
+  "jwks_uri",
+] as const;
+
+/** Pinned lists that must match the live document exactly, in any order. */
+const PINNED_LISTS = ["id_token_signing_alg_values_supported"] as const;
+
+/** Pinned lists where the app only depends on one entry still being offered. */
+const REQUIRED_MEMBERS: Record<string, string> = {
+  token_endpoint_auth_methods_supported: "client_secret_basic",
 };
+
+const sameSet = (a: string[], b: string[]) =>
+  a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
 const INTROSPECTION = `
   query VerifyRootFields {
@@ -60,12 +81,38 @@ async function checkDiscovery() {
   }
   const doc = (await response.json()) as Record<string, unknown>;
 
-  for (const [key, expected] of Object.entries(PINNED)) {
+  for (const key of PINNED_URLS) {
+    const expected = METADATA[key];
     const actual = doc[key];
     if (actual === expected) {
-      console.log(ok(`${key}`));
+      console.log(ok(key));
     } else {
-      console.log(bad(`${key}: pinned ${expected}, live ${String(actual)}`));
+      console.log(bad(`${key}: pinned ${String(expected)}, live ${String(actual)}`));
+      failed = true;
+    }
+  }
+
+  for (const key of PINNED_LISTS) {
+    const expected = (METADATA[key] as string[] | undefined) ?? [];
+    const actual = (doc[key] as string[] | undefined) ?? [];
+    if (sameSet(expected, actual)) {
+      console.log(ok(`${key} [${actual.join(", ")}]`));
+    } else {
+      console.log(
+        bad(`${key}: pinned [${expected.join(", ")}], live [${actual.join(", ")}]`),
+      );
+      failed = true;
+    }
+  }
+
+  for (const [key, member] of Object.entries(REQUIRED_MEMBERS)) {
+    const actual = (doc[key] as string[] | undefined) ?? [];
+    if (actual.includes(member)) {
+      console.log(ok(`${key} still offers ${member}`));
+    } else {
+      console.log(
+        bad(`${key} no longer offers ${member}: live [${actual.join(", ")}]`),
+      );
       failed = true;
     }
   }

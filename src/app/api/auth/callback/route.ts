@@ -20,6 +20,37 @@ function fail(request: NextRequest, reason: string) {
   return response;
 }
 
+/**
+ * The browser only ever learns `token_exchange_failed`, so unless the real reason is
+ * recorded here it is lost — which is how an id_token signing-algorithm mismatch spent
+ * a while masquerading as a redirect-URI problem. Logged server-side only; nothing here
+ * reaches the client.
+ */
+function logExchangeFailure(error: unknown) {
+  const oauth = error as {
+    error?: string;
+    error_description?: string;
+    status?: number;
+  };
+
+  if (oauth?.error) {
+    // The token endpoint rejected the request: bad secret, wrong redirect_uri, …
+    console.error(
+      `token exchange rejected: ${oauth.error} (HTTP ${oauth.status ?? "?"})`,
+      oauth.error_description ?? "",
+    );
+    return;
+  }
+
+  // The response itself was unacceptable — wrong id_token signing alg, issuer, or
+  // audience. openid-client puts the specifics on `cause`.
+  console.error(
+    "token exchange failed:",
+    error instanceof Error ? error.message : error,
+    error instanceof Error ? (error.cause ?? "") : "",
+  );
+}
+
 export async function GET(request: NextRequest) {
   const { APP_URL, SESSION_SECRET } = env();
 
@@ -46,7 +77,10 @@ export async function GET(request: NextRequest) {
       pkceCodeVerifier: codeVerifier,
       expectedState,
     })
-    .catch(() => null);
+    .catch((error: unknown) => {
+      logExchangeFailure(error);
+      return null;
+    });
 
   if (!tokens) return fail(request, "token_exchange_failed");
 

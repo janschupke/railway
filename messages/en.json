@@ -138,7 +138,7 @@
     "failed": "Sign-in failed. Try again.",
     "session_expired": "Your Railway session expired and could not be renewed. Sign in again.",
     "no_refresh_token": "Railway did not return a refresh token, so the session would expire in an hour. Sign in again and approve offline access when prompted.",
-    "token_exchange_failed": "Railway rejected the sign-in. Check that this app's redirect URI matches the one registered on the OAuth app.",
+    "token_exchange_failed": "Railway rejected the sign-in. Try again — if it keeps failing, the server log records the reason.",
     "missing_pkce_state": "The sign-in attempt timed out or the cookies were cleared. Start again.",
     "missing_id_token": "Railway did not return an identity token. Try again.",
     "access_denied": "You declined the authorization request."
