@@ -1,28 +1,26 @@
 import "server-only";
 
+import { STREAM } from "@/lib/constants";
 import { gql } from "./client";
 import {
+  BUILD_LOGS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
-  BUILD_LOGS_QUERY,
   PROJECTS_QUERY,
   PROJECT_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
 } from "./operations";
-import { isManagedName, stripPrefix } from "./managed";
 import {
-  toContainerState,
-  type Container,
-  type LogLine,
-  type RailwayProject,
-} from "./types";
-
-type Edges<T> = { edges: Array<{ node: T }> } | null | undefined;
-
-const nodes = <T>(connection: Edges<T>): T[] =>
-  connection?.edges?.map((e) => e.node) ?? [];
+  nodes,
+  toContainers,
+  toProject,
+  type Edges,
+  type ProjectNode,
+  type ServiceNode,
+} from "./mappers";
+import type { Container, LogLine, RailwayProject } from "./types";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
@@ -35,47 +33,22 @@ export async function listProjects(
       id: string;
       name?: string;
       email?: string;
-      projects: Edges<{
-        id: string;
-        name: string;
-        environments: Edges<{ id: string; name: string }>;
-      }>;
+      projects: Edges<ProjectNode>;
     };
   }>(PROJECTS_QUERY, {}, { accessToken, operationName: "Projects", signal });
 
   return {
     viewer: { id: data.me.id, name: data.me.name, email: data.me.email },
-    projects: nodes(data.me.projects).map((p) => ({
-      id: p.id,
-      name: p.name,
-      environments: nodes(p.environments).map((e) => ({ id: e.id, name: e.name })),
-    })),
+    projects: nodes(data.me.projects).map(toProject),
   };
 }
-
-type ServiceNode = {
-  id: string;
-  name: string;
-  createdAt: string | null;
-  serviceInstances: Edges<{
-    id: string;
-    environmentId: string;
-    source: { image: string | null; repo: string | null } | null;
-    latestDeployment: {
-      id: string;
-      status: string | null;
-      createdAt: string | null;
-      updatedAt: string | null;
-    } | null;
-  }>;
-};
 
 /**
  * Everything the dashboard needs for one project, in a single request.
  *
- * Services created outside this app are returned too, marked `managed: false`. They are
- * shown for context — an accurate picture of the environment matters — but the UI
- * refuses to destroy them.
+ * Services created outside this app come back too, marked `managed: false`. They are
+ * shown for context — an accurate picture of the environment matters — but the UI and
+ * the spin-down action both refuse to destroy them.
  */
 export async function getProjectContainers(
   accessToken: string,
@@ -84,58 +57,17 @@ export async function getProjectContainers(
   signal?: AbortSignal,
 ): Promise<{ project: RailwayProject; containers: Container[] }> {
   const data = await gql<{
-    project: {
-      id: string;
-      name: string;
-      environments: Edges<{ id: string; name: string }>;
-      services: Edges<ServiceNode>;
-    };
+    project: ProjectNode & { services: Edges<ServiceNode> };
   }>(
     PROJECT_QUERY,
     { id: projectId },
     { accessToken, operationName: "Project", signal },
   );
 
-  const project: RailwayProject = {
-    id: data.project.id,
-    name: data.project.name,
-    environments: nodes(data.project.environments).map((e) => ({
-      id: e.id,
-      name: e.name,
-    })),
+  return {
+    project: toProject(data.project),
+    containers: toContainers(nodes(data.project.services), environmentId),
   };
-
-  const containers = nodes(data.project.services)
-    .map<Container | null>((service) => {
-      const instance = nodes(service.serviceInstances).find(
-        (i) => i.environmentId === environmentId,
-      );
-      // The service exists in the project but not in the selected environment.
-      if (!instance) return null;
-
-      const deployment = instance.latestDeployment;
-      return {
-        serviceId: service.id,
-        rawName: service.name,
-        displayName: stripPrefix(service.name),
-        image: instance.source?.image ?? null,
-        repo: instance.source?.repo ?? null,
-        state: toContainerState(deployment?.status),
-        rawStatus: deployment?.status ?? null,
-        deploymentId: deployment?.id ?? null,
-        createdAt: service.createdAt,
-        updatedAt: deployment?.updatedAt ?? null,
-        managed: isManagedName(service.name),
-      };
-    })
-    .filter((c): c is Container => c !== null)
-    .sort((a, b) => {
-      // Managed containers first, then newest.
-      if (a.managed !== b.managed) return a.managed ? -1 : 1;
-      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
-    });
-
-  return { project, containers };
 }
 
 export async function createContainer(
@@ -196,7 +128,11 @@ export async function getDeployment(
   signal?: AbortSignal,
 ): Promise<{ id: string; status: string | null; updatedAt: string | null } | null> {
   const data = await gql<{
-    deployment: { id: string; status: string | null; updatedAt: string | null } | null;
+    deployment: {
+      id: string;
+      status: string | null;
+      updatedAt: string | null;
+    } | null;
   }>(
     DEPLOYMENT_QUERY,
     { id: deploymentId },
@@ -213,18 +149,18 @@ export async function getLogs(
   accessToken: string,
   deploymentId: string,
   kind: "build" | "deploy",
-  limit = 200,
+  limit: number = STREAM.BACKFILL_LINES,
   signal?: AbortSignal,
 ): Promise<LogLine[]> {
-  const query = kind === "build" ? BUILD_LOGS_QUERY : DEPLOYMENT_LOGS_QUERY;
+  const isBuild = kind === "build";
   const data = await gql<Record<string, LogLine[] | null>>(
-    query,
+    isBuild ? BUILD_LOGS_QUERY : DEPLOYMENT_LOGS_QUERY,
     { deploymentId, limit },
     {
       accessToken,
-      operationName: kind === "build" ? "BuildLogs" : "DeploymentLogs",
+      operationName: isBuild ? "BuildLogs" : "DeploymentLogs",
       signal,
     },
   );
-  return data[kind === "build" ? "buildLogs" : "deploymentLogs"] ?? [];
+  return data[isBuild ? "buildLogs" : "deploymentLogs"] ?? [];
 }

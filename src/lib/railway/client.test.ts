@@ -1,10 +1,11 @@
 import { HttpResponse, graphql, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { RAILWAY_GRAPHQL_HTTP, gql } from "./client";
+import { gql, railwayApiUrl } from "./client";
 import { RailwayApiError } from "./errors";
 
-const api = graphql.link(RAILWAY_GRAPHQL_HTTP);
+const ENDPOINT = railwayApiUrl();
+const api = graphql.link(ENDPOINT);
 const server = setupServer();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -20,7 +21,11 @@ const QUERY = /* GraphQL */ `
 `;
 
 const call = () =>
-  gql<{ me: { id: string } }>(QUERY, {}, { accessToken: "t0ken", operationName: "Ping" });
+  gql<{ me: { id: string } }>(
+    QUERY,
+    {},
+    { accessToken: "t0ken", operationName: "Ping" },
+  );
 
 describe("gql", () => {
   it("returns data and sends a bearer token", async () => {
@@ -68,7 +73,7 @@ describe("gql", () => {
   it("does not retry a 401 — a revoked authorization needs re-consent, not patience", async () => {
     let attempts = 0;
     server.use(
-      http.post(RAILWAY_GRAPHQL_HTTP, () => {
+      http.post(ENDPOINT, () => {
         attempts += 1;
         return new HttpResponse(null, { status: 401 });
       }),
@@ -82,7 +87,7 @@ describe("gql", () => {
   it("retries a 429 and succeeds", async () => {
     let attempts = 0;
     server.use(
-      http.post(RAILWAY_GRAPHQL_HTTP, () => {
+      http.post(ENDPOINT, () => {
         attempts += 1;
         if (attempts === 1) return new HttpResponse(null, { status: 429 });
         return HttpResponse.json({ data: { me: { id: "user_1" } } });
@@ -96,7 +101,7 @@ describe("gql", () => {
   it("gives up after exhausting retries on 429", async () => {
     let attempts = 0;
     server.use(
-      http.post(RAILWAY_GRAPHQL_HTTP, () => {
+      http.post(ENDPOINT, () => {
         attempts += 1;
         return new HttpResponse(null, { status: 429 });
       }),
@@ -108,9 +113,7 @@ describe("gql", () => {
   }, 10_000);
 
   it("retries 5xx and surfaces a server error when it persists", async () => {
-    server.use(
-      http.post(RAILWAY_GRAPHQL_HTTP, () => new HttpResponse(null, { status: 502 })),
-    );
+    server.use(http.post(ENDPOINT, () => new HttpResponse(null, { status: 502 })));
 
     const error = (await call().catch((e: unknown) => e)) as RailwayApiError;
     expect(error.kind).toBe("server");
@@ -118,9 +121,7 @@ describe("gql", () => {
   }, 10_000);
 
   it("never leaks the token into a client-facing error", async () => {
-    server.use(
-      http.post(RAILWAY_GRAPHQL_HTTP, () => new HttpResponse(null, { status: 401 })),
-    );
+    server.use(http.post(ENDPOINT, () => new HttpResponse(null, { status: 401 })));
 
     const error = (await call().catch((e: unknown) => e)) as RailwayApiError;
     expect(JSON.stringify(error.toClientError())).not.toContain("t0ken");

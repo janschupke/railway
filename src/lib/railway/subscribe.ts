@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient, type Client } from "graphql-ws";
 import WebSocket from "ws";
-import { RAILWAY_GRAPHQL_WS } from "./client";
+import { railwayWsUrl } from "./client";
 import type { LogLine } from "./types";
 
 /**
@@ -26,7 +26,7 @@ function authedSocket(accessToken: string) {
 
 export function createLogClient(accessToken: string): Client {
   return createClient({
-    url: RAILWAY_GRAPHQL_WS,
+    url: railwayWsUrl(),
     webSocketImpl: authedSocket(accessToken),
     connectionParams: { Authorization: `Bearer ${accessToken}` },
     // The SSE route owns reconnection policy; keep the socket layer simple.

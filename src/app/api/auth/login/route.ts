@@ -2,10 +2,8 @@ import * as client from "openid-client";
 import { NextResponse } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { SCOPES, oidcConfig } from "@/lib/auth/oidc";
+import { SESSION } from "@/lib/constants";
 import { PKCE_COOKIE, STATE_COOKIE, cookieOptions } from "@/lib/auth/session";
-
-/** PKCE verifier and state only need to survive the round-trip to Railway. */
-const TRANSIENT_MAX_AGE = 60 * 10;
 
 export async function GET() {
   const { APP_URL } = env();
@@ -26,7 +24,10 @@ export async function GET() {
   });
 
   const response = NextResponse.redirect(authorizationUrl.href);
-  const opts = { ...cookieOptions(APP_URL), maxAge: TRANSIENT_MAX_AGE };
+  const opts = {
+    ...cookieOptions(APP_URL),
+    maxAge: SESSION.TRANSIENT_MAX_AGE_SECONDS,
+  };
   response.cookies.set(PKCE_COOKIE, codeVerifier, opts);
   response.cookies.set(STATE_COOKIE, state, opts);
   return response;

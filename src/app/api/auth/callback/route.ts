@@ -2,10 +2,10 @@ import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { oidcConfig } from "@/lib/auth/oidc";
+import { SESSION } from "@/lib/constants";
 import {
   PKCE_COOKIE,
   SESSION_COOKIE,
-  SESSION_MAX_AGE_SECONDS,
   STATE_COOKIE,
   cookieOptions,
   sealSession,
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
   const response = NextResponse.redirect(new URL("/dashboard", request.url));
   response.cookies.set(SESSION_COOKIE, await sealSession(session, SESSION_SECRET), {
     ...cookieOptions(APP_URL),
-    maxAge: SESSION_MAX_AGE_SECONDS,
+    maxAge: SESSION.MAX_AGE_SECONDS,
   });
   response.cookies.delete(PKCE_COOKIE);
   response.cookies.delete(STATE_COOKIE);

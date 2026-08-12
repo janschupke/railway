@@ -11,10 +11,7 @@
  * Exits non-zero if anything the app *requires* is missing.
  */
 
-import {
-  OPTIONAL_FIELDS,
-  REQUIRED_FIELDS,
-} from "../src/lib/railway/operations.ts";
+import { OPTIONAL_FIELDS, REQUIRED_FIELDS } from "../src/lib/railway/operations.ts";
 
 const ENDPOINT = "https://backboard.railway.com/graphql/v2";
 const DISCOVERY =
@@ -100,8 +97,9 @@ async function checkSchema(token: string) {
     errors?: Array<{ message: string }>;
   };
 
-  if (body.errors?.length) {
-    console.log(bad(`introspection rejected: ${body.errors[0].message}`));
+  const [introspectionError] = body.errors ?? [];
+  if (introspectionError) {
+    console.log(bad(`introspection rejected: ${introspectionError.message}`));
     console.log(
       warn("If introspection is disabled, verify operations by running them instead."),
     );
@@ -133,9 +131,7 @@ async function checkSchema(token: string) {
     const argNames = new Set(field.args.map((a) => a.name));
     const missing = required.args.filter((a) => !argNames.has(a));
     if (missing.length) {
-      console.log(
-        bad(`${label} exists but is missing args: ${missing.join(", ")}`),
-      );
+      console.log(bad(`${label} exists but is missing args: ${missing.join(", ")}`));
       failed = true;
     } else {
       console.log(ok(label));
@@ -148,7 +144,9 @@ async function checkSchema(token: string) {
     const label = `${optional.root}.${optional.field}`;
     if (field) {
       console.log(
-        ok(`${label} available (args: ${field.args.map((a) => a.name).join(", ") || "none"})`),
+        ok(
+          `${label} available (args: ${field.args.map((a) => a.name).join(", ") || "none"})`,
+        ),
       );
     } else {
       console.log(warn(`${label} not available — spin-down stays destroy-only`));
@@ -162,12 +160,8 @@ async function main() {
   await checkDiscovery();
 
   if (!token) {
-    console.log(
-      `\n${warn("RAILWAY_TOKEN not set — skipped schema introspection.")}`,
-    );
-    console.log(
-      "  Create one at https://railway.com/account/tokens, then re-run:",
-    );
+    console.log(`\n${warn("RAILWAY_TOKEN not set — skipped schema introspection.")}`);
+    console.log("  Create one at https://railway.com/account/tokens, then re-run:");
     console.log("  RAILWAY_TOKEN=… pnpm verify:schema\n");
     process.exit(failed ? 1 : 0);
   }

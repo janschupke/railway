@@ -12,6 +12,12 @@ function inferredAppUrl(): string | undefined {
   return undefined;
 }
 
+export const RAILWAY_DEFAULTS = {
+  ISSUER: "https://backboard.railway.com",
+  API_URL: "https://backboard.railway.com/graphql/v2",
+  WS_URL: "wss://backboard.railway.com/graphql/v2",
+} as const;
+
 const schema = z.object({
   RAILWAY_CLIENT_ID: z.string().min(1, "RAILWAY_CLIENT_ID is required"),
   RAILWAY_CLIENT_SECRET: z.string().min(1, "RAILWAY_CLIENT_SECRET is required"),
@@ -23,6 +29,15 @@ const schema = z.object({
    * ownership marker that gates destructive actions — see lib/railway/managed.ts.
    */
   MANAGED_PREFIX: z.string().min(1).default("spun-"),
+
+  /*
+   * Railway endpoints are configurable so the end-to-end suite can point the whole
+   * app at a local fixture that speaks OIDC, GraphQL and graphql-ws. Nothing overrides
+   * these in production. See e2e/fixtures/fake-railway/.
+   */
+  RAILWAY_ISSUER: z.url().default(RAILWAY_DEFAULTS.ISSUER),
+  RAILWAY_API_URL: z.url().default(RAILWAY_DEFAULTS.API_URL),
+  RAILWAY_WS_URL: z.string().min(1).default(RAILWAY_DEFAULTS.WS_URL),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -38,6 +53,9 @@ export function env(): Env {
     SESSION_SECRET: process.env.SESSION_SECRET,
     APP_URL: inferredAppUrl(),
     MANAGED_PREFIX: process.env.MANAGED_PREFIX,
+    RAILWAY_ISSUER: process.env.RAILWAY_ISSUER,
+    RAILWAY_API_URL: process.env.RAILWAY_API_URL,
+    RAILWAY_WS_URL: process.env.RAILWAY_WS_URL,
   });
 
   if (!parsed.success) {
@@ -54,4 +72,9 @@ export function env(): Env {
 /** Absolute callback URL. Must exactly match a redirect URI registered on the Railway OAuth app. */
 export function callbackUrl(): string {
   return new URL("/api/auth/callback", env().APP_URL).toString();
+}
+
+/** Reset the memoised env. Tests only. */
+export function __resetEnv() {
+  cached = undefined;
 }

@@ -23,14 +23,19 @@ Browser ──── SSE ────► Next.js (single Railway service)
 One process, one deployment. Server Components read, Server Actions write, and a single
 SSE route multiplexes deployment status and log output into the open tab.
 
-| Path | Role |
-| --- | --- |
-| `src/proxy.ts` | Refreshes the Railway access token before the render (see ADR-2) |
-| `src/lib/auth/` | OIDC flow, encrypted session cookie, refresh rotation |
-| `src/lib/railway/` | GraphQL client, operations, status model, ownership marker |
-| `src/app/api/streams/[deploymentId]/` | SSE downstream, graphql-ws upstream |
-| `src/app/dashboard/` | Dashboard page + Server Actions |
-| `scripts/verify-schema.ts` | Checks every operation against the live Railway API |
+| Path                                    | Role                                                             |
+| --------------------------------------- | ---------------------------------------------------------------- |
+| `src/proxy.ts`                          | Refreshes the Railway access token before the render (see ADR-2) |
+| `src/lib/auth/`                         | OIDC flow, encrypted session cookie, refresh rotation            |
+| `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker          |
+| `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream   |
+| `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling              |
+| `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it          |
+| `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses  |
+| `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class    |
+| `src/app/dashboard/`                    | Page, data loader, Server Actions                                |
+| `e2e/fixtures/fake-railway/`            | Stand-in Railway: OIDC + GraphQL + graphql-ws                    |
+| `scripts/verify-schema.ts`              | Checks every operation against the live Railway API              |
 
 ---
 
@@ -68,7 +73,7 @@ an afterthought.
 
 Server Components can read cookies but not write them, so a refresh during render would
 rotate the token and then lose it — and the spent refresh token is gone. Refresh
-therefore runs in `src/proxy.ts`, which executes before the render and *can* write. The
+therefore runs in `src/proxy.ts`, which executes before the render and _can_ write. The
 new cookie is set on the **request** as well as the response, so the render that
 triggered the refresh already sees the fresh token. Server Actions and Route Handlers
 carry a fallback path (`requireAccessToken`) since they can write cookies too.
@@ -102,14 +107,14 @@ cost a round-trip per row against a low rate limit. So the **name prefix** (`spu
 default) is the marker: it comes back in the same query that lists services, and it is
 visible in Railway's own dashboard rather than hidden.
 
-Services created elsewhere are listed for context but render as *Not managed here* with
+Services created elsewhere are listed for context but render as _Not managed here_ with
 no destroy control — and `spinDown` re-derives ownership **server-side** before deleting,
 so a forged request fails even though the user's own token would happily perform it.
 
 ### ADR-6 — Docker images only; GitHub sources are a stated limitation
 
 `serviceCreate` accepts `source.image` or `source.repo`. Repo sources silently require
-*the signed-in user's* Railway account to have the GitHub app installed with access to
+_the signed-in user's_ Railway account to have the GitHub app installed with access to
 that repo — something this app cannot provision on their behalf. Image sources work for
 anyone, so that is the product surface. See "Limitations".
 
@@ -128,7 +133,7 @@ RAILWAY_TOKEN=… pnpm verify:schema       # + full schema introspection
 ```
 
 Get a token at <https://railway.com/account/tokens>. It also reports whether
-`deploymentStop` exists — if it does, spin-down can offer *stop* alongside *destroy*
+`deploymentStop` exists — if it does, spin-down can offer _stop_ alongside _destroy_
 rather than destroy only.
 
 CI runs the discovery half on every push.
@@ -165,8 +170,90 @@ The app deploys itself the same way it deploys containers.
 ### Checks
 
 ```bash
-pnpm check     # typecheck + lint + tests
+pnpm check      # format:check + lint (0 warnings) + typecheck + coverage gate
+pnpm test:e2e   # Playwright against the fake Railway fixture
 ```
+
+CI runs these on every push and pull request to `master`, as four parallel jobs behind a
+single `All checks` gate for branch protection to require. Enabling that protection is a
+GitHub repo setting, not a file — it is the one manual step.
+
+---
+
+## Design system
+
+Tokens live in `src/app/tokens.css` in two layers: raw ramps, then a semantic layer
+(`--rc-canvas`, `--rc-text-muted`, `--rc-state-running`, …) which is the only thing the
+UI is allowed to touch. `@theme inline` in `globals.css` maps the semantic layer onto
+Tailwind utilities.
+
+> The semantic tokens are named `--rc-*`, not `--color-*`. Mapping `--color-accent:
+var(--color-accent)` is self-referential: Tailwind resolves it to whatever `:root`
+> happens to hold, and the theme overrides silently stop applying — the dashboard
+> rendered light-theme accents inside dark mode until the namespaces were separated.
+
+Dark is the default, matching Railway's product; light follows `prefers-color-scheme`;
+an explicit `[data-theme]` beats both, in either direction. Container-state colours are
+resolved through a `data-state-color` attribute, so adding a state means adding a token
+rather than editing a lookup table inside a badge.
+
+Primitives in `src/components/ui/` are built on Radix. That buys real behaviour, not
+styling: the destroy confirmation gets a focus trap, Escape handling and focus restore;
+action feedback moves to an announced toast region; the raw Railway status enum moves
+out of a `title` attribute, where keyboard and screen-reader users never saw it.
+
+---
+
+## Tests
+
+Four tiers, each answering something the others cannot.
+
+| Tier            | Runs on     | Covers                                                            |
+| --------------- | ----------- | ----------------------------------------------------------------- |
+| **unit**        | node        | Token rotation, status mapping, ownership, backoff, SSE framing   |
+| **component**   | jsdom + RTL | Dialog guard, stream hook, autoscroll, keyboard on the primitives |
+| **integration** | node + MSW  | Server Actions and route handlers against a mocked Railway        |
+| **e2e**         | Playwright  | The real OAuth flow and lifecycle against a fake Railway          |
+
+`pnpm test:coverage` enforces **80%** on lines, branches, functions and statements
+across `src/**`. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
+are excluded and covered end-to-end instead — counting them would either inflate the
+number or invite render tests that assert nothing. E2E does not feed the figure, so
+component tests have to carry the UI. Current: 350 tests, ~94% lines.
+
+### The fake Railway
+
+`e2e/fixtures/fake-railway/` is a stand-in Railway on one port: an OIDC provider whose
+`id_token` is genuinely RS256-signed and served through a real JWKS, a GraphQL API over
+an in-memory store, and a hand-rolled `graphql-transport-ws` endpoint. Deployments
+advance `QUEUED → BUILDING → DEPLOYING → SUCCESS` on a timer, so status transitions and
+log streaming are real rather than snapshots.
+
+The app runs unmodified against it — `RAILWAY_ISSUER` / `RAILWAY_API_URL` /
+`RAILWAY_WS_URL` are the only difference — so PKCE, the token exchange and refresh-token
+rotation are all exercised, rather than stubbed away by seeding a session cookie.
+`POST /__test/faults` injects rate limits, revoked authorizations and failed builds, so
+the unhappy paths are tested instead of asserted.
+
+Playwright runs `workers: 1`: the fixture holds shared state that each spec resets.
+
+---
+
+## Accessibility
+
+WCAG 2.1 AA, checked three ways because each misses what the others catch:
+
+1. **`@axe-core/playwright`** on every meaningful state — landing, dashboard populated
+   and empty, destroy dialog, log panel, form errors — **in both themes**.
+2. **`src/app/contrast.test.ts`** parses `tokens.css` and computes the contrast ratio of
+   every declared pair in both themes. It runs in milliseconds without a browser and
+   covers colours no spec happens to visit; it is what makes promising two themes safe.
+   It has already caught four real failures.
+3. **Keyboard specs** (`e2e/keyboard.spec.ts`) for focus traps, focus restore, roving
+   tabindex, Escape and live-region politeness. Axe cannot see any of that — and they
+   are what make replacing a native `<select>` with a Radix one defensible.
+
+Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
 
 ---
 
@@ -181,7 +268,7 @@ pnpm check     # typecheck + lint + tests
    session cookie, then perform an action. It should succeed — the proxy refreshes and
    rotates transparently.
 5. **Ownership:** create a service in the Railway dashboard directly. It appears here as
-   *Not managed here*, with no destroy control.
+   _Not managed here_, with no destroy control.
 6. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
    **Failed** with build logs, rather than spinning forever. Revoke the app's
    authorization mid-session and confirm you are sent back to sign in with an

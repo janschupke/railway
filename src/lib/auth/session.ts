@@ -1,13 +1,9 @@
 import { EncryptJWT, jwtDecrypt } from "jose";
+import { SESSION } from "@/lib/constants";
 
 export const SESSION_COOKIE = "rc_session";
 export const PKCE_COOKIE = "rc_pkce";
 export const STATE_COOKIE = "rc_state";
-
-/** Refresh this many seconds before the access token actually expires. */
-export const REFRESH_SKEW_SECONDS = 300;
-
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export type SessionUser = {
   id: string;
@@ -60,7 +56,7 @@ export async function sealSession(
   return new EncryptJWT({ session })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setIssuedAt()
-    .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
+    .setExpirationTime(`${SESSION.MAX_AGE_SECONDS}s`)
     .encrypt(key);
 }
 
@@ -85,7 +81,7 @@ export function isExpiring(
   session: Pick<RailwaySession, "expiresAt">,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): boolean {
-  return session.expiresAt - nowSeconds <= REFRESH_SKEW_SECONDS;
+  return session.expiresAt - nowSeconds <= SESSION.REFRESH_SKEW_SECONDS;
 }
 
 export function cookieOptions(appUrl: string) {

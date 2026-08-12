@@ -1,18 +1,75 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 
+const alias = {
+  "@": path.resolve(import.meta.dirname, "src"),
+  // `server-only` throws by design outside a React Server Component graph.
+  // Tests exercise those modules directly, so it is stubbed out here.
+  "server-only": path.resolve(import.meta.dirname, "src/test/noop.ts"),
+};
+
 export default defineConfig({
+  resolve: { alias },
   test: {
-    environment: "node",
-    include: ["src/**/*.test.ts"],
-    setupFiles: ["src/test/setup.ts"],
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "src"),
-      // `server-only` throws by design outside a React Server Component graph.
-      // Tests exercise those modules directly, so it is stubbed out here.
-      "server-only": path.resolve(import.meta.dirname, "src/test/noop.ts"),
+    projects: [
+      {
+        resolve: { alias },
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["src/**/*.test.ts"],
+          exclude: ["src/**/*.integration.test.ts"],
+          setupFiles: ["src/test/setup.ts"],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: "component",
+          environment: "jsdom",
+          include: ["src/**/*.test.tsx"],
+          setupFiles: ["src/test/setup.ts", "src/test/setup-dom.ts"],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: "integration",
+          environment: "node",
+          include: ["src/**/*.integration.test.ts"],
+          setupFiles: ["src/test/setup.ts"],
+        },
+      },
+    ],
+
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov", "html"],
+      include: ["src/**"],
+      exclude: [
+        "src/test/**",
+        "src/**/*.d.ts",
+        "src/**/*.test.*",
+        /*
+         * Framework shells: these are React Server Components and route boundaries
+         * whose behaviour is composition. They are covered end-to-end by Playwright
+         * (e2e/), which does not feed this number — counting them here would either
+         * inflate the figure or invite render tests that assert nothing.
+         *
+         * Everything with logic in it — lib, hooks, components, Server Actions, data
+         * loaders and API route handlers — is inside the gate.
+         */
+        "src/app/**/layout.tsx",
+        "src/app/**/page.tsx",
+        "src/app/**/loading.tsx",
+        "src/app/**/error.tsx",
+      ],
+      thresholds: {
+        lines: 80,
+        branches: 80,
+        functions: 80,
+        statements: 80,
+      },
     },
   },
 });

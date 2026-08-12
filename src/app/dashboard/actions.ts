@@ -1,51 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import { requireAccessToken, SessionExpiredError } from "@/lib/auth/server";
+import { requireAccessToken } from "@/lib/auth/server";
+import { isField, toActionError, type ActionResult } from "@/lib/action-result";
 import {
   createContainer,
   destroyContainer,
   getProjectContainers,
 } from "@/lib/railway/api";
-import { RailwayApiError } from "@/lib/railway/errors";
 import { toManagedName } from "@/lib/railway/managed";
+import { spinDownSchema, spinUpSchema } from "@/lib/validation";
 
-export type ActionResult =
-  | { ok: true; message: string }
-  | { ok: false; error: string; field?: "name" | "image" };
-
-/**
- * Docker image reference: `[registry/]name[:tag][@digest]`.
- * Deliberately permissive on registry hosts, strict on shell-unsafe characters.
- */
-const IMAGE_PATTERN = /^[a-z0-9]+([._\-/][a-z0-9]+)*(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$/i;
-
-const spinUpSchema = z.object({
-  projectId: z.string().min(1),
-  environmentId: z.string().min(1),
-  name: z
-    .string()
-    .trim()
-    .min(1, "Give the container a name")
-    .max(40, "Keep the name under 40 characters"),
-  image: z
-    .string()
-    .trim()
-    .min(1, "An image reference is required")
-    .max(255)
-    .regex(IMAGE_PATTERN, "That does not look like a valid image reference"),
-});
-
-function toResult(error: unknown): ActionResult {
-  if (error instanceof SessionExpiredError) {
-    return { ok: false, error: "Your Railway session expired. Sign in again." };
-  }
-  if (error instanceof RailwayApiError) {
-    return { ok: false, error: error.userMessage() };
-  }
-  return { ok: false, error: "Something went wrong. Please try again." };
-}
+export type { ActionResult };
 
 export async function spinUp(
   _prev: ActionResult | null,
@@ -60,11 +26,12 @@ export async function spinUp(
 
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
+    if (!issue) return { ok: false, error: "Check the form and try again." };
     const field = issue.path[0];
     return {
       ok: false,
       error: issue.message,
-      field: field === "name" || field === "image" ? field : undefined,
+      ...(isField(field) ? { field } : {}),
     };
   }
 
@@ -103,7 +70,7 @@ export async function spinUp(
     revalidatePath("/dashboard");
     return { ok: true, message: `Spinning up ${name}` };
   } catch (error) {
-    return toResult(error);
+    return toActionError(error);
   }
 }
 
@@ -111,13 +78,16 @@ export async function spinDown(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
-  const projectId = String(formData.get("projectId") ?? "");
-  const environmentId = String(formData.get("environmentId") ?? "");
-  const serviceId = String(formData.get("serviceId") ?? "");
-
-  if (!projectId || !environmentId || !serviceId) {
+  const parsed = spinDownSchema.safeParse({
+    projectId: formData.get("projectId"),
+    environmentId: formData.get("environmentId"),
+    serviceId: formData.get("serviceId"),
+  });
+  if (!parsed.success) {
     return { ok: false, error: "Missing container reference." };
   }
+
+  const { projectId, environmentId, serviceId } = parsed.data;
 
   try {
     const accessToken = await requireAccessToken();
@@ -149,11 +119,6 @@ export async function spinDown(
     revalidatePath("/dashboard");
     return { ok: true, message: `Destroyed ${target.displayName}` };
   } catch (error) {
-    return toResult(error);
+    return toActionError(error);
   }
-}
-
-/** Cheap refresh for the client poll after a mutation settles. */
-export async function refreshDashboard(): Promise<void> {
-  revalidatePath("/dashboard");
 }

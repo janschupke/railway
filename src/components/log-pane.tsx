@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { UI } from "@/lib/constants";
 import type { LogLine } from "@/lib/railway/types";
-
-const NEAR_BOTTOM_PX = 24;
+import { ScrollArea } from "./ui/scroll-area";
+import { Button } from "./ui/button";
 
 /**
- * Log output with autoscroll that yields to the reader: scrolling up detaches, and a
- * button reattaches. Tailing that fights the user is worse than no tailing.
+ * Log output with autoscroll that yields to the reader.
+ *
+ * Scrolling up detaches the tail and surfaces a button to reattach. Tailing that fights
+ * the user is worse than no tailing — you cannot read a failure while it scrolls away.
  */
 export function LogPane({
   lines,
@@ -19,21 +21,21 @@ export function LogPane({
   connected: boolean;
   emptyLabel?: string;
 }) {
-  const scrollerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
 
   useLayoutEffect(() => {
-    const el = scrollerRef.current;
+    const el = viewportRef.current;
     if (!el || !pinned) return;
     el.scrollTop = el.scrollHeight;
   }, [lines, pinned]);
 
   useEffect(() => {
-    const el = scrollerRef.current;
+    const el = viewportRef.current;
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setPinned(distance <= NEAR_BOTTOM_PX);
+      setPinned(distance <= UI.AUTOSCROLL_THRESHOLD_PX);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
@@ -41,41 +43,48 @@ export function LogPane({
 
   return (
     <div className="relative">
-      <div
-        ref={scrollerRef}
-        role="log"
-        aria-live="polite"
-        aria-label="Container logs"
-        className={cn(
-          "h-64 overflow-y-auto overflow-x-auto rounded-md bg-subtle p-3",
-          "font-mono text-xs leading-relaxed",
-        )}
+      <ScrollArea
+        className="bg-subtle h-64 rounded-md"
+        viewportClassName="p-3"
+        viewportRef={viewportRef}
+        viewportProps={{
+          role: "log",
+          // Polite: a build emits hundreds of lines and assertive would be unusable.
+          "aria-live": "polite",
+          "aria-label": "Container logs",
+        }}
       >
         {lines.length === 0 ? (
-          <p className="text-muted">{connected ? emptyLabel : "Connecting…"}</p>
+          <p className="text-text-muted font-mono text-xs">
+            {connected ? emptyLabel : "Connecting…"}
+          </p>
         ) : (
-          lines.map((line, index) => (
-            <div
-              key={`${line.timestamp}-${index}`}
-              className="whitespace-pre text-foreground/90"
-            >
-              <span className="mr-2 select-none text-muted">
-                {line.timestamp?.slice(11, 19) ?? "--:--:--"}
-              </span>
-              {line.message}
-            </div>
-          ))
+          <div className="font-mono text-xs leading-relaxed">
+            {lines.map((line, index) => (
+              <div
+                key={`${line.timestamp}-${index}`}
+                className="text-text/90 whitespace-pre"
+              >
+                <span className="text-text-subtle mr-2 select-none">
+                  {/* `||`, not `??`: an empty timestamp slices to "" and must
+                      still fall back to the placeholder. */}
+                  {line.timestamp?.slice(11, 19) || "--:--:--"}
+                </span>
+                {line.message}
+              </div>
+            ))}
+          </div>
         )}
-      </div>
+      </ScrollArea>
 
       {!pinned && (
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={() => setPinned(true)}
-          className="focus-ring absolute bottom-3 right-3 rounded-full border border-border bg-surface px-3 py-1 text-xs shadow-sm"
+          className="absolute right-3 bottom-3 rounded-full shadow-sm"
         >
           Jump to latest
-        </button>
+        </Button>
       )}
     </div>
   );

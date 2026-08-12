@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { Container, ShieldCheck } from "lucide-react";
 import { getSession } from "@/lib/auth/server";
-import { Banner, Card } from "@/components/ui";
+import { Banner } from "@/components/ui/banner";
+import { Card } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const ERRORS: Record<string, string> = {
   session_expired:
@@ -28,14 +30,20 @@ export default async function LandingPage({
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 p-6">
+      <div className="flex justify-end">
+        <ThemeToggle />
+      </div>
+
       <div className="space-y-3">
-        <span className="inline-flex size-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+        <span className="bg-accent-bg text-accent inline-flex size-10 items-center justify-center rounded-lg">
           <Container aria-hidden className="size-5" />
         </span>
-        <h1 className="text-2xl font-semibold tracking-tight">Container Console</h1>
-        <p className="text-sm text-muted">
-          Spin containers up and down in your own Railway projects. Sign in with
-          Railway and pick which projects this app may touch.
+        <h1 className="font-display text-text text-2xl font-semibold tracking-tight">
+          Container Console
+        </h1>
+        <p className="text-text-muted text-sm">
+          Spin containers up and down in your own Railway projects. Sign in with Railway
+          and pick which projects this app may touch.
         </p>
       </div>
 
@@ -44,11 +52,11 @@ export default async function LandingPage({
       <Card className="space-y-4 p-5">
         <a
           href="/api/auth/login"
-          className="focus-ring flex w-full items-center justify-center rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-accent-contrast transition-opacity hover:opacity-90"
+          className="focus-ring bg-accent text-accent-fg hover:bg-accent-hover flex w-full items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition-colors"
         >
           Sign in with Railway
         </a>
-        <p className="flex items-start gap-2 text-xs text-muted">
+        <p className="text-text-subtle flex items-start gap-2 text-xs">
           <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
             Railway&rsquo;s consent screen lets you choose exactly which projects to

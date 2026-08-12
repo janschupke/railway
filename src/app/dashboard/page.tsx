@@ -1,148 +1,102 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/server";
-import { getProjectContainers, listProjects } from "@/lib/railway/api";
-import { RailwayApiError } from "@/lib/railway/errors";
-import { managedPrefix } from "@/lib/railway/managed";
-import type { Container, RailwayProject } from "@/lib/railway/types";
 import { ContainerRow } from "@/components/container-row";
+import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
 import { SpinUpForm } from "@/components/spin-up-form";
-import { Banner, Button, Card } from "@/components/ui";
+import { Banner } from "@/components/ui/banner";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/misc";
+import { managedPrefix } from "@/lib/railway/managed";
+import { loadDashboard } from "./data";
 
 // The dashboard is a live view of Railway; caching it would show stale containers.
 export const dynamic = "force-dynamic";
-
-function Header({ name, email }: { name?: string; email?: string }) {
-  return (
-    <header className="border-b border-border bg-surface">
-      <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
-        <span className="font-semibold tracking-tight">Container Console</span>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted sm:inline">
-            {name ?? email ?? "Signed in"}
-          </span>
-          <form action="/api/auth/logout" method="post">
-            <Button type="submit" variant="ghost">
-              Sign out
-            </Button>
-          </form>
-        </div>
-      </div>
-    </header>
-  );
-}
 
 export default async function DashboardPage({
   searchParams,
 }: {
   searchParams: Promise<{ project?: string; environment?: string }>;
 }) {
-  const session = await getSession();
-  if (!session) redirect("/");
+  const { project: projectParam, environment: environmentParam } = await searchParams;
 
-  const { project: projectParam, environment: environmentParam } =
-    await searchParams;
+  const data = await loadDashboard({
+    ...(projectParam ? { projectId: projectParam } : {}),
+    ...(environmentParam ? { environmentId: environmentParam } : {}),
+  });
+  if (!data) redirect("/");
 
-  let projects: RailwayProject[] = [];
-  let loadError: string | null = null;
-
-  try {
-    ({ projects } = await listProjects(session.accessToken));
-  } catch (error) {
-    loadError =
-      error instanceof RailwayApiError
-        ? error.userMessage()
-        : "Could not load your Railway projects.";
-  }
-
-  const selectedProject =
-    projects.find((p) => p.id === projectParam) ?? projects[0] ?? null;
-  const selectedEnvironment =
-    selectedProject?.environments.find((e) => e.id === environmentParam) ??
-    selectedProject?.environments[0] ??
-    null;
-
-  let containers: Container[] = [];
-  if (!loadError && selectedProject && selectedEnvironment) {
-    try {
-      ({ containers } = await getProjectContainers(
-        session.accessToken,
-        selectedProject.id,
-        selectedEnvironment.id,
-      ));
-    } catch (error) {
-      loadError =
-        error instanceof RailwayApiError
-          ? error.userMessage()
-          : "Could not load containers for this environment.";
-    }
-  }
-
+  const { projects, project, environment, containers, error } = data;
   const managedCount = containers.filter((c) => c.managed).length;
 
   return (
     <>
-      <Header name={session.user.name} email={session.user.email} />
+      <DashboardHeader {...data.user} />
 
       <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
-        {loadError && <Banner tone="error">{loadError}</Banner>}
+        {error && <Banner tone="error">{error}</Banner>}
 
-        {projects.length === 0 && !loadError ? (
-          <Card className="space-y-2 p-6 text-center">
-            <p className="font-medium">No projects shared with this app</p>
-            <p className="text-sm text-muted">
-              Railway&rsquo;s consent screen controls which projects are visible here.
-              Sign in again and select at least one project.
-            </p>
-            <a
-              href="/api/auth/login"
-              className="focus-ring mt-2 inline-block rounded-md border border-border px-3 py-1.5 text-sm hover:bg-subtle"
-            >
-              Choose projects
-            </a>
+        {projects.length === 0 && !error ? (
+          <Card>
+            <EmptyState
+              title="No projects shared with this app"
+              description="Railway's consent screen controls which projects are visible here. Sign in again and select at least one project."
+              action={
+                <a
+                  href="/api/auth/login"
+                  className="focus-ring border-border hover:bg-subtle inline-block rounded-md border px-3 py-1.5 text-sm"
+                >
+                  Choose projects
+                </a>
+              }
+            />
           </Card>
         ) : (
           <>
             <ProjectPicker
               projects={projects}
-              projectId={selectedProject?.id ?? null}
-              environmentId={selectedEnvironment?.id ?? null}
+              projectId={project?.id ?? null}
+              environmentId={environment?.id ?? null}
             />
 
             <SpinUpForm
-              projectId={selectedProject?.id ?? ""}
-              environmentId={selectedEnvironment?.id ?? ""}
-              disabled={!selectedProject || !selectedEnvironment}
+              projectId={project?.id ?? ""}
+              environmentId={environment?.id ?? ""}
+              disabled={!project || !environment}
             />
 
             <section className="space-y-2">
               <div className="flex items-baseline justify-between">
-                <h2 className="text-sm font-medium">Containers</h2>
-                <p className="text-xs text-muted">
+                <h2 className="font-display text-text text-sm font-medium">
+                  Containers
+                </h2>
+                <p className="text-text-subtle text-xs">
                   {managedCount} of {containers.length} created here
                 </p>
               </div>
 
               <Card>
                 {containers.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted">
-                    Nothing running in this environment yet. Spin one up above.
-                  </p>
+                  <EmptyState
+                    title="Nothing running in this environment"
+                    description="Spin one up above and its build logs will stream here."
+                  />
                 ) : (
-                  <ul>
+                  // Named so the list is distinguishable from other lists on the
+                  // page — the toast viewport is also a list.
+                  <ul aria-label="Containers">
                     {containers.map((container) => (
                       <ContainerRow
                         key={container.serviceId}
                         container={container}
-                        projectId={selectedProject!.id}
-                        environmentId={selectedEnvironment!.id}
+                        projectId={project?.id ?? ""}
+                        environmentId={environment?.id ?? ""}
                       />
                     ))}
                   </ul>
                 )}
               </Card>
 
-              <p className="text-xs text-muted">
+              <p className="text-text-subtle text-xs">
                 Services named <code className="font-mono">{managedPrefix()}…</code>{" "}
                 were created here and can be destroyed here. Everything else is shown
                 for context only.

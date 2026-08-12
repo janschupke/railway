@@ -1,53 +1,129 @@
 @import "tailwindcss";
+@import "./tokens.css";
 
-:root {
-  --canvas: #fbfbfd;
-  --surface: #ffffff;
-  --subtle: #f3f4f6;
-  --border: #e4e4e7;
-  --foreground: #18181b;
-  --muted: #71717a;
-  --accent: #6b46ff;
-  --accent-contrast: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas: #0b0b0f;
-    --surface: #131318;
-    --subtle: #1c1c23;
-    --border: #2a2a33;
-    --foreground: #ededf2;
-    --muted: #8b8b98;
-    --accent: #9a7bff;
-    --accent-contrast: #14141a;
-  }
-}
-
+/*
+ * Semantic tokens become Tailwind utilities. Only the semantic layer is exposed —
+ * `bg-plum-900` deliberately does not exist, so a component cannot reach past the
+ * design system to a raw ramp value.
+ */
 @theme inline {
-  --color-canvas: var(--canvas);
-  --color-surface: var(--surface);
-  --color-subtle: var(--subtle);
-  --color-border: var(--border);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-accent: var(--accent);
-  --color-accent-contrast: var(--accent-contrast);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas: var(--rc-canvas);
+  --color-surface: var(--rc-surface);
+  --color-raised: var(--rc-raised);
+  --color-subtle: var(--rc-subtle);
+  --color-border: var(--rc-border);
+  --color-border-strong: var(--rc-border-strong);
+
+  --color-text: var(--rc-text);
+  --color-text-muted: var(--rc-text-muted);
+  --color-text-subtle: var(--rc-text-subtle);
+
+  --color-accent: var(--rc-accent);
+  --color-accent-hover: var(--rc-accent-hover);
+  --color-accent-fg: var(--rc-accent-fg);
+  --color-accent-bg: var(--rc-accent-bg);
+
+  --color-danger: var(--rc-danger);
+  --color-danger-bg: var(--rc-danger-bg);
+  --color-danger-border: var(--rc-danger-border);
+  --color-success: var(--rc-success);
+  --color-success-bg: var(--rc-success-bg);
+  --color-warning: var(--rc-warning);
+  --color-warning-bg: var(--rc-warning-bg);
+  --color-info: var(--rc-info);
+  --color-info-bg: var(--rc-info-bg);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"],
+html:has(:root[data-theme="light"]) {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
 }
 
 body {
-  background: var(--canvas);
-  color: var(--foreground);
+  background: var(--rc-canvas);
+  color: var(--rc-text);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
-/* Flush focus ring — visible on both themes, no offset gap. */
 @layer utilities {
+  /* Flush focus ring — visible on both themes, no offset gap. */
   .focus-ring {
-    @apply outline-none focus-visible:ring-2 focus-visible:ring-accent;
+    @apply focus-visible:ring-accent outline-none focus-visible:ring-2;
   }
+}
+
+/*
+ * Container-state colours are driven by a `data-state` attribute rather than a lookup
+ * table of Tailwind class strings in the component. Adding a state means adding a token
+ * and a line here — not editing two maps inside a badge.
+ */
+[data-state-color] {
+  color: var(--state-fg);
+  background-color: var(--state-bg);
+}
+[data-state-color="pending"] {
+  --state-fg: var(--rc-state-pending);
+  --state-bg: var(--rc-state-pending-bg);
+}
+[data-state-color="building"] {
+  --state-fg: var(--rc-state-building);
+  --state-bg: var(--rc-state-building-bg);
+}
+[data-state-color="deploying"] {
+  --state-fg: var(--rc-state-deploying);
+  --state-bg: var(--rc-state-deploying-bg);
+}
+[data-state-color="running"] {
+  --state-fg: var(--rc-state-running);
+  --state-bg: var(--rc-state-running-bg);
+}
+[data-state-color="failed"] {
+  --state-fg: var(--rc-state-failed);
+  --state-bg: var(--rc-state-failed-bg);
+}
+[data-state-color="sleeping"] {
+  --state-fg: var(--rc-state-sleeping);
+  --state-bg: var(--rc-state-sleeping-bg);
+}
+[data-state-color="removing"] {
+  --state-fg: var(--rc-state-removing);
+  --state-bg: var(--rc-state-removing-bg);
+}
+[data-state-color="removed"] {
+  --state-fg: var(--rc-state-removed);
+  --state-bg: var(--rc-state-removed-bg);
+}
+[data-state-color="unknown"] {
+  --state-fg: var(--rc-state-unknown);
+  --state-bg: var(--rc-state-unknown-bg);
+}
+
+/* The dot inherits the state foreground rather than repeating the mapping. */
+[data-state-dot] {
+  background-color: var(--state-fg, var(--rc-text-muted));
 }
 
 @keyframes pulse-dot {
@@ -64,8 +140,40 @@ body {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
+/* Radix content animations, tokenised so reduced-motion has one switch. */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+[data-radix-popper-content-wrapper],
+[data-state="open"].animate-content {
+  animation: content-in var(--duration-fast) ease-out;
+}
+[data-state="open"].animate-overlay {
+  animation: overlay-in var(--duration-fast) ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-pulse-dot {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

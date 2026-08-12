@@ -2,9 +2,9 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { env } from "@/env";
+import { SESSION } from "@/lib/constants";
 import {
   SESSION_COOKIE,
-  SESSION_MAX_AGE_SECONDS,
   cookieOptions,
   isExpiring,
   openSession,
@@ -31,7 +31,7 @@ export async function persistSession(session: RailwaySession): Promise<void> {
   const { APP_URL, SESSION_SECRET } = env();
   jar.set(SESSION_COOKIE, await sealSession(session, SESSION_SECRET), {
     ...cookieOptions(APP_URL),
-    maxAge: SESSION_MAX_AGE_SECONDS,
+    maxAge: SESSION.MAX_AGE_SECONDS,
   });
 }
 

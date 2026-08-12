@@ -1,4 +1,7 @@
+# esbuild powers tsx, which runs the E2E fixture server; msw builds its
+# service-worker asset. The rest stay off.
 allowBuilds:
-  msw: set this to true or false
+  esbuild: true
+  msw: true
   sharp: false
   unrs-resolver: false

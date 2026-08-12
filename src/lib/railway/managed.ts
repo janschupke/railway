@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { LIMITS } from "@/lib/constants";
 
 /**
  * Ownership marker.
@@ -26,7 +27,7 @@ export function toManagedName(input: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
+    .slice(0, LIMITS.SERVICE_SLUG_MAX);
   return `${managedPrefix()}${slug || "container"}`;
 }
 

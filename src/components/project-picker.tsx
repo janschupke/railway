@@ -3,10 +3,10 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import type { RailwayProject } from "@/lib/railway/types";
-import { cn } from "@/lib/utils";
+import { Select } from "./ui/select";
 
 /**
- * Selection lives in the URL rather than component state so the dashboard is
+ * Selection lives in the URL rather than component state, so the dashboard is
  * linkable, survives a refresh, and lets the server do the fetching.
  */
 export function ProjectPicker({
@@ -28,58 +28,35 @@ export function ProjectPicker({
     startTransition(() => router.push(`/dashboard?${next.toString()}`));
   };
 
-  const onProjectChange = (id: string) => {
-    const next = new URLSearchParams(params);
-    next.set("project", id);
-    // The old environment belongs to the old project; let the server pick the default.
-    next.delete("environment");
-    navigate(next);
-  };
-
-  const onEnvironmentChange = (id: string) => {
-    const next = new URLSearchParams(params);
-    next.set("environment", id);
-    navigate(next);
-  };
-
-  const selectClass = cn(
-    "focus-ring rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm",
-    pending && "opacity-60",
-  );
-
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <label className="flex items-center gap-2 text-sm">
-        <span className="text-muted">Project</span>
-        <select
-          className={selectClass}
-          value={projectId ?? ""}
-          disabled={pending}
-          onChange={(e) => onProjectChange(e.target.value)}
-        >
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Select
+        label="Project"
+        value={projectId ?? undefined}
+        disabled={pending}
+        options={projects.map((p) => ({ value: p.id, label: p.name }))}
+        onValueChange={(id) => {
+          const next = new URLSearchParams(params);
+          next.set("project", id);
+          // The old environment belongs to the old project; let the server default it.
+          next.delete("environment");
+          navigate(next);
+        }}
+      />
 
-      <label className="flex items-center gap-2 text-sm">
-        <span className="text-muted">Environment</span>
-        <select
-          className={selectClass}
-          value={environmentId ?? ""}
-          disabled={pending || !selected}
-          onChange={(e) => onEnvironmentChange(e.target.value)}
-        >
-          {selected?.environments.map((environment) => (
-            <option key={environment.id} value={environment.id}>
-              {environment.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Select
+        label="Environment"
+        value={environmentId ?? undefined}
+        disabled={pending || !selected}
+        options={
+          selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
+        }
+        onValueChange={(id) => {
+          const next = new URLSearchParams(params);
+          next.set("environment", id);
+          navigate(next);
+        }}
+      />
     </div>
   );
 }

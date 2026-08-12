@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  isExpiring,
-  openSession,
-  sealSession,
-  REFRESH_SKEW_SECONDS,
-  type RailwaySession,
-} from "./session";
+import { SESSION } from "@/lib/constants";
+import { isExpiring, openSession, sealSession, type RailwaySession } from "./session";
 
 const SECRET = "a-secret-that-is-at-least-32-characters";
 
@@ -35,13 +30,15 @@ describe("session sealing", () => {
   it("rejects tampered ciphertext", async () => {
     const sealed = await sealSession(session, SECRET);
     const parts = sealed.split(".");
+    const ciphertext = parts[3];
+    // dir + A256GCM always produces header.key.iv.ciphertext.tag, so this is present.
+    if (!ciphertext) throw new Error("expected a compact JWE with 5 segments");
     /*
      * Flip a character at the START of the ciphertext. The final base64url character
      * carries only the leftover bits, so changing it can decode to identical bytes and
      * slip past the GCM tag.
      */
-    const first = parts[3][0];
-    parts[3] = (first === "A" ? "B" : "A") + parts[3].slice(1);
+    parts[3] = (ciphertext[0] === "A" ? "B" : "A") + ciphertext.slice(1);
     expect(await openSession(parts.join("."), SECRET)).toBeNull();
   });
 
@@ -58,7 +55,9 @@ describe("isExpiring", () => {
   });
 
   it("is true inside the refresh skew", () => {
-    expect(isExpiring({ expiresAt: now + REFRESH_SKEW_SECONDS - 1 }, now)).toBe(true);
+    expect(isExpiring({ expiresAt: now + SESSION.REFRESH_SKEW_SECONDS - 1 }, now)).toBe(
+      true,
+    );
   });
 
   it("is true once already expired", () => {

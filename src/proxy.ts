@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/env";
+import { SESSION } from "@/lib/constants";
 import {
   SESSION_COOKIE,
-  SESSION_MAX_AGE_SECONDS,
   cookieOptions,
   isExpiring,
   openSession,
@@ -49,7 +49,7 @@ export async function proxy(request: NextRequest) {
     // ...and on the response so the browser keeps it.
     response.cookies.set(SESSION_COOKIE, sealed, {
       ...cookieOptions(APP_URL),
-      maxAge: SESSION_MAX_AGE_SECONDS,
+      maxAge: SESSION.MAX_AGE_SECONDS,
     });
     return response;
   } catch {
@@ -57,9 +57,7 @@ export async function proxy(request: NextRequest) {
     const target = isProtected
       ? new URL("/?error=session_expired", request.url)
       : request.url;
-    const response = isProtected
-      ? NextResponse.redirect(target)
-      : NextResponse.next();
+    const response = isProtected ? NextResponse.redirect(target) : NextResponse.next();
     response.cookies.delete(SESSION_COOKIE);
     return response;
   }

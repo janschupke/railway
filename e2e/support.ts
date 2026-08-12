@@ -1,0 +1,163 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test as base, type Locator, type Page } from "@playwright/test";
+
+export const FIXTURE_URL = `http://localhost:${process.env.FAKE_RAILWAY_PORT ?? 4010}`;
+
+/** Every spec starts from a known fixture state; workers:1 makes this safe. */
+export const test = base.extend<{ page: Page }>({
+  page: async ({ page }, use) => {
+    await page.request.post(`${FIXTURE_URL}/__test/reset`);
+    await use(page);
+  },
+});
+
+export { expect };
+
+export async function injectFaults(
+  page: Page,
+  faults: Partial<{
+    rateLimit: number;
+    unauthorized: number;
+    refreshFails: boolean;
+    accessTokenTtl: number;
+    deploymentsFail: boolean;
+  }>,
+) {
+  await page.request.post(`${FIXTURE_URL}/__test/faults`, { data: faults });
+}
+
+export type FixtureStats = {
+  authorizationCode: number;
+  refreshToken: number;
+  refreshRejected: number;
+};
+
+/**
+ * Grant counters from the fixture.
+ *
+ * Token refresh happens server-side, between Next and the fixture, so the browser
+ * never issues that request and Playwright cannot observe it with waitForRequest.
+ */
+export async function fixtureStats(page: Page): Promise<FixtureStats> {
+  const response = await page.request.get(`${FIXTURE_URL}/__test/stats`);
+  return response.json() as Promise<FixtureStats>;
+}
+
+/** The app's own alert regions, excluding Next's always-present empty route announcer. */
+export function alerts(page: Page) {
+  return page.getByRole("alert").filter({ hasNotText: /^$/, visible: true });
+}
+
+/**
+ * Toast notifications. Radix Toast roots carry role="status", not role="alert", so
+ * `alerts()` does not see them — the two are genuinely different regions.
+ */
+export function toasts(page: Page) {
+  return onlyVisible(page.getByRole("status"));
+}
+
+/**
+ * One toast, by its text. Several can be on screen at once — spinning a container up
+ * and destroying it within the toast lifetime leaves both visible — so an assertion
+ * has to name the one it means.
+ */
+export function toast(page: Page, text: string | RegExp) {
+  return toasts(page).filter({ hasText: text });
+}
+
+/**
+ * Restricts a locator to elements the user can actually see.
+ *
+ * While React streams, finished content is parked in a hidden container before being
+ * relocated into place, so for roughly 100ms the document holds two copies of the page
+ * and every unqualified locator is ambiguous. Filtering on visibility is both the fix
+ * and the more honest assertion — a spec should only ever act on what a user could.
+ */
+export const onlyVisible = (locator: Locator) => locator.filter({ visible: true });
+
+export const field = (page: Page, label: string) => onlyVisible(page.getByLabel(label));
+
+export const button = (page: Page, name: RegExp | string) =>
+  onlyVisible(page.getByRole("button", { name }));
+
+/** The container list, named so it cannot be confused with the toast viewport. */
+export const containerList = (page: Page) =>
+  onlyVisible(page.getByRole("list", { name: "Containers" }));
+
+export function row(page: Page, name: string) {
+  return onlyVisible(
+    containerList(page).getByRole("listitem").filter({ hasText: name }),
+  );
+}
+
+/**
+ * Waits for a re-render to finish.
+ *
+ * A Server Action followed by router.refresh() streams a fresh tree the same way the
+ * initial load does, so the container list momentarily exists twice. Asserting on the
+ * count retries until exactly one remains — no fixed sleep, and it fails loudly if the
+ * page genuinely renders two lists.
+ */
+export async function settled(page: Page) {
+  await expect(containerList(page)).toHaveCount(1);
+}
+
+/** Completes the real OAuth round trip and lands on the dashboard. */
+export async function signIn(page: Page) {
+  await page.goto("/");
+  await page.getByRole("link", { name: /sign in with railway/i }).click();
+  await page.waitForURL("**/dashboard**");
+  await expect(
+    onlyVisible(page.getByRole("heading", { name: "Containers" })),
+  ).toBeVisible();
+  await settled(page);
+}
+
+export async function spinUp(page: Page, name: string, preset = "Redis") {
+  await onlyVisible(page.getByRole("radio", { name: preset })).click();
+  await field(page, "Name").fill(name);
+  await button(page, /spin up container/i).click();
+}
+
+/**
+ * WCAG 2.1 AA, scoped to the tags a reviewer would actually hold this to.
+ *
+ * Axe cannot see focus traps, tab order, or whether a live region is announced at a
+ * sensible politeness — e2e/keyboard.spec.ts covers those separately.
+ */
+export async function expectNoA11yViolations(page: Page, context?: string) {
+  /*
+   * Axe reads computed colours, so a scan taken mid-transition measures a blend of the
+   * old and new values and reports contrast failures that never appear on screen.
+   * Reduced motion collapses the app's transitions (see globals.css), and waiting on
+   * getAnimations() covers anything still in flight — deterministically, without a sleep.
+   */
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.waitForFunction(() =>
+    document.getAnimations().every((animation) => animation.playState !== "running"),
+  );
+
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+
+  const summary = results.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    nodes: v.nodes.map((n) => ({
+      target: n.target.join(" "),
+      // The measured values, so a contrast failure names the two colours rather
+      // than leaving you to guess which token is at fault.
+      why: (n.failureSummary ?? "").replace(/\s+/g, " ").slice(0, 240),
+    })),
+  }));
+
+  expect(summary, `axe violations${context ? ` (${context})` : ""}`).toEqual([]);
+}
+
+export async function setTheme(page: Page, theme: "light" | "dark") {
+  await page.evaluate((value) => {
+    document.documentElement.dataset.theme = value;
+    window.localStorage.setItem("theme", value);
+  }, theme);
+}

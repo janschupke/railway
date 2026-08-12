@@ -1,12 +1,12 @@
 import "server-only";
 
+import { env } from "@/env";
+import { NETWORK } from "@/lib/constants";
 import { RailwayApiError } from "./errors";
 
-export const RAILWAY_GRAPHQL_HTTP = "https://backboard.railway.com/graphql/v2";
-export const RAILWAY_GRAPHQL_WS = "wss://backboard.railway.com/graphql/v2";
-
-const DEFAULT_TIMEOUT_MS = 20_000;
-const MAX_ATTEMPTS = 3;
+/** Configurable so the E2E fixture can stand in for Railway. Defaults to production. */
+export const railwayApiUrl = () => env().RAILWAY_API_URL;
+export const railwayWsUrl = () => env().RAILWAY_WS_URL;
 
 type GraphQLResponse<T> = {
   data?: T;
@@ -26,8 +26,7 @@ export type GqlOptions = {
 
 function backoffMs(attempt: number, retryAfterSeconds?: number): number {
   if (retryAfterSeconds) return retryAfterSeconds * 1000;
-  // 400ms, 1200ms — deliberately short; a human is watching a button spinner.
-  return 400 * 3 ** (attempt - 1);
+  return NETWORK.RETRY_BASE_MS * NETWORK.RETRY_FACTOR ** (attempt - 1);
 }
 
 function parseRetryAfter(headers: Headers): number | undefined {
@@ -55,18 +54,20 @@ export async function gql<T>(
   variables: Record<string, unknown>,
   options: GqlOptions,
 ): Promise<T> {
-  const { accessToken, operationName, signal, timeoutMs = DEFAULT_TIMEOUT_MS } =
-    options;
+  const {
+    accessToken,
+    operationName,
+    signal,
+    timeoutMs = NETWORK.REQUEST_TIMEOUT_MS,
+  } = options;
 
-  let lastRateLimitRetryAfter: number | undefined;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= NETWORK.MAX_ATTEMPTS; attempt++) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const composed = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
     let response: Response;
     try {
-      response = await fetch(RAILWAY_GRAPHQL_HTTP, {
+      response = await fetch(railwayApiUrl(), {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -79,7 +80,7 @@ export async function gql<T>(
     } catch (cause) {
       // Caller-initiated abort is not a failure worth retrying.
       if (signal?.aborted) throw cause;
-      if (attempt === MAX_ATTEMPTS) {
+      if (attempt === NETWORK.MAX_ATTEMPTS) {
         throw new RailwayApiError("Request to Railway failed", {
           kind: "network",
           operation: operationName,
@@ -99,21 +100,21 @@ export async function gql<T>(
     }
 
     if (response.status === 429) {
-      lastRateLimitRetryAfter = parseRetryAfter(response.headers);
-      if (attempt === MAX_ATTEMPTS) {
+      const retryAfterSeconds = parseRetryAfter(response.headers);
+      if (attempt === NETWORK.MAX_ATTEMPTS) {
         throw new RailwayApiError("Rate limited by Railway", {
           kind: "rate_limit",
           status: 429,
           operation: operationName,
-          retryAfterSeconds: lastRateLimitRetryAfter,
+          retryAfterSeconds,
         });
       }
-      await sleep(backoffMs(attempt, lastRateLimitRetryAfter));
+      await sleep(backoffMs(attempt, retryAfterSeconds));
       continue;
     }
 
     if (response.status >= 500) {
-      if (attempt === MAX_ATTEMPTS) {
+      if (attempt === NETWORK.MAX_ATTEMPTS) {
         throw new RailwayApiError(`Railway returned ${response.status}`, {
           kind: "server",
           status: response.status,
@@ -136,17 +137,16 @@ export async function gql<T>(
       });
     }
 
-    if (body.errors?.length) {
-      const first = body.errors[0];
-      const code = first.extensions?.code;
+    const [firstError] = body.errors ?? [];
+    if (firstError) {
+      const code = firstError.extensions?.code;
       // GraphQL-layer auth failures also surface as 200 + errors[].
       const kind =
         code === "UNAUTHENTICATED" || code === "FORBIDDEN" ? "auth" : "graphql";
-      throw new RailwayApiError(first.message || "Railway rejected the operation", {
-        kind,
-        status: response.status,
-        operation: operationName,
-      });
+      throw new RailwayApiError(
+        firstError.message || "Railway rejected the operation",
+        { kind, status: response.status, operation: operationName },
+      );
     }
 
     if (!body.data) {

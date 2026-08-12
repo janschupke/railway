@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { STREAM } from "@/lib/constants";
 import type { ContainerState, LogLine } from "@/lib/railway/types";
-
-/** Bound the buffer so a chatty container cannot grow the tab's memory without limit. */
-const MAX_LINES = 1000;
 
 export type StreamState = {
   state: ContainerState | null;
@@ -64,7 +62,7 @@ export function useDeploymentStream(
         state: fn(prev.key === key ? prev.state : INITIAL),
       }));
 
-    const parse = <T,>(event: Event): T | null => {
+    const parse = <T>(event: Event): T | null => {
       try {
         return JSON.parse((event as MessageEvent).data) as T;
       } catch {
@@ -77,9 +75,14 @@ export function useDeploymentStream(
     });
 
     source.addEventListener("log", (event) => {
-      const line = parse<LogLine>(event);
+      // The event name carries the type; the payload is the rest of the monitor
+      // event, so a log line arrives wrapped as { line }.
+      const line = parse<{ line: LogLine }>(event)?.line;
       if (!line) return;
-      update((s) => ({ ...s, logs: [...s.logs, line].slice(-MAX_LINES) }));
+      update((s) => ({
+        ...s,
+        logs: [...s.logs, line].slice(-STREAM.MAX_BUFFERED_LINES),
+      }));
     });
 
     source.addEventListener("status", (event) => {

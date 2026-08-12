@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { Button, Card } from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export default function DashboardError({
   error,
@@ -18,8 +19,10 @@ export default function DashboardError({
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 items-center p-6">
       <Card className="w-full space-y-3 p-6">
-        <h1 className="font-medium">The dashboard could not load</h1>
-        <p className="text-sm text-muted">
+        <h1 className="font-display text-text font-medium">
+          The dashboard could not load
+        </h1>
+        <p className="text-text-muted text-sm">
           This is usually a Railway API hiccup or an expired authorization. Retrying is
           safe — nothing was created or destroyed.
         </p>
@@ -27,15 +30,12 @@ export default function DashboardError({
           <Button variant="primary" onClick={reset}>
             Retry
           </Button>
-          <a
-            href="/api/auth/login"
-            className="focus-ring inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm hover:bg-subtle"
-          >
-            Re-authorize
-          </a>
+          <Button asChild variant="secondary">
+            <a href="/api/auth/login">Re-authorize</a>
+          </Button>
         </div>
         {error.digest && (
-          <p className="font-mono text-xs text-muted">ref: {error.digest}</p>
+          <p className="text-text-subtle font-mono text-xs">ref: {error.digest}</p>
         )}
       </Card>
     </main>

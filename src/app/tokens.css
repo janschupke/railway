@@ -1,0 +1,289 @@
+/*
+ * Design tokens, in two layers.
+ *
+ *  1. PRIMITIVES — raw ramps. Never referenced outside this file.
+ *  2. SEMANTIC   — what the UI is allowed to use. Every component styles itself
+ *                  exclusively from these, which is what makes retheming a one-file
+ *                  change and makes the contrast test in contrast.test.ts meaningful.
+ *
+ * Dark is the default, matching Railway's own product. Light is served to anyone whose
+ * OS asks for it, and an explicit [data-theme] on <html> overrides both directions.
+ *
+ * Semantic tokens are named --rc-*, not --color-*. Tailwind's @theme maps them onto
+ * its own --color-* variables; using the same names on both sides makes the mapping
+ * self-referential, and the theme overrides silently stop applying.
+ *
+ * Every text-on-background pair below is asserted at WCAG AA by
+ * src/app/contrast.test.ts — change a value there and the test tells you.
+ */
+
+:root {
+  /* ---- Primitives: plum (Railway's canvas family, #13111C) ---- */
+  --plum-950: #0a0910;
+  --plum-900: #13111c;
+  --plum-850: #191725;
+  --plum-800: #1f1d2e;
+  --plum-700: #2a2740;
+  --plum-600: #383455;
+
+  /* ---- Primitives: violet (Railway's accent, #6C3FE7) ---- */
+  --violet-700: #4a25b0;
+  --violet-600: #5b30cc;
+  --violet-500: #6c3fe7;
+  --violet-400: #8b63ef;
+  --violet-300: #a98cf4;
+  --violet-200: #c7b3f8;
+
+  /* ---- Primitives: neutrals ---- */
+  --gray-50: #fafafa;
+  --gray-100: #f4f4f5;
+  --gray-200: #e4e4e7;
+  --gray-300: #d4d4d8;
+  --gray-400: #a1a1aa;
+  --gray-500: #8b8b98;
+  --gray-600: #5c5c6b;
+  --gray-700: #3f3f46;
+  --gray-900: #18181b;
+
+  /* ---- Primitives: signal ramps ---- */
+  --red-600: #dc2626;
+  --red-400: #f87171;
+  --red-300: #fca5a5;
+  --amber-600: #d97706;
+  --amber-400: #fbbf24;
+  --amber-300: #fcd34d;
+  --emerald-600: #059669;
+  --emerald-400: #34d399;
+  --emerald-300: #6ee7b7;
+  --sky-600: #0284c7;
+  --sky-400: #38bdf8;
+  --sky-300: #7dd3fc;
+  --orange-600: #ea580c;
+  --orange-300: #fdba74;
+
+  /* ---- Shape, depth, motion ---- */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+/* ---------- SEMANTIC: dark (default) ---------- */
+:root {
+  --rc-canvas: var(--plum-900);
+  --rc-surface: var(--plum-850);
+  --rc-raised: var(--plum-800);
+  --rc-subtle: var(--plum-800);
+  --rc-border: var(--plum-700);
+  --rc-border-strong: var(--plum-600);
+
+  --rc-text: #ededf2;
+  --rc-text-muted: #a5a5b5;
+  --rc-text-subtle: #8d8da0;
+
+  --rc-accent: var(--violet-300);
+  --rc-accent-hover: var(--violet-200);
+  --rc-accent-fg: var(--plum-950);
+  --rc-accent-bg: rgb(108 63 231 / 0.18);
+
+  --rc-danger: var(--red-300);
+  --rc-danger-bg: rgb(220 38 38 / 0.16);
+  --rc-danger-border: rgb(248 113 113 / 0.4);
+  --rc-success: var(--emerald-300);
+  --rc-success-bg: rgb(5 150 105 / 0.16);
+  --rc-warning: var(--amber-300);
+  --rc-warning-bg: rgb(217 119 6 / 0.16);
+  --rc-info: var(--sky-300);
+  --rc-info-bg: rgb(2 132 199 / 0.16);
+
+  /* Container lifecycle. Paired -bg values are always the badge fill. */
+  --rc-state-pending: var(--amber-300);
+  --rc-state-pending-bg: rgb(217 119 6 / 0.16);
+  --rc-state-building: var(--sky-300);
+  --rc-state-building-bg: rgb(2 132 199 / 0.16);
+  --rc-state-deploying: var(--sky-300);
+  --rc-state-deploying-bg: rgb(2 132 199 / 0.16);
+  --rc-state-running: var(--emerald-300);
+  --rc-state-running-bg: rgb(5 150 105 / 0.16);
+  --rc-state-failed: var(--red-300);
+  --rc-state-failed-bg: rgb(220 38 38 / 0.16);
+  --rc-state-sleeping: var(--violet-200);
+  --rc-state-sleeping-bg: rgb(108 63 231 / 0.16);
+  --rc-state-removing: var(--orange-300);
+  --rc-state-removing-bg: rgb(234 88 12 / 0.16);
+  --rc-state-removed: var(--gray-400);
+  --rc-state-removed-bg: rgb(139 139 152 / 0.16);
+  --rc-state-unknown: var(--gray-400);
+  --rc-state-unknown-bg: rgb(139 139 152 / 0.16);
+}
+
+/* ---------- SEMANTIC: light ---------- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --rc-canvas: #fbfbfd;
+    --rc-surface: #ffffff;
+    --rc-raised: #ffffff;
+    --rc-subtle: var(--gray-100);
+    --rc-border: var(--gray-200);
+    --rc-border-strong: var(--gray-300);
+
+    --rc-text: var(--gray-900);
+    --rc-text-muted: #55555f;
+    --rc-text-subtle: var(--gray-600);
+
+    --rc-accent: var(--violet-600);
+    --rc-accent-hover: var(--violet-700);
+    --rc-accent-fg: #ffffff;
+    --rc-accent-bg: rgb(108 63 231 / 0.1);
+
+    --rc-danger: #b91c1c;
+    --rc-danger-bg: rgb(220 38 38 / 0.09);
+    --rc-danger-border: rgb(220 38 38 / 0.35);
+    --rc-success: #047857;
+    --rc-success-bg: rgb(5 150 105 / 0.1);
+    --rc-warning: #7a4a06;
+    --rc-warning-bg: rgb(217 119 6 / 0.12);
+    --rc-info: #0369a1;
+    --rc-info-bg: rgb(2 132 199 / 0.1);
+
+    --rc-state-pending: #7a4a06;
+    --rc-state-pending-bg: rgb(217 119 6 / 0.12);
+    --rc-state-building: #0369a1;
+    --rc-state-building-bg: rgb(2 132 199 / 0.1);
+    --rc-state-deploying: #0369a1;
+    --rc-state-deploying-bg: rgb(2 132 199 / 0.1);
+    --rc-state-running: #047857;
+    --rc-state-running-bg: rgb(5 150 105 / 0.1);
+    --rc-state-failed: #b91c1c;
+    --rc-state-failed-bg: rgb(220 38 38 / 0.09);
+    --rc-state-sleeping: var(--violet-700);
+    --rc-state-sleeping-bg: rgb(108 63 231 / 0.1);
+    --rc-state-removing: #c2410c;
+    --rc-state-removing-bg: rgb(234 88 12 / 0.1);
+    --rc-state-removed: var(--gray-600);
+    --rc-state-removed-bg: rgb(92 92 107 / 0.1);
+    --rc-state-unknown: var(--gray-600);
+    --rc-state-unknown-bg: rgb(92 92 107 / 0.1);
+
+    --shadow-sm: 0 1px 2px 0 rgb(24 24 27 / 0.06);
+    --shadow-md: 0 4px 12px -2px rgb(24 24 27 / 0.1);
+    --shadow-lg: 0 16px 48px -12px rgb(24 24 27 / 0.18);
+  }
+}
+
+/*
+ * Explicit choice beats the OS preference, in both directions. These duplicate the
+ * blocks above rather than sharing them because CSS custom properties do not compose
+ * across a media query boundary — a `[data-theme="dark"]` rule must restate the dark
+ * values to win inside `prefers-color-scheme: light`.
+ */
+:root[data-theme="light"] {
+  --rc-canvas: #fbfbfd;
+  --rc-surface: #ffffff;
+  --rc-raised: #ffffff;
+  --rc-subtle: var(--gray-100);
+  --rc-border: var(--gray-200);
+  --rc-border-strong: var(--gray-300);
+
+  --rc-text: var(--gray-900);
+  --rc-text-muted: #55555f;
+  --rc-text-subtle: var(--gray-600);
+
+  --rc-accent: var(--violet-600);
+  --rc-accent-hover: var(--violet-700);
+  --rc-accent-fg: #ffffff;
+  --rc-accent-bg: rgb(108 63 231 / 0.1);
+
+  --rc-danger: #b91c1c;
+  --rc-danger-bg: rgb(220 38 38 / 0.09);
+  --rc-danger-border: rgb(220 38 38 / 0.35);
+  --rc-success: #047857;
+  --rc-success-bg: rgb(5 150 105 / 0.1);
+  --rc-warning: #7a4a06;
+  --rc-warning-bg: rgb(217 119 6 / 0.12);
+  --rc-info: #0369a1;
+  --rc-info-bg: rgb(2 132 199 / 0.1);
+
+  --rc-state-pending: #7a4a06;
+  --rc-state-pending-bg: rgb(217 119 6 / 0.12);
+  --rc-state-building: #0369a1;
+  --rc-state-building-bg: rgb(2 132 199 / 0.1);
+  --rc-state-deploying: #0369a1;
+  --rc-state-deploying-bg: rgb(2 132 199 / 0.1);
+  --rc-state-running: #047857;
+  --rc-state-running-bg: rgb(5 150 105 / 0.1);
+  --rc-state-failed: #b91c1c;
+  --rc-state-failed-bg: rgb(220 38 38 / 0.09);
+  --rc-state-sleeping: var(--violet-700);
+  --rc-state-sleeping-bg: rgb(108 63 231 / 0.1);
+  --rc-state-removing: #c2410c;
+  --rc-state-removing-bg: rgb(234 88 12 / 0.1);
+  --rc-state-removed: var(--gray-600);
+  --rc-state-removed-bg: rgb(92 92 107 / 0.1);
+  --rc-state-unknown: var(--gray-600);
+  --rc-state-unknown-bg: rgb(92 92 107 / 0.1);
+
+  --shadow-sm: 0 1px 2px 0 rgb(24 24 27 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(24 24 27 / 0.1);
+  --shadow-lg: 0 16px 48px -12px rgb(24 24 27 / 0.18);
+}
+
+:root[data-theme="dark"] {
+  --rc-canvas: var(--plum-900);
+  --rc-surface: var(--plum-850);
+  --rc-raised: var(--plum-800);
+  --rc-subtle: var(--plum-800);
+  --rc-border: var(--plum-700);
+  --rc-border-strong: var(--plum-600);
+
+  --rc-text: #ededf2;
+  --rc-text-muted: #a5a5b5;
+  --rc-text-subtle: #8d8da0;
+
+  --rc-accent: var(--violet-300);
+  --rc-accent-hover: var(--violet-200);
+  --rc-accent-fg: var(--plum-950);
+  --rc-accent-bg: rgb(108 63 231 / 0.18);
+
+  --rc-danger: var(--red-300);
+  --rc-danger-bg: rgb(220 38 38 / 0.16);
+  --rc-danger-border: rgb(248 113 113 / 0.4);
+  --rc-success: var(--emerald-300);
+  --rc-success-bg: rgb(5 150 105 / 0.16);
+  --rc-warning: var(--amber-300);
+  --rc-warning-bg: rgb(217 119 6 / 0.16);
+  --rc-info: var(--sky-300);
+  --rc-info-bg: rgb(2 132 199 / 0.16);
+
+  --rc-state-pending: var(--amber-300);
+  --rc-state-pending-bg: rgb(217 119 6 / 0.16);
+  --rc-state-building: var(--sky-300);
+  --rc-state-building-bg: rgb(2 132 199 / 0.16);
+  --rc-state-deploying: var(--sky-300);
+  --rc-state-deploying-bg: rgb(2 132 199 / 0.16);
+  --rc-state-running: var(--emerald-300);
+  --rc-state-running-bg: rgb(5 150 105 / 0.16);
+  --rc-state-failed: var(--red-300);
+  --rc-state-failed-bg: rgb(220 38 38 / 0.16);
+  --rc-state-sleeping: var(--violet-200);
+  --rc-state-sleeping-bg: rgb(108 63 231 / 0.16);
+  --rc-state-removing: var(--orange-300);
+  --rc-state-removing-bg: rgb(234 88 12 / 0.16);
+  --rc-state-removed: var(--gray-400);
+  --rc-state-removed-bg: rgb(139 139 152 / 0.16);
+  --rc-state-unknown: var(--gray-400);
+  --rc-state-unknown-bg: rgb(139 139 152 / 0.16);
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
+}

@@ -40,8 +40,7 @@ export async function refreshSession(
     user: session.user,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? session.refreshToken,
-    expiresAt:
-      Math.floor(now() / 1000) + (tokens.expires_in ?? 3600),
+    expiresAt: Math.floor(now() / 1000) + (tokens.expires_in ?? 3600),
     scope: tokens.scope ?? session.scope,
   };
 }
