@@ -127,6 +127,82 @@ describe("spinUp", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("sets a database's credentials from the image, not from the request", async () => {
+    /*
+     * The security property behind the shared preset catalog: variables are derived
+     * server-side from the submitted *image string*. The browser never sends a preset id
+     * and never sends variables, so there is no request shape in which a caller can
+     * inject arbitrary environment into a service — the whole surface is the image
+     * reference, which IMAGE_PATTERN already bounds.
+     */
+    const upserted: Array<Record<string, unknown>> = [];
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_db", name: "spun-cache" } },
+        }),
+      ),
+      api.mutation("VariableCollectionUpsert", ({ variables }) => {
+        upserted.push(variables);
+        return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_db" } }),
+      ),
+    );
+
+    // A tag the catalog does not list: postgres is postgres, and it still needs this.
+    const result = await spinUp(null, spinUpForm({ image: "postgres:17" }));
+
+    expect(result).toMatchObject({ ok: true });
+    const sent = (upserted[0]?.input as { variables: Record<string, string> })
+      .variables;
+    expect(Object.keys(sent)).toEqual(["POSTGRES_PASSWORD"]);
+    expect(sent.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(32);
+  });
+
+  it("sends no variables for an image that boots bare", async () => {
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
+      ),
+      api.mutation("VariableCollectionUpsert", () => {
+        throw new Error("no variables should be sent for a bare image");
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "d" } }),
+      ),
+    );
+
+    await expect(
+      spinUp(null, spinUpForm({ image: "ghcr.io/owner/app:1.0.0" })),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("says a service was created when only its environment failed", async () => {
+    // Reporting a bare failure would leave the user hunting for something they were
+    // never told had been created.
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
+      ),
+      api.mutation("VariableCollectionUpsert", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        throw new Error("must not deploy an unconfigured service");
+      }),
+    );
+
+    const result = await spinUp(null, spinUpForm({ image: "postgres:16-alpine" }));
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.ok ? "" : result.error).toMatch(/Created cache/);
+  });
+
   it("refuses a duplicate name without calling Railway", async () => {
     let createCalls = 0;
     server.use(

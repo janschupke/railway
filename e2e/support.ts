@@ -22,6 +22,7 @@ export async function injectFaults(
     refreshFails: boolean;
     accessTokenTtl: number;
     deploymentsFail: boolean;
+    variablesFail: boolean;
     projectsSource: ProjectsSource;
     rejectWorkspaces: boolean;
     rejectPersonal: boolean;
@@ -55,11 +56,23 @@ export function alerts(page: Page) {
 }
 
 /**
- * Toast notifications. Radix Toast roots carry role="status", not role="alert", so
- * `alerts()` does not see them — the two are genuinely different regions.
+ * Toast notifications, located through Radix's own viewport region.
+ *
+ * NOT `getByRole("status")`, which is what this used to be and is a trap. Radix does not
+ * put that role on the toast itself: it renders a separate, visually-hidden
+ * `role="status"` copy of the toast's text for screen readers, removes it about a second
+ * later, and marks the close button `data-radix-toast-announce-exclude` so it is left
+ * out of that copy entirely.
+ *
+ * So every assertion here was matching a transient hidden div rather than the toast on
+ * screen. Text assertions passed anyway — the copy carries the same words — which meant
+ * a toast that never rendered visibly would still have passed, and anything that had to
+ * *interact* with one could not resolve at all.
  */
 function toasts(page: Page) {
-  return onlyVisible(page.getByRole("status"));
+  return onlyVisible(
+    page.getByRole("region", { name: /notifications/i }).getByRole("listitem"),
+  );
 }
 
 /**
@@ -148,10 +161,33 @@ export async function openDestroyDialog(page: Page, name: string) {
   return dialog;
 }
 
+/**
+ * Picks a preset and submits.
+ *
+ * The image control is one editable combobox now, so this opens the list, picks, and
+ * lets it close itself. It MUST leave the popup closed: the listbox is portalled and
+ * overlaps the submit button, so a spec that leaves it open clicks the list instead.
+ */
 export async function spinUp(page: Page, name: string, preset = "Redis") {
-  await onlyVisible(page.getByRole("radio", { name: preset })).click();
+  await onlyVisible(page.getByRole("button", { name: /show preset images/i })).click();
+  await onlyVisible(
+    page.getByRole("option", { name: new RegExp(`^${preset}`) }),
+  ).click();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
   await field(page, "Name").fill(name);
   await button(page, /spin up container/i).click();
+}
+
+/** Service records from the fixture, including the environment each was created with. */
+export async function fixtureServices(
+  page: Page,
+): Promise<
+  Array<{ name: string; image: string | null; variables: Record<string, string> }>
+> {
+  const response = await page.request.get(`${FIXTURE_URL}/__test/services`);
+  return response.json() as Promise<
+    Array<{ name: string; image: string | null; variables: Record<string, string> }>
+  >;
 }
 
 /**

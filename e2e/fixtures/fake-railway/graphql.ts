@@ -149,6 +149,21 @@ export function execute(
       return { data: { serviceCreate: { id: service.id, name: service.name } } };
     }
 
+    case "VariableCollectionUpsert": {
+      if (store.faults.variablesFail) {
+        // Railway's real refusal shape: HTTP 200 with a field-level error.
+        return { errors: [{ message: "Not Authorized" }] };
+      }
+      const input = variables.input as {
+        serviceId: string;
+        variables: Record<string, string>;
+      };
+      const service = store.services.get(input.serviceId);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      service.variables = { ...service.variables, ...input.variables };
+      return { data: { variableCollectionUpsert: 1 } };
+    }
+
     case "ServiceInstanceDeployV2": {
       const serviceId = variables.serviceId as string;
       if (!store.services.has(serviceId)) {

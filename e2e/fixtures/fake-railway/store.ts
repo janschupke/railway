@@ -26,6 +26,12 @@ export type Service = {
   repo: string | null;
   createdAt: string;
   deploymentId: string | null;
+  /**
+   * Environment set at creation. Never rendered by the app — a spec asserts the *names*
+   * and the length of a generated value through /__test/services, so the fixture cannot
+   * leak a credential into the page it is checking.
+   */
+  variables: Record<string, string>;
 };
 
 const PROGRESSION = ["QUEUED", "BUILDING", "DEPLOYING", "SUCCESS"] as const;
@@ -58,6 +64,8 @@ export type Faults = {
   accessTokenTtl: number;
   /** Newly created deployments fail their build. */
   deploymentsFail: boolean;
+  /** variableCollectionUpsert is refused, stranding a service before its deploy. */
+  variablesFail: boolean;
   /** Where the Projects query finds projects, if anywhere. */
   projectsSource: ProjectsSource;
   /**
@@ -87,6 +95,7 @@ const DEFAULT_FAULTS: Faults = {
   accessTokenTtl: 3600,
   deploymentsFail: false,
   projectsSource: "personal",
+  variablesFail: false,
   rejectWorkspaces: false,
   rejectPersonal: false,
   rejectViewer: false,
@@ -150,6 +159,7 @@ export class Store {
       repo: null,
       createdAt: new Date(0).toISOString(),
       deploymentId: null,
+      variables: {},
     };
     this.services.set(service.id, service);
     if (input.deployed) {

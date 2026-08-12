@@ -62,19 +62,11 @@ export function ProjectPickerSkeleton() {
 export function SpinUpFormSkeleton() {
   return (
     <Card className="space-y-4 p-4">
-      <div className="space-y-2">
+      {/* One control where there used to be a chip row and a field: the image is a
+          single editable combobox now. */}
+      <div className="flex flex-col gap-1.5">
         <Skeleton className="h-5 w-28" />
-        {/* Widths written out, not interpolated: Tailwind scans for literal class names. */}
-        <div className="flex flex-wrap gap-2">
-          <Skeleton shape="pill" className="h-6 w-24" />
-          <Skeleton shape="pill" className="h-6 w-20" />
-          <Skeleton shape="pill" className="h-6 w-28" />
-          <Skeleton shape="pill" className="h-6 w-22" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Skeleton className="h-5 w-20" />
-          <Skeleton shape="control" className="h-control-md w-full" />
-        </div>
+        <Skeleton shape="control" className="h-control-md w-full" />
       </div>
 
       <div className="flex flex-col gap-1.5">

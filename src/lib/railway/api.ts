@@ -14,6 +14,7 @@ import {
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
+  VARIABLE_COLLECTION_UPSERT_MUTATION,
   VIEWER_QUERY,
 } from "./operations";
 import {
@@ -182,9 +183,16 @@ export async function createContainer(
     /** Already prefixed by the caller via toManagedName(). */
     name: string;
     image: string;
+    /** Resolved by the caller from the preset catalog; never supplied by the browser. */
+    variables?: Record<string, string>;
   },
   signal?: AbortSignal,
-): Promise<{ serviceId: string; deploymentId: string | null }> {
+): Promise<{
+  serviceId: string;
+  deploymentId: string | null;
+  /** False when the service exists but its environment could not be set. */
+  configured: boolean;
+}> {
   const created = await gql<{ serviceCreate: { id: string; name: string } }>(
     SERVICE_CREATE_MUTATION,
     {
@@ -201,6 +209,46 @@ export async function createContainer(
   const serviceId = created.serviceCreate.id;
 
   /*
+   * Variables BEFORE the deploy, never after.
+   *
+   * A postgres container started without POSTGRES_PASSWORD exits on its first tick and
+   * Railway restarts it forever — the user watches a crash loop and reasonably concludes
+   * this app is broken. Setting them afterwards would need a redeploy and would show that
+   * crash loop first.
+   *
+   * A failure here deliberately does NOT deploy, for the same reason the comment below
+   * gives: an un-deployed service is visible, prefixed and destroyable from the
+   * dashboard, which is strictly better than a running container in a restart loop
+   * nobody can diagnose.
+   */
+  if (params.variables && Object.keys(params.variables).length > 0) {
+    try {
+      await gql(
+        VARIABLE_COLLECTION_UPSERT_MUTATION,
+        {
+          input: {
+            projectId: params.projectId,
+            environmentId: params.environmentId,
+            serviceId,
+            variables: params.variables,
+            replace: false,
+          },
+        },
+        { accessToken, operationName: "VariableCollectionUpsert", signal },
+      );
+    } catch (error) {
+      // Names only. These are generated credentials, and this is the one log line in the
+      // system that would otherwise be holding them.
+      log.warn("railway.variables_failed", {
+        service_id: serviceId,
+        variable_names: Object.keys(params.variables).join(","),
+        error,
+      });
+      return { serviceId, deploymentId: null, configured: false };
+    }
+  }
+
+  /*
    * serviceCreate registers the service; the deploy is a separate step. If this second
    * call fails the service exists but is not running, which the dashboard shows as an
    * un-deployed container the user can destroy — better than silently orphaning it.
@@ -211,7 +259,11 @@ export async function createContainer(
     { accessToken, operationName: "ServiceInstanceDeployV2", signal },
   );
 
-  return { serviceId, deploymentId: deployed.serviceInstanceDeployV2 ?? null };
+  return {
+    serviceId,
+    deploymentId: deployed.serviceInstanceDeployV2 ?? null,
+    configured: true,
+  };
 }
 
 export async function destroyContainer(

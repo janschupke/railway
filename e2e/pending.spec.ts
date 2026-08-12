@@ -37,7 +37,6 @@ test("spin up marks the button busy and announces it", async ({ page }) => {
   await signIn(page);
   await injectFaults(page, { slowMs: 1500 });
 
-  await onlyVisible(page.getByRole("radio", { name: "Redis" })).click();
   await field(page, "Name").fill("busy-check");
 
   // Matches either label: the button renames itself while busy, so a locator pinned to
@@ -61,7 +60,6 @@ test("spin up marks the button busy and announces it", async ({ page }) => {
 test("destroy marks its button busy and locks cancel", async ({ page }) => {
   await signIn(page);
 
-  await onlyVisible(page.getByRole("radio", { name: "Redis" })).click();
   await field(page, "Name").fill("doomed");
   await button(page, /spin up container/i).click();
   await settled(page);

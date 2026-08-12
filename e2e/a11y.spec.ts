@@ -124,6 +124,8 @@ test.describe("accessibility", () => {
       await setTheme(page, theme);
 
       await field(page, "Image reference").fill("not a valid image");
+      // The portalled list covers the submit button while it is open.
+      await page.keyboard.press("Escape");
       await field(page, "Name").fill("bad");
       await button(page, /spin up container/i).click();
       await expect(alerts(page).first()).toBeVisible();

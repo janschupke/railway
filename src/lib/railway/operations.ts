@@ -216,6 +216,18 @@ export const BUILD_LOGS_SUBSCRIPTION = /* GraphQL */ `
 `;
 
 /**
+ * Environment for a service, set in one call.
+ *
+ * `replace: false` — the service was created moments ago and has nothing to replace, and
+ * a mutation that can silently wipe variables is the wrong default to have lying around.
+ */
+export const VARIABLE_COLLECTION_UPSERT_MUTATION = /* GraphQL */ `
+  mutation VariableCollectionUpsert($input: VariableCollectionUpsertInput!) {
+    variableCollectionUpsert(input: $input)
+  }
+`;
+
+/**
  * Root fields the app depends on, for `pnpm verify:schema`.
  * `args` lists argument names that must be present (not their types).
  */

@@ -12,6 +12,8 @@ import {
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { toManagedName } from "@/lib/railway/managed";
+import { presetFor } from "@/lib/presets";
+import { resolveVariables } from "@/lib/railway/secrets";
 import { VALIDATION_VALUES, spinDownSchema, spinUpSchema } from "@/lib/validation";
 import type { MessageKey, Translate } from "@/lib/messages";
 
@@ -94,11 +96,24 @@ async function create(formData: FormData): Promise<ActionResult> {
       };
     }
 
+    /*
+     * Variables are derived from the *submitted image string*, server-side.
+     *
+     * The client never sends a preset id and never sends variables, so there is no
+     * request shape in which a caller can inject arbitrary environment into a service.
+     * The whole attack surface is the image reference, which IMAGE_PATTERN already
+     * bounds. That is why the preset catalog is a shared module rather than a client
+     * constant — see SECURITY.md.
+     */
+    const preset = presetFor(image);
+    const variables = resolveVariables(preset?.variables);
+
     const created = await createContainer(accessToken, {
       projectId,
       environmentId,
       name: managedName,
       image,
+      ...(variables ? { variables } : {}),
     });
 
     /*
@@ -117,10 +132,25 @@ async function create(formData: FormData): Promise<ActionResult> {
       image,
       service_id: created.serviceId,
       deployment_id: created.deploymentId,
+      // Names only, never values — they are generated credentials. The logger's own
+      // scalar-only field type is what makes that hard to get wrong. See secrets.ts.
+      variable_names: variables ? Object.keys(variables).join(",") : "",
     });
 
     revalidatePath("/dashboard");
-    return { ok: true, message: t("actions.spinningUp", { name }) };
+
+    if (!created.configured) {
+      // The service exists and is destroyable; saying only "failed" would leave the user
+      // hunting for something they were not told had been created.
+      return { ok: false, error: t("actions.createdButNotConfigured", { name }) };
+    }
+
+    return {
+      ok: true,
+      message: variables
+        ? t("actions.spinningUpWithCredentials", { name })
+        : t("actions.spinningUp", { name }),
+    };
   } catch (error) {
     const { key, values } = describeActionError(error);
     return { ok: false, error: asTranslate(t)(key as MessageKey, values) };

@@ -118,6 +118,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, stats);
   }
 
+  /*
+   * Service records, including the environment each was created with.
+   *
+   * Read out of band rather than off the page on purpose: a spec needs to prove that a
+   * generated credential reached Railway *and* that it never reached the browser, and it
+   * cannot do both if the only way to see it is to render it.
+   */
+  if (url.pathname === "/__test/services") {
+    return json(res, 200, [...store.services.values()]);
+  }
+
   if (url.pathname === "/__test/faults" && req.method === "POST") {
     const patch = JSON.parse((await readBody(req)) || "{}");
     store.faults = { ...store.faults, ...patch };

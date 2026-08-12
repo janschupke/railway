@@ -1,40 +1,20 @@
 "use client";
 
-import {
-  useActionState,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { spinUp } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
+import { DEFAULT_IMAGE, PRESETS } from "@/lib/presets";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
+import { Combobox } from "./ui/combobox";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 import { PendingStatus } from "./ui/misc";
-import { ToggleGroup } from "./ui/toggle-group";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
-
-/**
- * Images chosen because they stay up with no configuration. A preset that boots and
- * immediately exits (plain `alpine`, or `postgres` without credentials) would show a
- * crash loop and read as a bug in this app rather than in the image.
- */
-const PRESETS = [
-  { value: "redis:7-alpine", labelKey: "presetRedis" },
-  { value: "nginx:alpine", labelKey: "presetNginx" },
-  { value: "traefik/whoami", labelKey: "presetWhoami" },
-  { value: "httpd:alpine", labelKey: "presetApache" },
-] as const;
-
-const DEFAULT_IMAGE = PRESETS[0].value;
 
 export function SpinUpForm({
   projectId,
@@ -46,6 +26,7 @@ export function SpinUpForm({
   disabled?: boolean;
 }) {
   const t = useTranslations("spinUp");
+  const tPresets = useTranslations("presets");
   const router = useRouter();
   const { toast } = useToast();
   const [result, formAction, pending] = useActionState<ActionResult | null, FormData>(
@@ -60,7 +41,17 @@ export function SpinUpForm({
    */
   const [refreshing, startRefresh] = useTransition();
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
-  const imageGroupId = useId();
+
+  /*
+   * Labels and group headings are catalog keys, resolved here. The catalog itself is a
+   * plain module so the Server Action can read the same entries' variables without the
+   * client ever sending any — see presetFor().
+   */
+  const presetOptions = PRESETS.map((preset) => ({
+    value: preset.value,
+    label: tPresets(`labels.${preset.labelKey}`),
+    group: tPresets(`groups.${preset.groupKey}`),
+  }));
   // Uncontrolled: nothing else reads the name, so clearing it on success is a DOM
   // write rather than a setState inside an effect.
   const nameRef = useRef<HTMLInputElement>(null);
@@ -94,37 +85,29 @@ export function SpinUpForm({
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="environmentId" value={environmentId} />
 
-        {/* The heading is visual grouping; role+labelledby makes it programmatic too. */}
-        <div className="space-y-2" role="group" aria-labelledby={imageGroupId}>
-          <Text asChild variant="label">
-            <p id={imageGroupId}>{t("imageGroup")}</p>
-          </Text>
-          <ToggleGroup
-            label={t("presetImages")}
-            value={image}
-            onValueChange={setImage}
-            options={PRESETS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
-          />
-          <Field
-            label={t("imageLabel")}
-            hint={t("imageHint")}
-            error={fieldError("image")}
-          >
-            {(field) => (
-              <Input
-                {...field}
-                name="image"
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder={t("imagePlaceholder")}
-                autoComplete="off"
-                spellCheck={false}
-                className="font-mono"
-                required
-              />
-            )}
-          </Field>
-        </div>
+        {/*
+          One control, not two. The chip row and the text field were the same value shown
+          twice — typing a reference that matched no chip silently deselected all of them,
+          which is combobox behaviour built out of two controls that could disagree.
+
+          The list is the catalog; free text is still the contract. Anything the server's
+          IMAGE_PATTERN accepts can be typed here, and anything it rejects still reaches
+          the server so that rule stays the only definition of what is valid.
+        */}
+        <Combobox
+          label={t("imageLabel")}
+          hint={t("imageHint")}
+          error={fieldError("image")}
+          name="image"
+          value={image}
+          onValueChange={setImage}
+          options={presetOptions}
+          placeholder={t("imagePlaceholder")}
+          noMatchesLabel={t("imageNoMatches")}
+          toggleLabel={t("imageToggle")}
+          listLabel={t("imageListLabel")}
+          inputClassName="font-mono"
+        />
 
         <Field label={t("nameLabel")} hint={t("nameHint")} error={fieldError("name")}>
           {(field) => (

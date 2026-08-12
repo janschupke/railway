@@ -121,19 +121,56 @@ test.describe("keyboard operation", () => {
     await expect(select).toContainText("Demo Project");
   });
 
-  test("treats the preset chips as one tab stop", async ({ page }) => {
+  test("drives the image list from the keyboard without leaving the field", async ({
+    page,
+  }) => {
+    /*
+     * The editable-combobox contract. Focus never moves to the list — the input is the
+     * control, and a popup that took focus would make typing-to-filter impossible — so
+     * the highlight is carried by aria-activedescendant instead.
+     */
     await signIn(page);
+    const image = field(page, "Image reference");
 
-    await onlyVisible(page.getByRole("radio", { name: "Redis" })).focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(onlyVisible(page.getByRole("radio", { name: "Nginx" }))).toBeFocused();
+    await image.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(image).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(image).toBeFocused();
+    await expect(image).toHaveAttribute("aria-activedescendant", /.+/);
 
     await page.keyboard.press("Enter");
-    await expect(field(page, "Image reference")).toHaveValue("nginx:alpine");
+    await expect(image).toHaveValue("memcached:1-alpine");
+    await expect(image).toHaveAttribute("aria-expanded", "false");
+  });
 
-    // One Tab leaves the whole group rather than stepping through each chip.
+  test("closes the image list on Escape without discarding what was typed", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const image = field(page, "Image reference");
+
+    await image.fill("ghcr.io/owner/app");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    // Escape closes the list. It does not undo the field, and it must not reach the
+    // page behind it — there is an alertdialog on this screen.
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(image).toHaveValue("ghcr.io/owner/app");
+    await expect(image).toBeFocused();
+  });
+
+  test("reaches the next field in one Tab from the image control", async ({ page }) => {
+    // The chevron is not a tab stop: a second stop on the way to Name, for a shortcut
+    // to something ArrowDown already does, is noise.
+    await signIn(page);
+
+    await field(page, "Image reference").focus();
     await page.keyboard.press("Tab");
-    await expect(field(page, "Image reference")).toBeFocused();
+
+    await expect(field(page, "Name")).toBeFocused();
   });
 
   test("expands the log panel from the keyboard", async ({ page }) => {
@@ -167,7 +204,7 @@ test.describe("keyboard operation", () => {
 
     for (const locator of [
       onlyVisible(page.getByRole("combobox", { name: "Project" })),
-      onlyVisible(page.getByRole("radio", { name: "Redis" })),
+      field(page, "Image reference"),
       field(page, "Name"),
       button(page, /spin up container/i),
     ]) {

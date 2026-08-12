@@ -2,6 +2,7 @@ import {
   button,
   expect,
   field,
+  fixtureServices,
   injectFaults,
   onlyVisible,
   openDestroyDialog,
@@ -108,13 +109,65 @@ test.describe("container lifecycle", () => {
   });
 
   test("rejects a malformed image reference before submitting", async ({ page }) => {
+    /*
+     * Typed, not picked — the whole reason the image control stays free text. The value
+     * has to reach the server so the server's own rule stays the single definition of
+     * what is valid; a dropdown that could only emit known-good values would make this
+     * case unreachable and the validation untested.
+     */
     await field(page, "Image reference").fill("redis; rm -rf /");
+    // The portalled list covers the submit button while it is open.
+    await page.keyboard.press("Escape");
     await field(page, "Name").fill("bad");
     await button(page, /spin up container/i).click();
 
     await expect(
       onlyVisible(page.getByText(/does not look like a valid image reference/)),
     ).toBeVisible();
+    await expect(field(page, "Image reference")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
+  test("gives a database the credentials it needs, without showing them", async ({
+    page,
+  }) => {
+    /*
+     * The whole reason the catalog can carry databases at all. `postgres` exits on its
+     * first tick without POSTGRES_PASSWORD and Railway restarts it forever, so a preset
+     * that offered it without one would show a crash loop and read as a bug in this app.
+     *
+     * Both halves matter: the credential reaches Railway, and it never reaches the page.
+     * The user reads it on Railway's own Variables page, which is where every other
+     * Railway secret lives — this app stores nothing.
+     */
+    await spinUp(page, "db", "PostgreSQL");
+    await expect(row(page, "db")).toBeVisible();
+
+    const services = await fixtureServices(page);
+    const created = services.find((service) => service.name === "spun-db")!;
+
+    expect(Object.keys(created.variables)).toEqual(["POSTGRES_PASSWORD"]);
+    const password = created.variables.POSTGRES_PASSWORD!;
+    expect(password.length).toBeGreaterThanOrEqual(32);
+    expect(await page.content()).not.toContain(password);
+  });
+
+  test("says a service was created when only its environment failed", async ({
+    page,
+  }) => {
+    /*
+     * Deliberately not deployed: the service exists, is prefixed and is destroyable, and
+     * that is strictly better than a running container in a restart loop nobody can
+     * diagnose. Reporting a bare failure would leave the user hunting for something they
+     * were never told had been created.
+     */
+    await injectFaults(page, { variablesFail: true });
+
+    await spinUp(page, "db", "PostgreSQL");
+
+    await expect(toast(page, /Created db/)).toBeVisible();
   });
 
   test("settles a failed build into Failed rather than spinning forever", async ({

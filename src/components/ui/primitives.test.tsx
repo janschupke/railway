@@ -9,7 +9,6 @@ import { EmptyState, PendingStatus } from "./misc";
 import { Skeleton } from "./skeleton";
 import { ScrollArea } from "./scroll-area";
 import { Select } from "./select";
-import { ToggleGroup } from "./toggle-group";
 import { Tooltip, TooltipProvider } from "./tooltip";
 
 describe("Button", () => {
@@ -366,46 +365,6 @@ describe("Select", () => {
 
     await user.click(screen.getByRole("combobox"));
     expect(screen.queryByRole("option")).toBeNull();
-  });
-});
-
-describe("ToggleGroup", () => {
-  const options = [
-    { value: "a", label: "Alpha" },
-    { value: "b", label: "Beta" },
-  ];
-
-  it("reports a new selection", async () => {
-    const onValueChange = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <ToggleGroup
-        label="Presets"
-        value="a"
-        options={options}
-        onValueChange={onValueChange}
-      />,
-    );
-
-    await user.click(screen.getByRole("radio", { name: "Beta" }));
-    expect(onValueChange).toHaveBeenCalledWith("b");
-  });
-
-  it("ignores a re-click on the active item rather than blanking the choice", async () => {
-    // Radix emits "" when deselecting; this group is not deselectable.
-    const onValueChange = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <ToggleGroup
-        label="Presets"
-        value="a"
-        options={options}
-        onValueChange={onValueChange}
-      />,
-    );
-
-    await user.click(screen.getByRole("radio", { name: "Alpha" }));
-    expect(onValueChange).not.toHaveBeenCalled();
   });
 });
 

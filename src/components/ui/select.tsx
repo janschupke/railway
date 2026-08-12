@@ -5,28 +5,9 @@ import { Check, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { Field } from "./field";
+import { byGroup, type GroupedOption } from "./group-options";
 
-type SelectOption = {
-  value: string;
-  label: string;
-  /**
-   * Optional heading to file this option under. Options with no group render loose at
-   * the top, so a list where nothing is grouped looks exactly as it did before.
-   */
-  group?: string;
-};
-
-/** Preserves first-seen order, so grouping never reshuffles the caller's list. */
-function byGroup(options: SelectOption[]): Array<[string | null, SelectOption[]]> {
-  const groups = new Map<string | null, SelectOption[]>();
-  for (const option of options) {
-    const key = option.group ?? null;
-    const existing = groups.get(key);
-    if (existing) existing.push(option);
-    else groups.set(key, [option]);
-  }
-  return [...groups.entries()];
-}
+type SelectOption = GroupedOption;
 
 /**
  * Styled single-select on Radix.

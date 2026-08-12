@@ -261,7 +261,105 @@ describe("createContainer", () => {
       image: "redis:7-alpine",
     });
 
-    expect(result).toEqual({ serviceId: "svc_1", deploymentId: "dep_1" });
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: "dep_1",
+      configured: true,
+    });
+  });
+
+  it("sets the environment before deploying, not after", async () => {
+    /*
+     * Order is the whole point. A postgres container started without POSTGRES_PASSWORD
+     * exits on its first tick and Railway restarts it forever; setting the variables
+     * afterwards would need a redeploy and would show that crash loop first.
+     */
+    const calls: string[] = [];
+    server.use(
+      api.mutation("ServiceCreate", () => {
+        calls.push("create");
+        return HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        });
+      }),
+      api.mutation("VariableCollectionUpsert", () => {
+        calls.push("variables");
+        return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        calls.push("deploy");
+        return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } });
+      }),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "generated" },
+    });
+
+    expect(calls).toEqual(["create", "variables", "deploy"]);
+    expect(result.configured).toBe(true);
+  });
+
+  it("declines to deploy a service whose environment could not be set", async () => {
+    /*
+     * The service exists, is prefixed, and is destroyable from the dashboard. That is
+     * strictly better than a running container in a restart loop nobody can diagnose —
+     * the same reasoning as the un-deployed case above.
+     */
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      api.mutation("VariableCollectionUpsert", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        throw new Error("must not deploy an unconfigured service");
+      }),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "generated" },
+    });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: null,
+      configured: false,
+    });
+  });
+
+  it("issues no variables call for an image that boots bare", async () => {
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
+      ),
+      api.mutation("VariableCollectionUpsert", () => {
+        throw new Error("no variables should be sent");
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+      ),
+    );
+
+    await expect(
+      createContainer(TOKEN, {
+        projectId: "p1",
+        environmentId: "e1",
+        name: "spun-x",
+        image: "redis:7-alpine",
+      }),
+    ).resolves.toMatchObject({ configured: true });
   });
 
   it("still reports the service when the deploy returns no id", async () => {
@@ -283,7 +381,11 @@ describe("createContainer", () => {
       image: "redis:7-alpine",
     });
 
-    expect(result).toEqual({ serviceId: "svc_1", deploymentId: null });
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: null,
+      configured: true,
+    });
   });
 });
 

@@ -20,6 +20,8 @@ const renderForm = (props: { disabled?: boolean } = {}) =>
   );
 
 const submitButton = () => screen.getByRole("button", { name: /spin up container/i });
+/** The image control is one editable combobox now, so this is a real <input>. */
+const image = () => screen.getByLabelText("Image reference");
 
 describe("SpinUpForm", () => {
   beforeEach(() => {
@@ -32,46 +34,105 @@ describe("SpinUpForm", () => {
   it("defaults to a preset that stays running once started", () => {
     // A preset that boots and exits reads as a bug in this app, not in the image.
     renderForm();
-    expect(screen.getByLabelText("Image reference")).toHaveValue("redis:7-alpine");
+    expect(image()).toHaveValue("redis:7-alpine");
   });
 
-  it("fills the image field from a preset chip", async () => {
+  it("fills the image field from the preset list", async () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.click(screen.getByRole("radio", { name: "Nginx" }));
+    await user.click(screen.getByRole("button", { name: "Show preset images" }));
+    await user.click(screen.getByRole("option", { name: /Nginx/ }));
 
-    expect(screen.getByLabelText("Image reference")).toHaveValue("nginx:alpine");
+    expect(image()).toHaveValue("nginx:alpine");
   });
 
-  it("moves focus between presets with arrow keys, selecting on Enter", async () => {
+  it("groups the list by what the images are for", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.click(screen.getByRole("button", { name: "Show preset images" }));
+
+    expect(screen.getByRole("group", { name: "Databases" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Web servers" })).toBeInTheDocument();
+  });
+
+  it("highlights options without moving focus or changing the value", async () => {
     /*
-     * Radix roving tabindex: the whole chip row is one tab stop and arrows move
-     * within it. Focus moves without selecting — activation is explicit — so a
-     * keyboard user can survey the options without changing the image.
+     * The editable-combobox contract: focus never leaves the input, because the input is
+     * the control — it carries the ARIA state and it is what the user is typing into.
+     * Highlighting is announced through aria-activedescendant instead, and nothing is
+     * committed until Enter.
      */
     const user = userEvent.setup();
     renderForm();
 
-    await user.click(screen.getByRole("radio", { name: "Redis" }));
-    await user.keyboard("{ArrowRight}");
+    image().focus();
+    await user.keyboard("{ArrowDown}");
+    expect(image()).toHaveAttribute("aria-expanded", "true");
 
-    expect(screen.getByRole("radio", { name: "Nginx" })).toHaveFocus();
-    expect(screen.getByLabelText("Image reference")).toHaveValue("redis:7-alpine");
+    await user.keyboard("{ArrowDown}");
+    expect(image()).toHaveFocus();
+    expect(image()).toHaveValue("redis:7-alpine");
+    expect(image().getAttribute("aria-activedescendant")).toBeTruthy();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByLabelText("Image reference")).toHaveValue("nginx:alpine");
+    expect(image()).toHaveValue("memcached:1-alpine");
+    expect(image()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("exposes the editable-combobox ARIA, not a select's", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    expect(image()).toHaveAttribute("role", "combobox");
+    expect(image()).toHaveAttribute("aria-autocomplete", "list");
+    // Omitted, never "": an empty value makes NVDA re-announce the whole field.
+    expect(image()).not.toHaveAttribute("aria-activedescendant");
+
+    await user.click(screen.getByRole("button", { name: "Show preset images" }));
+    const listbox = screen.getByRole("listbox");
+    expect(image().getAttribute("aria-controls")).toBe(listbox.id);
   });
 
   it("accepts a hand-typed image over the preset", async () => {
     const user = userEvent.setup();
     renderForm();
 
-    const image = screen.getByLabelText("Image reference");
-    await user.clear(image);
-    await user.type(image, "ghcr.io/owner/app:1.0.0");
+    await user.clear(image());
+    await user.type(image(), "ghcr.io/owner/app:1.0.0");
 
-    expect(image).toHaveValue("ghcr.io/owner/app:1.0.0");
+    expect(image()).toHaveValue("ghcr.io/owner/app:1.0.0");
+    // Nothing in the catalog matches, and that is not an error — the field takes any
+    // reference the server accepts, and the server is what decides.
+    expect(screen.getByText(/no preset matches/i)).toBeInTheDocument();
+  });
+
+  it("closes the list on Escape without touching what was typed", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "ghcr.io/owner/app");
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(image()).toHaveValue("ghcr.io/owner/app");
+    expect(image()).toHaveFocus();
+  });
+
+  it("shows the whole catalog again once a preset is selected", async () => {
+    /*
+     * Filtering on a committed value would leave every other preset unreachable without
+     * clearing the field first — the list would narrow to the one entry the field
+     * already holds. Typing narrows; a known value does not.
+     */
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.click(screen.getByRole("button", { name: "Show preset images" }));
+
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(5);
   });
 
   it("submits both fields to the action", async () => {
@@ -97,7 +158,7 @@ describe("SpinUpForm", () => {
     await user.click(submitButton());
 
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue(""));
-    expect(screen.getByLabelText("Image reference")).toHaveValue("redis:7-alpine");
+    expect(image()).toHaveValue("redis:7-alpine");
   });
 
   it("announces success", async () => {
