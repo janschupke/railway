@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -50,11 +50,24 @@ export function DestroyContainerDialog({
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  /*
+   * The destroy succeeded but the row is still on screen until the refreshed list
+   * arrives, and its trigger was still live — a second click hit a service that no
+   * longer exists and answered with an error. The transition makes that window visible
+   * and closes it; Button derives aria-busy and disabled from `pending` already.
+   */
+  const [refreshing, startRefresh] = useTransition();
 
   return (
     <AlertDialogRoot open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button variant="danger" size="sm" disabled={disabled}>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={disabled}
+          pending={refreshing}
+          pendingLabel={t("refreshPending")}
+        >
           <Trash2 aria-hidden />
           {t("trigger")}
         </Button>
@@ -71,7 +84,7 @@ export function DestroyContainerDialog({
             onDone={(message) => {
               toast({ title: message, tone: "success" });
               setOpen(false);
-              router.refresh();
+              startRefresh(() => router.refresh());
             }}
             onError={(message) =>
               toast({

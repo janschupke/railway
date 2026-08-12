@@ -57,9 +57,25 @@ that grants the API capability. Clerk would sit between the app and a token it n
 every request, while explicitly not refreshing that token on its own — you still write
 the refresh logic, just further from the thing that needs it.
 
-**Why not Auth.js:** it remains `5.0.0-beta.x` and unproven against Next 16. The flow
-here is a single provider and about 150 explicit lines, which is also easier to read
-than a config object.
+**Why not Auth.js.** Three reasons, in order of weight:
+
+1. **Auth.js would not remove the part that is actually hard.** What this app needs is
+   the visitor's Railway access token, live, on every request — and Railway rotates
+   refresh tokens on every use. In Auth.js that is a `jwt` callback you write yourself,
+   so the refresh logic survives the adoption; it just moves further from the code that
+   depends on it.
+2. **Railway's discovery document fails RFC 8414 issuer validation** — it is served from
+   `/oauth/.well-known/openid-configuration` but declares `issuer` as the bare domain.
+   Anything built on `openid-client`, Auth.js included, needs the endpoints pinned by
+   hand (`src/lib/auth/oidc.ts`). The escape hatch is most of the implementation.
+3. **v5 is still `5.0.0-beta.x`** and unproven against Next 16.
+
+**What it costs, measured.** The auth implementation is **419 lines** across
+`src/lib/auth/**` and the three route handlers, 493 counting `src/proxy.ts` — against
+**728 lines of tests**. (An earlier revision of this ADR said "about 150 lines"; that
+was wrong by a factor of three, and a decision argued from a number should use the real
+one.) In exchange for those lines, session encryption, CSRF and cookie chunking are
+hand-rolled rather than inherited. Two consequences are listed under Limitations.
 
 **The scope that matters is `project:admin`.** Railway's prose scope table lists only
 `viewer` and `member` for projects; `project:admin` appears in the live discovery
@@ -117,6 +133,77 @@ so a forged request fails even though the user's own token would happily perform
 _the signed-in user's_ Railway account to have the GitHub app installed with access to
 that repo — something this app cannot provision on their behalf. Image sources work for
 anyone, so that is the product surface. See "Limitations".
+
+### ADR-7 — The URL is the state; there is no client store
+
+No Redux, Zustand, Jotai, React Query or SWR. The measured shape of client state is one
+app-authored context, eight `useState`, zero `useReducer`, zero `useOptimistic`.
+
+**The selected project and environment live in the URL.** They are search params, read
+by `page.tsx` and resolved server-side in `data.ts` — a stale or absent param falls back
+to the first project rather than blanking the page. So the dashboard is linkable,
+survives a reload, and the server does the fetching. `ProjectPicker` holds no selection
+of its own; it writes to the URL and re-reads the result.
+
+**`router.refresh()` is the cache invalidation.** The dashboard is `force-dynamic` and
+every Railway request is `cache: "no-store"`, because it is a live view of
+infrastructure. There is no client-side fetch of the container list, so there is no
+client cache to reconcile — which is the single biggest reason a data-fetching library
+would add machinery without removing any.
+
+**The one context is `ToastContext`**, and it is mounted in the _dashboard_ layout
+rather than the root so the landing page and the 404 do not ship Radix Toast (~12 kB
+gzip) for UI that has no actions in it. Its value is an imperative `{ toast }` memoised
+to a stable identity; the toast list stays in provider state and never enters the
+context, so pushing a toast re-renders the viewport rather than the dashboard.
+
+Refactors considered and rejected:
+
+| Tempting                                           | Why not                                                                                                                                                                                                     |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `ProjectContext` for `projectId`/`environmentId` | Duplicates the URL as a second source of truth and forces components client-side. The drill is two non-consuming hops (`ContainerRow` → `DestroyContainerDialog`) of values that are constant for the page. |
+| React Query / SWR for containers                   | There is no client fetch to cache, and the live path is push (SSE), not poll.                                                                                                                               |
+| Theme in context or state                          | It is `useSyncExternalStore` over `localStorage`, which is correct on the first client render rather than one render late.                                                                                  |
+| Lifting `expanded` / `pinned` / `open`             | All three are single-consumer disclosure state.                                                                                                                                                             |
+
+**The live hazard worth naming:** `useTranslations` returns a fresh function identity on
+every render. Putting `t` in a `useEffect` dependency array once caused duplicate toasts
+and a `router.refresh()` loop; the fix — resolve the string during render and depend on
+the string — is documented in place in `spin-up-form.tsx`. No lint rule prevents a
+repeat, and `container-row.tsx`'s settle effect is one auto-added dependency away from
+the same loop on a `force-dynamic` page.
+
+### ADR-8 — A hand-rolled GraphQL client, not Apollo
+
+`src/lib/railway/` is 1072 lines covering ten operations: a transport (`client.ts`), the
+documents, typed call sites, error mapping, and a monitor that merges a log subscription
+with a status poll.
+
+**All of it is server-only.** `client.ts`, `api.ts`, `subscribe.ts` and
+`deployment-monitor.ts` each open with `import "server-only"`; the five client
+components that touch this directory import types and pure helpers exclusively. Apollo
+Client's value is a normalized cache plus hooks in the browser — there is no
+browser-side GraphQL here to give them to, and it would put ~35 kB gzip into a bundle
+that is gated at 209 kB.
+
+**A normalized cache would be actively wrong.** The dashboard shows infrastructure that
+changes underneath the user; every request is `cache: "no-store"` on purpose.
+
+**The subscription path is not Apollo-shaped.** App Router route handlers cannot accept
+WebSocket upgrades, so logs arrive over `graphql-ws` upstream and leave over SSE
+downstream, merged with a 2.5s status poll because Railway exposes no deployment-status
+subscription. A link chain does not cross that boundary.
+
+**What `client.ts` buys that `RetryLink` does not** is Railway-specific: a 200 response
+carrying `errors[]` is a failure; `UNAUTHENTICATED`/`FORBIDDEN` in `extensions` is an
+auth failure and is never retried; `Retry-After` and `X-RateLimit-Reset` are honoured
+against a documented 1000 req/hour quota.
+
+**The real gap, and why Apollo is not the fix.** The type parameter on `gql<T>()` is an
+unchecked assertion, and `verify-schema.ts` proves root field and argument _existence_,
+not selection sets or nullability — so a renamed nested field surfaces as a runtime
+`undefined`. The answer to that is codegen, which Apollo does not provide either. It is
+in "What I would do next".
 
 ---
 
@@ -293,6 +380,47 @@ document navigations, so `useFormStatus` and `useTransition` see nothing. They u
 — otherwise returning via bfcache, after declining Railway's consent screen, restores a
 button that spins forever.
 
+### Loading states
+
+Every wait a user can cause now shows something, and which mechanism applies depends on
+what the wait replaces.
+
+**Skeletons stand in for content that is about to appear.** The compositions live in
+`src/components/dashboard-skeletons.tsx` and are shared by the route-level
+`loading.tsx` and the in-page Suspense fallback, so a placeholder row is defined once.
+Two rules there are load-bearing and have tests:
+
+- **They are synchronous and take their strings as props.** A Suspense fallback must not
+  suspend; an `async` composition awaiting `getTranslations()` would escalate past its
+  own boundary and blank the whole route instead of one section.
+- **The container fallback renders no `<ul>`.** The e2e helpers find the list by
+  `getByRole("list", { name: "Containers" })` and assert there is exactly one.
+
+**The container list sits behind a keyed Suspense boundary.** `page.tsx` awaits only the
+shell — identity, projects, the resolved selection — and `ContainerSection` awaits the
+second Railway round trip on its own. The `key` is the selection, and it is on
+`<Suspense>` rather than on the child, because React only reveals a fallback for a
+boundary it is _mounting_: an update to a boundary already showing content suspends
+without committing, which is precisely why switching project used to hold the previous
+project's rows on screen for the whole fetch. Keying the child compiles, renders and
+reviews identically while restoring the bug, so `e2e/skeleton.spec.ts` asserts the old
+rows are gone rather than only that the skeleton appeared.
+
+The same property means `router.refresh()` — same key — never blanks a list the user is
+reading. Those call sites carry their own pending state instead: spin-up and destroy
+wrap the refresh in `useTransition` so the control that caused it stays busy, and the
+destroy trigger is inert until the refreshed list lands, closing a window in which it
+could be clicked again against a service that no longer existed. The settle-refresh in
+`container-row.tsx` deliberately has none — nobody activated it, several rows can settle
+at once, and the badge has already updated from the stream.
+
+**The placeholder fill is a token, not an animation.** `globals.css` freezes every
+animation under `prefers-reduced-motion`, so `--rc-subtle` at ~1.05:1 was an invisible
+rectangle for those users. `--rc-skeleton` sits at ~1.5:1 dark / ~1.45:1 light,
+asserted in `contrast.test.ts`, and the pulse is `motion-safe:` — an enhancement, not
+the signal. The mid-load axe scan runs with reduced motion forced, which is exactly the
+state the token exists for.
+
 ---
 
 ## Tests
@@ -392,7 +520,22 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
 - **A stream open for more than an hour** outlives its access token. Deploys finish well
   inside that; a long-lived streaming session would need mid-stream token rotation.
 - **Double-submit protection is a name check, not a lock.** Two truly simultaneous
-  submissions could still create two services.
+  submissions could still create two services. It also costs a round trip: every
+  mutation re-reads the container list before acting. The ownership re-derivation in
+  `spinDown` is a genuine safety property and stays; the duplicate-name pre-check is the
+  one to replace.
+- **No `nonce` in the OIDC flow** (ADR-1) — `state` and PKCE only. Defensible with
+  `response_type=code` plus PKCE `S256`, since the code is bound to the verifier and the
+  id_token is never accepted from a redirect, but it is a deviation from the OIDC core
+  recommendation and worth stating rather than leaving to be discovered.
+- **Sign-out is local only.** It deletes the session cookie; it does not call an
+  `end_session_endpoint` or revoke the refresh token, so that grant stays live at
+  Railway until it expires or the user revokes the app.
+- **A project switch announces once, at the start.** `useTransition`'s pending state now
+  ends when the skeleton commits rather than when the containers arrive, so the polite
+  "Loading containers…" fires as the wait begins and the skeleton carries the rest. A
+  live region that stayed accurate for the whole wait would cost a client provider to
+  extend an announcement already delivered.
 
 ## What I would do next
 
@@ -403,6 +546,9 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
 - **An audit log** of spin-up/spin-down per user — the one thing genuinely worth a
   database, since Railway does not retain it once a service is deleted.
 - **Idempotency keys** on create, replacing the name pre-check.
+- **Typed GraphQL documents** via codegen against the live schema, replacing the
+  unchecked `gql<T>()` assertions (ADR-8). `verify-schema.ts` catches a renamed root
+  field today; it cannot catch a renamed nested one.
 - **Budget guards:** a per-user cap on concurrent containers, and a TTL that reaps them
   automatically — the obvious next thing for a tool whose whole purpose is creating
   billable infrastructure.

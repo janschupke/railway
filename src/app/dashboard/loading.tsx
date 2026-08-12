@@ -1,48 +1,33 @@
 import { getTranslations } from "next-intl/server";
-import { Skeleton } from "@/components/ui/misc";
+import {
+  ContainerSectionSkeleton,
+  DashboardHeaderSkeleton,
+  ProjectPickerSkeleton,
+  SpinUpFormSkeleton,
+} from "@/components/dashboard-skeletons";
 
-/** Mirrors the real dashboard markup so nothing shifts when data lands. */
+/**
+ * Cold navigation into the dashboard.
+ *
+ * Composed from the same pieces as the in-page fallback in page.tsx, so a loading row
+ * is defined once. This boundary covers the whole route; the one inside page.tsx covers
+ * only the container list, which is what a project switch replaces.
+ */
 export default async function DashboardLoading() {
   const t = await getTranslations();
 
   return (
     <>
-      <header className="border-border bg-surface border-b">
-        <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3">
-          <span className="font-display text-text font-semibold tracking-tight">
-            {t("app.name")}
-          </span>
-          <Skeleton className="h-7 w-20" />
-        </div>
-      </header>
+      <DashboardHeaderSkeleton appName={t("app.name")} />
 
       <main
         className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6"
         aria-busy="true"
         aria-label={t("dashboard.loading")}
       >
-        <div className="flex gap-3">
-          <Skeleton className="h-9 w-48 rounded-md" />
-          <Skeleton className="h-9 w-48 rounded-md" />
-        </div>
-
-        <Skeleton className="border-border h-56 rounded-lg border" />
-
-        <section className="space-y-2">
-          <Skeleton className="h-4 w-24" />
-          <div className="border-border bg-surface rounded-lg border">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="border-border flex items-center gap-4 border-b px-4 py-3 last:border-b-0"
-              >
-                <Skeleton className="h-9 flex-1" />
-                <Skeleton className="h-5 w-20 rounded-full" />
-                <Skeleton className="h-8 w-24 rounded-md" />
-              </div>
-            ))}
-          </div>
-        </section>
+        <ProjectPickerSkeleton />
+        <SpinUpFormSkeleton />
+        <ContainerSectionSkeleton heading={t("dashboard.containersHeading")} />
       </main>
     </>
   );

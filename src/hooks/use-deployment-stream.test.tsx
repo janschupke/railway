@@ -173,6 +173,41 @@ describe("useDeploymentStream", () => {
     expect(FakeEventSource.latest().url).toContain("dep_2");
   });
 
+  it("starts clean when the same deployment is re-attached", () => {
+    /*
+     * Collapsing and re-expanding a row detaches and re-attaches the same
+     * deploymentId:phase. Retaining the previous attachment's state meant the server's
+     * backfill was appended to logs that were already there — every line twice — and
+     * `done` flipped false → true again, firing container-row's settle refresh a second
+     * time for a container that had settled long ago.
+     */
+    const { rerender } = render(<Probe deploymentId="dep_1" />);
+    act(() => {
+      FakeEventSource.latest().emit("log", {
+        line: { timestamp: "t", message: "first run" },
+      });
+      FakeEventSource.latest().emit("done", {});
+    });
+    expect(text("logs")).toBe("first run");
+    expect(text("done")).toBe("true");
+
+    rerender(<Probe deploymentId="dep_1" enabled={false} />);
+    expect(text("logs")).toBe("");
+    expect(text("done")).toBe("false");
+
+    rerender(<Probe deploymentId="dep_1" enabled />);
+
+    expect(text("logs")).toBe("");
+    expect(text("done")).toBe("false");
+
+    act(() =>
+      FakeEventSource.latest().emit("log", {
+        line: { timestamp: "t", message: "backfill" },
+      }),
+    );
+    expect(text("logs")).toBe("backfill");
+  });
+
   it("closes the connection on unmount", () => {
     const { unmount } = render(<Probe deploymentId="dep_1" />);
     const source = FakeEventSource.latest();

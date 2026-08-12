@@ -1,6 +1,7 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { ContainerRow } from "@/components/container-row";
+import { ContainerSectionSkeleton } from "@/components/dashboard-skeletons";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
 import { SignInButton } from "@/components/sign-in-button";
@@ -8,8 +9,8 @@ import { SpinUpForm } from "@/components/spin-up-form";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/misc";
-import { managedPrefix } from "@/lib/railway/managed";
-import { loadDashboard } from "./data";
+import { ContainerSection } from "./container-section";
+import { loadDashboardShell } from "./data";
 
 // The dashboard is a live view of Railway; caching it would show stale containers.
 export const dynamic = "force-dynamic";
@@ -21,19 +22,18 @@ export default async function DashboardPage({
 }) {
   const { project: projectParam, environment: environmentParam } = await searchParams;
 
-  const data = await loadDashboard({
+  const shell = await loadDashboardShell({
     ...(projectParam ? { projectId: projectParam } : {}),
     ...(environmentParam ? { environmentId: environmentParam } : {}),
   });
-  if (!data) redirect("/");
+  if (!shell) redirect("/");
 
   const t = await getTranslations("dashboard");
-  const { projects, project, environment, containers, error } = data;
-  const managedCount = containers.filter((c) => c.managed).length;
+  const { projects, project, environment, error } = shell;
 
   return (
     <>
-      <DashboardHeader {...data.user} />
+      <DashboardHeader {...shell.user} />
 
       <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
         {error && <Banner tone="error">{error}</Banner>}
@@ -66,50 +66,30 @@ export default async function DashboardPage({
               disabled={!project || !environment}
             />
 
-            <section className="space-y-2">
-              <div className="flex items-baseline justify-between">
-                <h2 className="font-display text-text text-sm font-medium">
-                  {t("containersHeading")}
-                </h2>
-                <p className="text-text-subtle text-xs">
-                  {t("createdHere", {
-                    managed: managedCount,
-                    total: containers.length,
-                  })}
-                </p>
-              </div>
+            {/*
+              Keyed on the selection, not merely wrapped. React only reveals a fallback
+              for a boundary it is mounting fresh; an update to a boundary that is
+              already showing content suspends without committing, which is why
+              switching projects used to hold the previous project's rows on screen for
+              both Railway round trips.
 
-              <Card>
-                {containers.length === 0 ? (
-                  <EmptyState
-                    title={t("emptyTitle")}
-                    description={t("emptyDescription")}
-                  />
-                ) : (
-                  // Named so the list is distinguishable from other lists on the
-                  // page — the toast viewport is also a list.
-                  <ul aria-label={t("containersListLabel")}>
-                    {containers.map((container) => (
-                      <ContainerRow
-                        key={container.serviceId}
-                        container={container}
-                        projectId={project?.id ?? ""}
-                        environmentId={environment?.id ?? ""}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </Card>
+              The key must be on <Suspense> itself — keying the child remounts it under
+              the same boundary fiber, which is the no-commit path again and looks
+              identical in review. e2e/skeleton.spec.ts asserts the old rows are gone,
+              which is the only thing that catches it.
 
-              <p className="text-text-subtle text-xs">
-                {/* Rich text, not concatenation: the <code> span has to be able to move
-                    within the sentence when the sentence is translated. */}
-                {t.rich("prefixNote", {
-                  prefix: managedPrefix(),
-                  code: (chunks) => <code className="font-mono">{chunks}</code>,
-                })}
-              </p>
-            </section>
+              A router.refresh() keeps the same key, so it deliberately does NOT blank
+              the list; those call sites surface their own pending state instead.
+            */}
+            <Suspense
+              key={`${project?.id ?? ""}:${environment?.id ?? ""}`}
+              fallback={<ContainerSectionSkeleton heading={t("containersHeading")} />}
+            >
+              <ContainerSection
+                projectId={project?.id ?? null}
+                environmentId={environment?.id ?? null}
+              />
+            </Suspense>
           </>
         )}
       </main>

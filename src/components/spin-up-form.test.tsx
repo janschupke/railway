@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
 
 const spinUp = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
@@ -24,6 +25,8 @@ describe("SpinUpForm", () => {
   beforeEach(() => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
+    // Shared across the file; without this a call count is a running total.
+    routerMock.refresh.mockClear();
   });
 
   it("defaults to a preset that stays running once started", () => {
@@ -134,6 +137,23 @@ describe("SpinUpForm", () => {
 
     expect(await screen.findByText("Could not spin up")).toBeInTheDocument();
     expect(screen.getByText("Rate limited by Railway")).toBeInTheDocument();
+  });
+
+  it("pulls the fresh list exactly once on success", async () => {
+    /*
+     * Only the call is asserted, not the busy window it opens. `refresh` is a no-op spy
+     * here, so the transition wrapping it resolves in the same tick; in the browser it
+     * stays pending for the Railway round trip, which is covered by
+     * e2e/skeleton.spec.ts. "Exactly once" is the guard against the effect-dependency
+     * loop that fired this repeatedly before.
+     */
+    const user = userEvent.setup();
+    renderForm();
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText("Name")).toHaveValue("");
   });
 
   it("explains why it is disabled instead of silently doing nothing", async () => {

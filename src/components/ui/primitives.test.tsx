@@ -4,11 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { Banner } from "./banner";
 import { Button } from "./button";
 import { Card } from "./card";
-import { EmptyState, PendingStatus, Skeleton } from "./misc";
+import { EmptyState, PendingStatus } from "./misc";
+import { Skeleton } from "./skeleton";
 import { ScrollArea } from "./scroll-area";
 import { Select } from "./select";
 import { ToggleGroup } from "./toggle-group";
-import { Tooltip } from "./tooltip";
+import { Tooltip, TooltipProvider } from "./tooltip";
 import { ToastProvider, useToast } from "./toast";
 
 describe("Button", () => {
@@ -151,6 +152,28 @@ describe("Skeleton, EmptyState", () => {
     // The surrounding region already carries aria-busy; announcing shimmer is noise.
     const { container } = render(<Skeleton className="h-4" />);
     expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("carries its fill colour independently of the animation", () => {
+    /*
+     * prefers-reduced-motion freezes every animation globally, so a skeleton that
+     * relied on the pulse would be an invisible rectangle for those users. The token
+     * is what makes it readable; motion-safe: says the pulse is the enhancement.
+     */
+    const { container } = render(<Skeleton />);
+    expect(container.firstElementChild).toHaveClass("bg-skeleton");
+    expect(container.firstElementChild).toHaveClass("motion-safe:animate-pulse");
+  });
+
+  it("takes its radius from the control it stands in for", () => {
+    const { container } = render(<Skeleton shape="pill" />);
+    expect(container.firstElementChild).toHaveClass("rounded-full");
+  });
+
+  it("lets a caller override the shape's classes", () => {
+    const { container } = render(<Skeleton shape="control" className="rounded-none" />);
+    expect(container.firstElementChild).toHaveClass("rounded-none");
+    expect(container.firstElementChild).not.toHaveClass("rounded-md");
   });
 
   it("renders an empty state with an optional action", () => {
@@ -300,9 +323,13 @@ describe("Tooltip", () => {
   it("shows supplementary detail on keyboard focus, which a title attribute cannot", async () => {
     const user = userEvent.setup();
     render(
-      <Tooltip content="Only services created here can be destroyed here.">
-        <button type="button">Why?</button>
-      </Tooltip>,
+      // The provider lives in the dashboard layout so delayDuration groups across the
+      // whole list; a bare <Tooltip> is a Radix error, which is the point.
+      <TooltipProvider>
+        <Tooltip content="Only services created here can be destroyed here.">
+          <button type="button">Why?</button>
+        </Tooltip>
+      </TooltipProvider>,
     );
 
     await user.tab();

@@ -113,7 +113,20 @@ export function useDeploymentStream(
       source.close();
     });
 
-    return () => source.close();
+    return () => {
+      source.close();
+      /*
+       * Detaching discards this stream's state.
+       *
+       * The tag is stable across a collapse and re-expand of the same row, so without
+       * this the previous attachment's state came back on the way in: the server's
+       * 200-line backfill was appended to logs that were already there, and `done`
+       * flipped false → true again, firing the settle-refresh in container-row.tsx a
+       * second time. Guarded on the key so a teardown that has already been superseded
+       * by the next stream cannot clobber it.
+       */
+      setSnapshot((prev) => (prev.key === key ? { key: null, state: INITIAL } : prev));
+    };
   }, [key, deploymentId, phase]);
 
   return snapshot.key === key ? snapshot.state : INITIAL;

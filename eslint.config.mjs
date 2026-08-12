@@ -126,6 +126,7 @@ const eslintConfig = defineConfig([
               "variant",
               "size",
               "tone",
+              "shape",
               "side",
               "orientation",
               "position",

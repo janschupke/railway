@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
 
 const spinDown = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
@@ -40,6 +41,8 @@ describe("DestroyContainerDialog", () => {
   beforeEach(() => {
     spinDown.mockReset();
     spinDown.mockResolvedValue({ ok: true, message: "Destroyed cache" });
+    // Shared across the file; without this a call count is a running total.
+    routerMock.refresh.mockClear();
   });
 
   it("names the container in the confirmation, so the consequence is unambiguous", async () => {
@@ -105,6 +108,24 @@ describe("DestroyContainerDialog", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
     );
     expect(await screen.findByText("Destroyed cache")).toBeInTheDocument();
+  });
+
+  it("pulls the fresh list once the destroy succeeds", async () => {
+    /*
+     * Only the call is asserted, not the busy window it opens. `refresh` is a no-op spy
+     * here, so the transition wrapping it resolves in the same tick and there is no
+     * pending state to observe — in the browser it stays pending for the whole Railway
+     * round trip, which is the point of the transition. e2e/skeleton.spec.ts covers
+     * that the trigger is inert while it runs.
+     */
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cache");
+    await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
   it("stays open and surfaces the reason when the server refuses", async () => {

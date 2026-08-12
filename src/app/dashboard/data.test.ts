@@ -11,7 +11,7 @@ vi.mock("@/lib/railway/api", () => ({
   getProjectContainers: (...args: unknown[]) => getProjectContainers(...args),
 }));
 
-const { loadDashboard } = await import("./data");
+const { loadDashboardShell, loadContainers } = await import("./data");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 
 const session: RailwaySession = {
@@ -42,30 +42,44 @@ beforeEach(() => {
     .mockResolvedValue({ project: projects[0], containers: [] });
 });
 
-describe("loadDashboard", () => {
+describe("loadDashboardShell", () => {
   it("returns null without a session, leaving the redirect to routing", async () => {
     getSession.mockResolvedValue(null);
-    expect(await loadDashboard({})).toBeNull();
+    expect(await loadDashboardShell({})).toBeNull();
+  });
+
+  it("never reads containers", async () => {
+    /*
+     * The load-bearing property of the split: the shell is what the user waits for
+     * before anything renders, so a second Railway round trip must not be in it. Fails
+     * the moment someone re-inlines the container read for convenience.
+     */
+    await loadDashboardShell({});
+    expect(getProjectContainers).not.toHaveBeenCalled();
   });
 
   it("defaults to the first project and its first environment", async () => {
-    const data = await loadDashboard({});
+    const shell = await loadDashboardShell({});
 
-    expect(data?.project?.id).toBe("p1");
-    expect(data?.environment?.id).toBe("e1");
-    expect(getProjectContainers).toHaveBeenCalledWith("token", "p1", "e1");
+    expect(shell?.project?.id).toBe("p1");
+    expect(shell?.environment?.id).toBe("e1");
   });
 
   it("honours an explicit selection", async () => {
-    await loadDashboard({ projectId: "p2", environmentId: "e3" });
-    expect(getProjectContainers).toHaveBeenCalledWith("token", "p2", "e3");
+    const shell = await loadDashboardShell({ projectId: "p2", environmentId: "e3" });
+
+    expect(shell?.project?.id).toBe("p2");
+    expect(shell?.environment?.id).toBe("e3");
   });
 
   it("falls back when the selection names something that no longer exists", async () => {
     // A stale bookmark must not blank the dashboard.
-    const data = await loadDashboard({ projectId: "gone", environmentId: "gone" });
-    expect(data?.project?.id).toBe("p1");
-    expect(data?.environment?.id).toBe("e1");
+    const shell = await loadDashboardShell({
+      projectId: "gone",
+      environmentId: "gone",
+    });
+    expect(shell?.project?.id).toBe("p1");
+    expect(shell?.environment?.id).toBe("e1");
   });
 
   it("degrades to an explanation when the project list fails", async () => {
@@ -74,43 +88,30 @@ describe("loadDashboard", () => {
       new RailwayApiError("Rate limited by Railway", { kind: "rate_limit" }),
     );
 
-    const data = await loadDashboard({});
+    const shell = await loadDashboardShell({});
 
-    expect(data?.error).toContain("rate limit");
-    expect(data?.projects).toEqual([]);
-    expect(getProjectContainers).not.toHaveBeenCalled();
-  });
-
-  it("keeps the project selection when only the container query fails", async () => {
-    getProjectContainers.mockRejectedValue(
-      new RailwayApiError("boom", { kind: "server" }),
-    );
-
-    const data = await loadDashboard({});
-
-    expect(data?.project?.id).toBe("p1");
-    expect(data?.containers).toEqual([]);
-    expect(data?.error).toContain("server error");
+    expect(shell?.error).toContain("rate limit");
+    expect(shell?.projects).toEqual([]);
   });
 
   it("uses a generic message for a non-Railway failure", async () => {
     listProjects.mockRejectedValue(new Error("socket hang up"));
 
-    const data = await loadDashboard({});
+    const shell = await loadDashboardShell({});
 
-    expect(data?.error).toBe("Could not load your Railway projects.");
-    expect(data?.error).not.toContain("socket");
+    expect(shell?.error).toBe("Could not load your Railway projects.");
+    expect(shell?.error).not.toContain("socket");
   });
 
   it("handles a user with no projects shared", async () => {
     listProjects.mockResolvedValue({ viewer: {}, projects: [] });
 
-    const data = await loadDashboard({});
+    const shell = await loadDashboardShell({});
 
-    expect(data?.projects).toEqual([]);
-    expect(data?.project).toBeNull();
-    expect(data?.environment).toBeNull();
-    expect(data?.error).toBeNull();
+    expect(shell?.projects).toEqual([]);
+    expect(shell?.project).toBeNull();
+    expect(shell?.environment).toBeNull();
+    expect(shell?.error).toBeNull();
   });
 
   it("handles a project with no environments", async () => {
@@ -119,15 +120,59 @@ describe("loadDashboard", () => {
       projects: [{ id: "p9", name: "Empty", environments: [] }],
     });
 
-    const data = await loadDashboard({});
+    const shell = await loadDashboardShell({});
 
-    expect(data?.project?.id).toBe("p9");
-    expect(data?.environment).toBeNull();
-    expect(getProjectContainers).not.toHaveBeenCalled();
+    expect(shell?.project?.id).toBe("p9");
+    expect(shell?.environment).toBeNull();
   });
 
   it("carries the signed-in identity for the header", async () => {
-    const data = await loadDashboard({});
-    expect(data?.user).toEqual({ name: "Ada", email: "ada@example.com" });
+    const shell = await loadDashboardShell({});
+    expect(shell?.user).toEqual({ name: "Ada", email: "ada@example.com" });
+  });
+});
+
+describe("loadContainers", () => {
+  it("reads the selected environment with the session token", async () => {
+    getProjectContainers.mockResolvedValue({
+      project: projects[0],
+      containers: [{ serviceId: "s1" }],
+    });
+
+    const data = await loadContainers("p1", "e1");
+
+    expect(getProjectContainers).toHaveBeenCalledWith("token", "p1", "e1");
+    expect(data.containers).toHaveLength(1);
+    expect(data.error).toBeNull();
+  });
+
+  it("degrades to an explanation rather than throwing into the boundary", async () => {
+    getProjectContainers.mockRejectedValue(
+      new RailwayApiError("boom", { kind: "server" }),
+    );
+
+    const data = await loadContainers("p1", "e1");
+
+    expect(data.containers).toEqual([]);
+    expect(data.error).toContain("server error");
+  });
+
+  it("does not leak a non-Railway failure's text", async () => {
+    getProjectContainers.mockRejectedValue(new Error("socket hang up"));
+
+    const data = await loadContainers("p1", "e1");
+
+    expect(data.error).toBe("Could not load containers for this environment.");
+    expect(data.error).not.toContain("socket");
+  });
+
+  it("is inert without a session", async () => {
+    // The shell already redirected; this is a guard, not a path.
+    getSession.mockResolvedValue(null);
+
+    const data = await loadContainers("p1", "e1");
+
+    expect(data).toEqual({ containers: [], error: null });
+    expect(getProjectContainers).not.toHaveBeenCalled();
   });
 });

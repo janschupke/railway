@@ -4,6 +4,7 @@ import {
   expect,
   expectNoA11yViolations,
   field,
+  injectFaults,
   onlyVisible,
   openDestroyDialog,
   row,
@@ -55,6 +56,27 @@ test.describe("accessibility", () => {
         onlyVisible(page.getByText("Nothing running in this environment")),
       ).toBeVisible();
       await expectNoA11yViolations(page, `dashboard-empty/${theme}`);
+    });
+
+    test(`dashboard mid-load has no violations (${theme})`, async ({ page }) => {
+      /*
+       * The only automated check that --rc-skeleton survives a real browser and the
+       * light/dark cascade. It fits here for a reason: expectNoA11yViolations forces
+       * reducedMotion: "reduce", which is exactly the frozen-pulse state the token was
+       * chosen for — a skeleton that relied on the animation would be invisible here.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+      await injectFaults(page, { slowMs: 1200 });
+
+      await onlyVisible(page.getByRole("combobox", { name: "Project" })).click();
+      await onlyVisible(page.getByRole("option", { name: "Second Project" })).click();
+      await expect(
+        onlyVisible(page.locator('[data-loading="containers"]')),
+      ).toBeVisible();
+
+      await expectNoA11yViolations(page, `dashboard-loading/${theme}`);
+      await injectFaults(page, { slowMs: 0 });
     });
 
     test(`destroy dialog has no violations (${theme})`, async ({ page }) => {

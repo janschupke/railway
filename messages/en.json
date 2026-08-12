@@ -79,6 +79,8 @@
     "submit": "Spin up container",
     "submitPending": "Spinning up…",
     "announce": "Spinning up container…",
+    "refreshPending": "Updating list…",
+    "refreshAnnounce": "Updating the container list…",
     "selectProjectFirst": "Select a project and environment first.",
     "failedTitle": "Could not spin up",
     "presetRedis": "Redis",
@@ -94,6 +96,7 @@
     "submit": "Destroy permanently",
     "submitPending": "Destroying…",
     "announce": "Destroying {name}…",
+    "refreshPending": "Removing…",
     "failedTitle": "Could not destroy container"
   },
   "actions": {

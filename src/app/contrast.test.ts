@@ -19,6 +19,8 @@ const TOKENS = readFileSync(path.join(import.meta.dirname, "tokens.css"), "utf8"
 const AA_NORMAL = 4.5;
 /** Large text and non-text UI boundaries (WCAG 1.4.11). */
 const AA_LARGE = 3;
+/** Not WCAG: the floor at which a frozen, textless placeholder still reads as a shape. */
+const AA_PLACEHOLDER = 1.4;
 
 type Rgb = [number, number, number];
 
@@ -261,6 +263,22 @@ describe.each(THEMES)("%s theme", (themeName, theme) => {
     }
   });
 
+  it("the skeleton fill is visible on the surfaces it sits on", () => {
+    /*
+     * Not a WCAG threshold — a placeholder is decorative and carries no text. This is
+     * the "still reads as a shape once the pulse is frozen" floor, which is the state
+     * every prefers-reduced-motion user sees (globals.css kills the animation).
+     */
+    for (const bg of ["--rc-canvas", "--rc-surface"]) {
+      const background = surface(bg);
+      const fill = resolve("--rc-skeleton", theme, background);
+      expect(
+        Number(contrast(fill, background).toFixed(2)),
+        `skeleton on ${bg} in ${themeName}`,
+      ).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
+    }
+  });
+
   it("borders are visible against their surfaces", () => {
     const surfaceRgb = surface("--rc-surface");
     expect(
@@ -277,6 +295,13 @@ describe("token parsing", () => {
     expect(DARK.get("--rc-canvas")).toBeDefined();
     expect(LIGHT.get("--rc-canvas")).toBeDefined();
     expect(DARK.get("--rc-canvas")).not.toBe(LIGHT.get("--rc-canvas"));
+  });
+
+  it("defines the skeleton fill in both themes", () => {
+    for (const [name, theme] of THEMES) {
+      expect(theme.get("--rc-skeleton"), `skeleton in ${name}`).toBeDefined();
+    }
+    expect(DARK.get("--rc-skeleton")).not.toBe(LIGHT.get("--rc-skeleton"));
   });
 
   it("defines every container state in both themes", () => {

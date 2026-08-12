@@ -53,17 +53,6 @@ export function PendingStatus({
   );
 }
 
-export function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn("bg-subtle animate-pulse rounded", className)}
-      // Decorative: the surrounding region already carries aria-busy.
-      aria-hidden
-      {...props}
-    />
-  );
-}
-
 export function EmptyState({
   title,
   description,

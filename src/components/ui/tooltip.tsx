@@ -4,6 +4,18 @@ import { Tooltip as Primitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 
 /**
+ * Wraps a subtree that contains tooltips.
+ *
+ * Radix's provider is what makes `delayDuration` grouped rather than per-tooltip: once
+ * one tooltip has opened, the next opens immediately. A provider around each individual
+ * tooltip — which is what this file used to render — puts every trigger in a group of
+ * one, so moving along a list of rows re-pays the delay at every stop.
+ */
+export function TooltipProvider({ children }: { children: React.ReactNode }) {
+  return <Primitive.Provider delayDuration={200}>{children}</Primitive.Provider>;
+}
+
+/**
  * Radix Tooltip shows on focus as well as hover, which a `title` attribute does not —
  * that is the whole reason this exists rather than the native tooltip it replaced.
  *
@@ -20,23 +32,21 @@ export function Tooltip({
   side?: "top" | "right" | "bottom" | "left";
 }) {
   return (
-    <Primitive.Provider delayDuration={200}>
-      <Primitive.Root>
-        <Primitive.Trigger asChild>{children}</Primitive.Trigger>
-        <Primitive.Portal>
-          <Primitive.Content
-            side={side}
-            sideOffset={6}
-            className={cn(
-              "border-border bg-raised text-text z-50 rounded-md border px-2 py-1",
-              "text-xs shadow-md",
-            )}
-          >
-            {content}
-            <Primitive.Arrow className="fill-raised" />
-          </Primitive.Content>
-        </Primitive.Portal>
-      </Primitive.Root>
-    </Primitive.Provider>
+    <Primitive.Root>
+      <Primitive.Trigger asChild>{children}</Primitive.Trigger>
+      <Primitive.Portal>
+        <Primitive.Content
+          side={side}
+          sideOffset={6}
+          className={cn(
+            "border-border bg-raised text-text z-50 rounded-md border px-2 py-1",
+            "text-xs shadow-md",
+          )}
+        >
+          {content}
+          <Primitive.Arrow className="fill-raised" />
+        </Primitive.Content>
+      </Primitive.Portal>
+    </Primitive.Root>
   );
 }

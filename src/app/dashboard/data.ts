@@ -11,13 +11,18 @@ import type {
   RailwayProject,
 } from "@/lib/railway/types";
 
-export type DashboardData = {
+export type DashboardShell = {
   user: { name?: string; email?: string };
   projects: RailwayProject[];
   project: RailwayProject | null;
   environment: RailwayEnvironment | null;
+  /** Set when the project list failed; the header and shell still render. */
+  error: string | null;
+};
+
+export type ContainerListData = {
   containers: Container[];
-  /** Set when a load partially failed; the page still renders what it has. */
+  /** Set when this environment's containers failed; the section still renders. */
   error: string | null;
 };
 
@@ -36,30 +41,33 @@ function describe(t: Translator, error: unknown, fallback: MessageKey): string {
 }
 
 /**
- * All dashboard reads in one place.
+ * Everything the page shell needs: identity, the project list, and the resolved
+ * selection.
+ *
+ * Deliberately does NOT read containers. That is a second Railway round trip, and
+ * holding the shell for it is what made switching projects freeze the whole page —
+ * the container list is loaded behind its own Suspense boundary instead.
  *
  * Failures degrade rather than throw: a Railway outage should render the shell with an
- * explanation, not an error boundary that loses the user's project selection. The page
- * stays a pure composition of this result.
+ * explanation, not an error boundary that loses the user's project selection.
  *
  * Returns null when there is no session, which the page turns into a redirect — the
  * redirect belongs to routing, not to data loading.
  */
-export async function loadDashboard(params: {
+export async function loadDashboardShell(params: {
   projectId?: string;
   environmentId?: string;
-}): Promise<DashboardData | null> {
+}): Promise<DashboardShell | null> {
   const session = await getSession();
   if (!session) return null;
 
   const t = await getTranslations();
 
-  const base: DashboardData = {
+  const base: DashboardShell = {
     user: { name: session.user.name, email: session.user.email },
     projects: [],
     project: null,
     environment: null,
-    containers: [],
     error: null,
   };
 
@@ -77,24 +85,33 @@ export async function loadDashboard(params: {
     project?.environments[0] ??
     null;
 
-  if (!project || !environment) {
-    return { ...base, projects, project, environment };
-  }
+  return { ...base, projects, project, environment };
+}
+
+/**
+ * The container list for one environment.
+ *
+ * Reads the session itself rather than taking a token: `getSession` is a cookie read
+ * plus a JWE open with no network call, and cookies are request-scoped, so calling it a
+ * second time costs nothing and keeps this independently callable and testable.
+ */
+export async function loadContainers(
+  projectId: string,
+  environmentId: string,
+): Promise<ContainerListData> {
+  const session = await getSession();
+  // The shell already redirected an anonymous request; this is a guard, not a path.
+  if (!session) return { containers: [], error: null };
 
   try {
     const { containers } = await getProjectContainers(
       session.accessToken,
-      project.id,
-      environment.id,
+      projectId,
+      environmentId,
     );
-    return { ...base, projects, project, environment, containers };
+    return { containers, error: null };
   } catch (error) {
-    return {
-      ...base,
-      projects,
-      project,
-      environment,
-      error: describe(t, error, "errors.containersFailed"),
-    };
+    const t = await getTranslations();
+    return { containers: [], error: describe(t, error, "errors.containersFailed") };
   }
 }

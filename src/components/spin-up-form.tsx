@@ -1,6 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useId, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -44,6 +51,13 @@ export function SpinUpForm({
     spinUp,
     null,
   );
+  /*
+   * The refresh gets its own transition so the wait for the fresh list is observable.
+   * A bare router.refresh() runs for two Railway round trips with nothing on screen
+   * marked busy: the toast has already fired and the submit button has gone idle, so
+   * the row simply appears at an unpredictable later moment.
+   */
+  const [refreshing, startRefresh] = useTransition();
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
   const imageGroupId = useId();
   // Uncontrolled: nothing else reads the name, so clearing it on success is a DOM
@@ -63,12 +77,12 @@ export function SpinUpForm({
     if (result.ok) {
       if (nameRef.current) nameRef.current.value = "";
       toast({ title: result.message, tone: "success" });
-      router.refresh();
+      startRefresh(() => router.refresh());
     } else if (!result.field) {
       // Field-attributed errors render inline next to the input instead.
       toast({ title: failedTitle, description: result.error, tone: "error" });
     }
-  }, [result, router, toast, failedTitle]);
+  }, [result, router, toast, failedTitle, startRefresh]);
 
   const fieldError = (field: "name" | "image") =>
     result && !result.ok && result.field === field ? result.error : undefined;
@@ -126,12 +140,17 @@ export function SpinUpForm({
         </Field>
 
         <div className="flex items-center gap-3">
+          {/*
+            Inert during the refresh too. That is a real cost — but the list a second
+            submission would be checked against is the stale one, and spinUp rejects
+            duplicate names server-side regardless.
+          */}
           <Button
             type="submit"
             variant="primary"
             disabled={disabled}
-            pending={pending}
-            pendingLabel={t("submitPending")}
+            pending={pending || refreshing}
+            pendingLabel={pending ? t("submitPending") : t("refreshPending")}
           >
             <Plus aria-hidden />
             {t("submit")}
@@ -142,7 +161,9 @@ export function SpinUpForm({
           {/* The button's own label change is not announced; this is. */}
           <PendingStatus
             className="sr-only"
-            label={pending ? t("announce") : undefined}
+            label={
+              pending ? t("announce") : refreshing ? t("refreshAnnounce") : undefined
+            }
           />
         </div>
       </form>

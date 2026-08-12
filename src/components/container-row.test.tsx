@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Container } from "@/lib/railway/types";
@@ -23,6 +23,7 @@ vi.mock("@/hooks/use-deployment-stream", () => ({
 
 const { ContainerRow } = await import("./container-row");
 const { ToastProvider } = await import("./ui/toast");
+const { TooltipProvider } = await import("./ui/tooltip");
 
 const container = (over: Partial<Container> = {}): Container => ({
   serviceId: "svc_1",
@@ -43,12 +44,15 @@ const container = (over: Partial<Container> = {}): Container => ({
 const disclosure = (name = "cache") =>
   screen.getByRole("button", { name: new RegExp(`^${name}`) });
 
+/** Mirrors the dashboard layout, which owns both providers. */
 const renderRow = (over: Partial<Container> = {}) =>
   render(
     <ToastProvider>
-      <ul>
-        <ContainerRow container={container(over)} projectId="p1" environmentId="e1" />
-      </ul>
+      <TooltipProvider>
+        <ul>
+          <ContainerRow container={container(over)} projectId="p1" environmentId="e1" />
+        </ul>
+      </TooltipProvider>
     </ToastProvider>,
   );
 
@@ -110,8 +114,15 @@ describe("ContainerRow", () => {
     await user.click(disclosure());
 
     expect(disclosure()).toHaveAttribute("aria-expanded", "true");
-    // findBy, not getBy: the log pane is a dynamic import, so it arrives a tick later.
-    expect(await screen.findByRole("log")).toBeInTheDocument();
+    /*
+     * getBy, and re-queried rather than captured. LogPane is a dynamic import whose
+     * loading fallback presents the same role and accessible name, so the region exists
+     * from the click — but holding a reference across the swap asserts on a detached
+     * node once the chunk lands, which is a race, not a wait.
+     */
+    await waitFor(() =>
+      expect(screen.getByRole("log")).toHaveAccessibleName("Container logs"),
+    );
 
     await user.click(disclosure());
     expect(screen.queryByRole("log")).toBeNull();

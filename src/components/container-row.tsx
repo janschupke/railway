@@ -9,6 +9,7 @@ import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 import { isTerminal, isTransitioning, type Container } from "@/lib/railway/types";
 import { cn, relativeTime } from "@/lib/utils";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
+import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
@@ -28,6 +29,9 @@ import { Tooltip } from "./ui/tooltip";
  */
 const LogPane = dynamic(() => import("./log-pane").then((m) => m.LogPane), {
   ssr: false,
+  // Without this the panel is empty until the chunk lands. The fallback is the pane's
+  // own first frame, so expanding a row shows one continuous region rather than a gap.
+  loading: () => <LogPaneSkeleton />,
 });
 
 /**
@@ -65,7 +69,16 @@ export function ContainerRow({
   // The stream is fresher than the last server render; prefer it once it has spoken.
   const state = stream.state ?? container.state;
 
-  // Pull the authoritative list once the deployment settles, so sources refresh.
+  /*
+   * Pull the authoritative list once the deployment settles, so sources refresh.
+   *
+   * Deliberately NOT wrapped in a transition with a pending state, unlike the spin-up
+   * and destroy refreshes. Nobody activated this: several rows can settle in the same
+   * second, and a refresh suspends above the container boundary, so a busy state here
+   * would be a page-wide signal attributable to no control the user touched. The badge
+   * has already flipped from the stream by the time this runs, which is the signal that
+   * matters.
+   */
   useEffect(() => {
     if (stream.done && isTerminal(state)) router.refresh();
   }, [stream.done, state, router]);
