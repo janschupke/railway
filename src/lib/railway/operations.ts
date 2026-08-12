@@ -241,12 +241,66 @@ export const REQUIRED_FIELDS: Array<{
 ];
 
 /**
- * Mutations that would let the app stop a container without destroying it. Neither is
- * documented in Railway's public API guides; the verify script reports whether they
- * exist so "spin down" can offer stop-vs-destroy rather than destroy only.
+ * Capabilities Railway does not document in its public API guides. The verify script
+ * reports whether each exists, and `note` says what the app can or cannot do without it —
+ * previously the script printed one hardcoded sentence for all of them, which was already
+ * wrong for `serviceInstanceUpdate`.
  */
-export const OPTIONAL_FIELDS: Array<{ root: "Mutation"; field: string }> = [
-  { root: "Mutation", field: "deploymentStop" },
-  { root: "Mutation", field: "deploymentRemove" },
-  { root: "Mutation", field: "serviceInstanceUpdate" },
+export const OPTIONAL_FIELDS: Array<{
+  root: "Mutation";
+  field: string;
+  note: string;
+}> = [
+  {
+    root: "Mutation",
+    field: "deploymentStop",
+    note: "spin-down stays destroy-only",
+  },
+  {
+    root: "Mutation",
+    field: "deploymentRemove",
+    note: "spin-down stays destroy-only",
+  },
+  {
+    root: "Mutation",
+    field: "serviceInstanceUpdate",
+    note: "a service cannot be edited in place",
+  },
+  /*
+   * Environment variables on a new service. Databases exit on their first tick without
+   * credentials — `postgres` without POSTGRES_PASSWORD restarts forever — so without one
+   * of these the preset catalog cannot include them and stays limited to images that boot
+   * bare.
+   */
+  {
+    root: "Mutation",
+    field: "variableCollectionUpsert",
+    note: "presets cannot carry environment variables",
+  },
+  {
+    root: "Mutation",
+    field: "variableUpsert",
+    note: "per-key fallback for variableCollectionUpsert",
+  },
+];
+
+/**
+ * Input objects the app constructs by hand.
+ *
+ * `verify:schema` has always proved that root *fields* exist and has never once looked at
+ * the shape of the input they take — which is exactly where `serviceCreate(input: {...})`
+ * is an unchecked assumption. A renamed member there fails at runtime, per request, with
+ * whatever wording Railway chooses.
+ */
+export const REQUIRED_INPUT_TYPES: Array<{ name: string; fields: string[] }> = [
+  {
+    name: "ServiceCreateInput",
+    fields: ["projectId", "environmentId", "name", "source"],
+  },
+];
+
+/** Printed, never enforced: the shape is unknown until the probe has been run. */
+export const PROBED_INPUT_TYPES: string[] = [
+  "VariableCollectionUpsertInput",
+  "VariableUpsertInput",
 ];

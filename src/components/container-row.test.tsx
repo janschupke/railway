@@ -44,6 +44,20 @@ const container = (over: Partial<Container> = {}): Container => ({
 const disclosure = (name = "cache") =>
   screen.getByRole("button", { name: new RegExp(`^${name}`) });
 
+/**
+ * Opens the panel and waits for it to actually be open.
+ *
+ * Expanding takes two animation frames: the first mounts the panel collapsed so the grid
+ * transition has a value to interpolate *from*, the second flips it open. Without that
+ * the panel would appear from `display: none`, which cannot be transitioned at all.
+ */
+async function expand(user: ReturnType<typeof userEvent.setup>, name = "cache") {
+  await user.click(disclosure(name));
+  await waitFor(() =>
+    expect(disclosure(name)).toHaveAttribute("aria-expanded", "true"),
+  );
+}
+
 /** Mirrors the dashboard layout, which owns both providers. */
 const renderRow = (over: Partial<Container> = {}) =>
   render(
@@ -111,9 +125,8 @@ describe("ContainerRow", () => {
     const user = userEvent.setup();
     renderRow();
 
-    await user.click(disclosure());
+    await expand(user);
 
-    expect(disclosure()).toHaveAttribute("aria-expanded", "true");
     /*
      * getBy, and re-queried rather than captured. LogPane is a dynamic import whose
      * loading fallback presents the same role and accessible name, so the region exists
@@ -125,14 +138,21 @@ describe("ContainerRow", () => {
     );
 
     await user.click(disclosure());
-    expect(screen.queryByRole("log")).toBeNull();
+    expect(disclosure()).toHaveAttribute("aria-expanded", "false");
+    /*
+     * The panel outlives the collapse by one transition — it is what animates out — so
+     * it is still in the tree here, at zero height. What must be immediate is that it is
+     * gone from the a11y tree and the tab order, which is what `hidden` provides and
+     * what a purely visual collapse would have quietly lost.
+     */
+    await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
   });
 
   it("explains itself instead of streaming when there is no deployment", async () => {
     const user = userEvent.setup();
     renderRow({ deploymentId: null, state: "unknown" });
 
-    await user.click(disclosure());
+    await expand(user);
 
     expect(screen.getByText(/no deployment yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("log")).toBeNull();
@@ -153,7 +173,7 @@ describe("ContainerRow", () => {
     const user = userEvent.setup();
     renderRow({ state: "running" });
 
-    await user.click(disclosure());
+    await expand(user);
 
     expect(useDeploymentStream).toHaveBeenLastCalledWith("dep_1", "deploy", true);
   });
@@ -190,7 +210,7 @@ describe("ContainerRow", () => {
     streamState.status = "closed";
     try {
       renderRow({ state: "running" });
-      await user.click(disclosure());
+      await expand(user);
 
       expect(screen.getByText(/log stream could not be opened/i)).toBeInTheDocument();
     } finally {
@@ -204,7 +224,7 @@ describe("ContainerRow", () => {
     streamState.done = true;
     try {
       renderRow({ state: "running" });
-      await user.click(disclosure());
+      await expand(user);
 
       expect(screen.queryByText(/log stream could not be opened/i)).toBeNull();
       expect(

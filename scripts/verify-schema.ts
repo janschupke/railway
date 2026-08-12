@@ -11,7 +11,12 @@
  * Exits non-zero if anything the app *requires* is missing.
  */
 
-import { OPTIONAL_FIELDS, REQUIRED_FIELDS } from "../src/lib/railway/operations.ts";
+import {
+  OPTIONAL_FIELDS,
+  PROBED_INPUT_TYPES,
+  REQUIRED_FIELDS,
+  REQUIRED_INPUT_TYPES,
+} from "../src/lib/railway/operations.ts";
 import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
 
@@ -46,17 +51,48 @@ const REQUIRED_MEMBERS: Record<string, string> = {
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
+/*
+ * Arg *types* as well as names. A field that still exists but now takes a different input
+ * object is a passing check and a failing app, and reading the type is the difference
+ * between "serviceCreate exists" and "serviceCreate takes the thing we are sending".
+ */
 const INTROSPECTION = `
   query VerifyRootFields {
     __schema {
-      queryType { fields { name args { name } } }
-      mutationType { fields { name args { name } } }
-      subscriptionType { fields { name args { name } } }
+      queryType { fields { name args { name ...ArgType } } }
+      mutationType { fields { name args { name ...ArgType } } }
+      subscriptionType { fields { name args { name ...ArgType } } }
+    }
+  }
+  fragment ArgType on __InputValue {
+    type { kind name ofType { kind name ofType { kind name } } }
+  }
+`;
+
+const INPUT_TYPE_INTROSPECTION = `
+  query VerifyInputType($name: String!) {
+    __type(name: $name) {
+      name
+      inputFields { name type { kind name ofType { kind name } } }
     }
   }
 `;
 
-type Field = { name: string; args: Array<{ name: string }> };
+type TypeRef = {
+  kind: string;
+  name: string | null;
+  ofType?: TypeRef | null;
+} | null;
+
+/** `NON_NULL(LIST(String))` → `[String]!`, close enough to read at a glance. */
+function typeName(type: TypeRef): string {
+  if (!type) return "?";
+  if (type.kind === "NON_NULL") return `${typeName(type.ofType ?? null)}!`;
+  if (type.kind === "LIST") return `[${typeName(type.ofType ?? null)}]`;
+  return type.name ?? "?";
+}
+
+type Field = { name: string; args: Array<{ name: string; type?: TypeRef }> };
 type Introspection = {
   __schema: {
     queryType: { fields: Field[] } | null;
@@ -192,14 +228,78 @@ async function checkSchema(token: string) {
     const field = byRoot[optional.root]?.find((f) => f.name === optional.field);
     const label = `${optional.root}.${optional.field}`;
     if (field) {
-      console.log(
-        ok(
-          `${label} available (args: ${field.args.map((a) => a.name).join(", ") || "none"})`,
-        ),
-      );
+      const args =
+        field.args.map((a) => `${a.name}: ${typeName(a.type ?? null)}`).join(", ") ||
+        "none";
+      console.log(ok(`${label} available (${args})`));
     } else {
-      console.log(warn(`${label} not available — spin-down stays destroy-only`));
+      // The consequence, per field. This used to print one hardcoded sentence for all
+      // of them, which was already the wrong sentence for two of the three.
+      console.log(warn(`${label} not available — ${optional.note}`));
     }
+  }
+}
+
+/**
+ * Input object shapes.
+ *
+ * The gap this closes: every check above proves a root *field* exists, and the app also
+ * hand-builds the object that field takes. `serviceCreate(input:)` has never been checked
+ * beyond its name, so a renamed member inside ServiceCreateInput would pass verification
+ * and fail on every real spin-up.
+ */
+async function checkInputTypes(token: string) {
+  console.log("\nInput object shapes");
+
+  const introspect = async (name: string) => {
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query: INPUT_TYPE_INTROSPECTION, variables: { name } }),
+    });
+    const body = (await response.json()) as {
+      data?: {
+        __type: {
+          name: string;
+          inputFields: Array<{ name: string; type: TypeRef }> | null;
+        } | null;
+      };
+    };
+    return body.data?.__type ?? null;
+  };
+
+  for (const required of REQUIRED_INPUT_TYPES) {
+    const type = await introspect(required.name);
+    if (!type?.inputFields) {
+      console.log(bad(`${required.name} does not exist`));
+      failed = true;
+      continue;
+    }
+    const present = new Set(type.inputFields.map((f) => f.name));
+    const missing = required.fields.filter((f) => !present.has(f));
+    if (missing.length) {
+      console.log(bad(`${required.name} is missing: ${missing.join(", ")}`));
+      failed = true;
+    } else {
+      console.log(ok(`${required.name} accepts ${required.fields.join(", ")}`));
+    }
+  }
+
+  // Printed, never enforced. These are the shapes a feature is being designed against,
+  // and guessing at a mutation's input is how you find out in production.
+  for (const name of PROBED_INPUT_TYPES) {
+    const type = await introspect(name);
+    if (!type?.inputFields) {
+      console.log(warn(`${name} not available`));
+      continue;
+    }
+    const fields = type.inputFields
+      .map((f) => `${f.name}: ${typeName(f.type)}`)
+      .join(", ");
+    console.log(ok(`${name} { ${fields} }`));
   }
 }
 
@@ -216,6 +316,7 @@ async function main() {
   }
 
   await checkSchema(token);
+  await checkInputTypes(token);
 
   console.log(
     failed

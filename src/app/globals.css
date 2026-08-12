@@ -237,6 +237,30 @@ body {
     transform: translateY(0) scale(1);
   }
 }
+/*
+ * Nothing in this app used to leave. Every surface faded in and then vanished on a single
+ * frame — a dialog, a dropdown and a toast all teleporting out, which reads as a glitch
+ * rather than as a dismissal. Radix's Presence holds a closing node in the tree for
+ * exactly as long as an animation runs on it, so declaring one is the whole fix.
+ */
+@keyframes content-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+}
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
 
 /*
  * Animate the CONTENT, never the positioning wrapper.
@@ -264,8 +288,14 @@ body {
   /* Grows from the edge nearest its trigger rather than from its own middle. */
   transform-origin: var(--radix-popper-transform-origin, center);
 }
+[data-state="closed"].animate-content {
+  animation: content-out var(--duration-fast) ease-in;
+}
 [data-state="open"].animate-overlay {
   animation: overlay-in var(--duration-fast) ease-out;
+}
+[data-state="closed"].animate-overlay {
+  animation: overlay-out var(--duration-fast) ease-in;
 }
 
 @media (prefers-reduced-motion: reduce) {

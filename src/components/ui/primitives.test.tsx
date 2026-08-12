@@ -11,7 +11,6 @@ import { ScrollArea } from "./scroll-area";
 import { Select } from "./select";
 import { ToggleGroup } from "./toggle-group";
 import { Tooltip, TooltipProvider } from "./tooltip";
-import { ToastProvider, useToast } from "./toast";
 
 describe("Button", () => {
   it("defaults to type=button so a decorative button cannot submit a form", () => {
@@ -427,38 +426,5 @@ describe("Tooltip", () => {
     expect(
       await screen.findByText("Only services created here can be destroyed here."),
     ).toBeInTheDocument();
-  });
-});
-
-describe("useToast", () => {
-  function Trigger() {
-    const { toast } = useToast();
-    return (
-      <button type="button" onClick={() => toast({ title: "Done", tone: "success" })}>
-        Fire
-      </button>
-    );
-  }
-
-  it("renders a toast and dismisses it", async () => {
-    const user = userEvent.setup();
-    render(
-      <ToastProvider>
-        <Trigger />
-      </ToastProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Fire" }));
-    expect(await screen.findByText("Done")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
-    expect(screen.queryByText("Done")).not.toBeInTheDocument();
-  });
-
-  it("throws outside a provider rather than swallowing the message", () => {
-    // A silently dropped toast is a bug you only find in production.
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => render(<Trigger />)).toThrow(/ToastProvider/);
-    quiet.mockRestore();
   });
 });

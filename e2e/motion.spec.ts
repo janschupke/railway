@@ -1,4 +1,4 @@
-import { expect, onlyVisible, signIn, test } from "./support";
+import { button, expect, onlyVisible, signIn, spinUp, test, toast } from "./support";
 
 /*
  * The one suite that must NOT run under reduced motion.
@@ -81,5 +81,42 @@ test.describe("popup motion", () => {
         "popup painted away from its trigger",
       ).toBeLessThan(24);
     }
+  });
+
+  test("a dismissed toast animates out instead of vanishing", async ({ page }) => {
+    /*
+     * The provider used to delete the record inside `onOpenChange`, which unmounted the
+     * root before Radix's Presence had a node to hold — so no toast in this app had ever
+     * animated out. jsdom cannot see this at all (it runs no animations and Presence
+     * unmounts immediately), which is why the assertion lives here.
+     */
+    await spinUp(page, "cache");
+    const created = toast(page, /cache/i);
+    await expect(created).toBeVisible();
+
+    await created.getByRole("button", { name: /dismiss/i }).click();
+
+    const exiting = await page.evaluate(() =>
+      document
+        .getAnimations()
+        .map((animation) => (animation as CSSAnimation).animationName)
+        .filter(Boolean),
+    );
+    expect(exiting).toContain("content-out");
+  });
+
+  test("expanding a container row animates the panel open", async ({ page }) => {
+    // The panel was a hard `hidden` toggle: the chevron rotated and 256px of log pane
+    // appeared on the same frame.
+    await spinUp(page, "cache");
+    await button(page, /^cache/).click();
+
+    const panel = onlyVisible(page.locator("[data-panel-open]"));
+    await expect(panel).toHaveAttribute("data-panel-open", "true");
+
+    const running = await panel.evaluate((element) =>
+      element.getAnimations().map((animation) => animation.playState),
+    );
+    expect(running).toContain("running");
   });
 });

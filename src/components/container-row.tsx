@@ -66,7 +66,40 @@ export function ContainerRow({
   const locale = useLocale();
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
+  /*
+   * Outlives `expanded` by one transition, because `hidden` is `display: none` and
+   * nothing can be transitioned out of that — while it is also the only thing keeping a
+   * collapsed panel out of the tab order and the a11y tree, so it cannot simply be
+   * dropped. `expanded` is the user's intent and drives aria-expanded and the grid rows;
+   * `mounted` is whether there is still something on screen to collapse.
+   */
+  const [mounted, setMounted] = useState(false);
   const panelId = useId();
+
+  const toggle = () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    setMounted(true);
+    /*
+     * Two frames, not one. The first commits `mounted` — `hidden` comes off at
+     * grid-rows 0fr — and the second flips to 1fr with a start value the transition can
+     * interpolate from. Collapsing needs no equivalent: the panel is already laid out.
+     */
+    requestAnimationFrame(() => requestAnimationFrame(() => setExpanded(true)));
+  };
+
+  /*
+   * Backstop for an interrupted transition. Toggling faster than the animation means
+   * `transitionend` may never fire, which would leave a zero-height panel mounted and
+   * therefore in the tab order — invisible, and focusable.
+   */
+  useEffect(() => {
+    if (expanded || !mounted) return;
+    const timer = setTimeout(() => setMounted(false), 400);
+    return () => clearTimeout(timer);
+  }, [expanded, mounted]);
 
   /*
    * Stream while the deployment is moving, or whenever the log pane is open. A settled
@@ -121,7 +154,7 @@ export function ContainerRow({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={toggle}
           aria-expanded={expanded}
           aria-controls={panelId}
           className="focus-ring hover:bg-subtle -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left"
@@ -129,7 +162,8 @@ export function ContainerRow({
           <ChevronDown
             aria-hidden
             className={cn(
-              "text-text-subtle size-4 shrink-0 transition-transform",
+              // Same duration as the panel, so the two read as one gesture.
+              "text-text-subtle duration-base size-4 shrink-0 transition-transform",
               expanded && "rotate-180",
             )}
           />
@@ -192,31 +226,58 @@ export function ContainerRow({
       {/*
         Always rendered, toggled with `hidden`: aria-controls must point at an element
         that exists in both states, and the collapsed panel had no node to point at.
+
+        The open/close itself is a grid row going 0fr ↔ 1fr, which is the one way to
+        transition to an unknown content height that works in every browser today. The
+        panel is not a fixed size — the log pane is 256px, but stream error and warning
+        banners sit above it — so a hardcoded max-height would either clip or ease from
+        the wrong place. `interpolate-size: allow-keywords` would say this more directly
+        and is a drop-in replacement here, but it is Chrome-only, and two mechanisms means
+        two behaviours to test for a 200ms flourish.
       */}
-      <div id={panelId} hidden={!expanded} className="space-y-2 px-4 pb-4">
-        {expanded && (
-          <>
-            {stream.error && <Banner tone="error">{stream.error}</Banner>}
-            {/*
-              The browser refused to open the stream and named nothing — a 400, a 401 or
-              the per-user slot cap. It used to be indistinguishable from "still dialling",
-              which is a pane that waits forever on a connection nobody is making.
-            */}
-            {!stream.error && stream.status === "closed" && !stream.done && (
-              <Banner tone="error">{t("streamUnavailable")}</Banner>
-            )}
-            {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
-            {container.deploymentId ? (
-              <LogPane
-                lines={stream.logs}
-                status={stream.status}
-                emptyLabel={t("waitingForOutput")}
-              />
-            ) : (
-              <Banner tone="info">{t("noDeployment")}</Banner>
-            )}
-          </>
+      <div
+        id={panelId}
+        hidden={!mounted}
+        data-panel-open={expanded}
+        onTransitionEnd={(event) => {
+          if (event.propertyName === "grid-template-rows" && !expanded) {
+            setMounted(false);
+          }
+        }}
+        className={cn(
+          "duration-base grid transition-[grid-template-rows] ease-out",
+          "data-[panel-open=false]:grid-rows-[0fr] data-[panel-open=true]:grid-rows-[1fr]",
         )}
+      >
+        {/* min-h-0 is what actually lets a grid row collapse to nothing. */}
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-2 px-4 pb-4">
+            {mounted && (
+              <>
+                {stream.error && <Banner tone="error">{stream.error}</Banner>}
+                {/*
+                  The browser refused to open the stream and named nothing — a 400, a 401
+                  or the per-user slot cap. It used to be indistinguishable from "still
+                  dialling", which is a pane that waits forever on a connection nobody is
+                  making.
+                */}
+                {!stream.error && stream.status === "closed" && !stream.done && (
+                  <Banner tone="error">{t("streamUnavailable")}</Banner>
+                )}
+                {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
+                {container.deploymentId ? (
+                  <LogPane
+                    lines={stream.logs}
+                    status={stream.status}
+                    emptyLabel={t("waitingForOutput")}
+                  />
+                ) : (
+                  <Banner tone="info">{t("noDeployment")}</Banner>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </li>
   );
