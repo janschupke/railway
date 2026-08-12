@@ -35,8 +35,6 @@ export function createLogClient(accessToken: string): Client {
   });
 }
 
-export type LogEvent = { kind: "build" | "deploy"; line: LogLine };
-
 /**
  * Async iterator over one log subscription. Terminates when the caller aborts, when
  * Railway completes the subscription, or on socket error.

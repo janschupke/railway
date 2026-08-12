@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { ContainerRow } from "@/components/container-row";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
@@ -26,6 +27,7 @@ export default async function DashboardPage({
   });
   if (!data) redirect("/");
 
+  const t = await getTranslations("dashboard");
   const { projects, project, environment, containers, error } = data;
   const managedCount = containers.filter((c) => c.managed).length;
 
@@ -39,10 +41,14 @@ export default async function DashboardPage({
         {projects.length === 0 && !error ? (
           <Card>
             <EmptyState
-              title="No projects shared with this app"
-              description="Railway's consent screen controls which projects are visible here. Sign in again and select at least one project."
+              title={t("noProjectsTitle")}
+              description={t("noProjectsDescription")}
               action={
-                <SignInButton label="Choose projects" variant="secondary" size="sm" />
+                <SignInButton
+                  label={t("chooseProjects")}
+                  variant="secondary"
+                  size="sm"
+                />
               }
             />
           </Card>
@@ -63,23 +69,26 @@ export default async function DashboardPage({
             <section className="space-y-2">
               <div className="flex items-baseline justify-between">
                 <h2 className="font-display text-text text-sm font-medium">
-                  Containers
+                  {t("containersHeading")}
                 </h2>
                 <p className="text-text-subtle text-xs">
-                  {managedCount} of {containers.length} created here
+                  {t("createdHere", {
+                    managed: managedCount,
+                    total: containers.length,
+                  })}
                 </p>
               </div>
 
               <Card>
                 {containers.length === 0 ? (
                   <EmptyState
-                    title="Nothing running in this environment"
-                    description="Spin one up above and its build logs will stream here."
+                    title={t("emptyTitle")}
+                    description={t("emptyDescription")}
                   />
                 ) : (
                   // Named so the list is distinguishable from other lists on the
                   // page — the toast viewport is also a list.
-                  <ul aria-label="Containers">
+                  <ul aria-label={t("containersListLabel")}>
                     {containers.map((container) => (
                       <ContainerRow
                         key={container.serviceId}
@@ -93,9 +102,12 @@ export default async function DashboardPage({
               </Card>
 
               <p className="text-text-subtle text-xs">
-                Services named <code className="font-mono">{managedPrefix()}…</code>{" "}
-                were created here and can be destroyed here. Everything else is shown
-                for context only.
+                {/* Rich text, not concatenation: the <code> span has to be able to move
+                    within the sentence when the sentence is translated. */}
+                {t.rich("prefixNote", {
+                  prefix: managedPrefix(),
+                  code: (chunks) => <code className="font-mono">{chunks}</code>,
+                })}
               </p>
             </section>
           </>

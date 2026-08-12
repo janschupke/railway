@@ -124,6 +124,6 @@ describe("gql", () => {
     server.use(http.post(ENDPOINT, () => new HttpResponse(null, { status: 401 })));
 
     const error = (await call().catch((e: unknown) => e)) as RailwayApiError;
-    expect(JSON.stringify(error.toClientError())).not.toContain("t0ken");
+    expect(JSON.stringify(error.describe())).not.toContain("t0ken");
   });
 });

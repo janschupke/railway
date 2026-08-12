@@ -2,9 +2,13 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
+import { useTranslations } from "next-intl";
 import type { RailwayProject } from "@/lib/railway/types";
 import { PendingStatus } from "./ui/misc";
 import { Select } from "./ui/select";
+
+/** Query-parameter names — protocol shared with the page's searchParams, not copy. */
+const PARAM = { project: "project", environment: "environment" } as const;
 
 /**
  * Selection lives in the URL rather than component state, so the dashboard is
@@ -19,6 +23,7 @@ export function ProjectPicker({
   projectId: string | null;
   environmentId: string | null;
 }) {
+  const t = useTranslations("dashboard");
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -38,20 +43,20 @@ export function ProjectPicker({
      */
     <div className="flex flex-wrap items-center gap-3" aria-busy={pending || undefined}>
       <Select
-        label="Project"
+        label={t("projectLabel")}
         value={projectId ?? undefined}
         options={projects.map((p) => ({ value: p.id, label: p.name }))}
         onValueChange={(id) => {
           const next = new URLSearchParams(params);
-          next.set("project", id);
+          next.set(PARAM.project, id);
           // The old environment belongs to the old project; let the server default it.
-          next.delete("environment");
+          next.delete(PARAM.environment);
           navigate(next);
         }}
       />
 
       <Select
-        label="Environment"
+        label={t("environmentLabel")}
         value={environmentId ?? undefined}
         disabled={!selected}
         options={
@@ -59,12 +64,12 @@ export function ProjectPicker({
         }
         onValueChange={(id) => {
           const next = new URLSearchParams(params);
-          next.set("environment", id);
+          next.set(PARAM.environment, id);
           navigate(next);
         }}
       />
 
-      <PendingStatus label={pending ? "Loading containers…" : undefined} />
+      <PendingStatus label={pending ? t("switchingProject") : undefined} />
     </div>
   );
 }

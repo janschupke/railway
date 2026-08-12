@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useNavigationPending } from "@/hooks/use-navigation-pending";
 import { Button } from "./ui/button";
 
@@ -12,6 +13,7 @@ import { Button } from "./ui/button";
  * cancelling the first.
  */
 export function SignOutButton() {
+  const t = useTranslations("common");
   const { pending, start } = useNavigationPending();
 
   return (
@@ -21,9 +23,9 @@ export function SignOutButton() {
         variant="ghost"
         size="sm"
         pending={pending}
-        pendingLabel="Signing out…"
+        pendingLabel={t("signOutPending")}
       >
-        Sign out
+        {t("signOut")}
       </Button>
     </form>
   );

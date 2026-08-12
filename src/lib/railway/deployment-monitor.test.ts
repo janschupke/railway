@@ -120,7 +120,11 @@ describe("monitorDeployment", () => {
       },
     );
 
-    expect(events[0]).toMatchObject({ type: "warning", message: "nope" });
+    expect(events[0]).toMatchObject({
+      type: "warning",
+      // A descriptor, not a sentence: the monitor has no translator of its own.
+      message: { key: "errors.api.graphqlDetail", values: { detail: "nope" } },
+    });
     expect(events.map((e) => e.type)).toContain("ready");
     expect(events.at(-1)?.type).toBe("done");
   });

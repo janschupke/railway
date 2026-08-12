@@ -142,7 +142,9 @@ describe("spinUp", () => {
     expect(result).toEqual({
       ok: false,
       field: "name",
-      error: 'A container named "cache" already exists here.',
+      // Typographic quotes come from the catalog: quoting style differs by locale, so
+      // it belongs inside the message rather than around the placeholder.
+      error: "A container named \u201Ccache\u201D already exists here.",
     });
     expect(createCalls).toBe(0);
   });
@@ -181,7 +183,10 @@ describe("spinUp", () => {
     );
 
     const result = await spinUp(null, spinUpForm());
-    expect(result).toEqual({ ok: false, error: "Too many requests" });
+    expect(result).toEqual({
+      ok: false,
+      error: "Railway rejected the operation: Too many requests",
+    });
   });
 
   it("asks the user to sign in again when the session cannot be refreshed", async () => {
@@ -290,17 +295,27 @@ describe("spinDown", () => {
     );
 
     const result = await spinDown(null, downForm("svc_managed"));
-    expect(result).toEqual({ ok: false, error: "Service is locked" });
+    expect(result).toEqual({
+      ok: false,
+      // Railway's own text is wrapped so the sentence around it stays translatable.
+      error: "Railway rejected the operation: Service is locked",
+    });
   });
 });
 
 describe("error mapping", () => {
-  it("keeps RailwayApiError's user message distinct from its internal one", () => {
+  it("keeps RailwayApiError's user-facing descriptor free of its internal message", () => {
     const error = new RailwayApiError("HTTP 429 from backboard", {
       kind: "rate_limit",
       retryAfterSeconds: 30,
     });
-    expect(error.userMessage()).toContain("30s");
-    expect(error.userMessage()).not.toContain("backboard");
+
+    const descriptor = error.describe();
+    expect(descriptor).toEqual({
+      key: "errors.api.rateLimitRetry",
+      values: { seconds: 30 },
+    });
+    // The upstream text names an internal host; it must not travel with the message.
+    expect(JSON.stringify(descriptor)).not.toContain("backboard");
   });
 });

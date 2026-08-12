@@ -1,0 +1,12 @@
+{
+  "$comment": [
+    "First-load JS per route, gzipped, in kilobytes. Checked by scripts/check-bundle-budget.ts.",
+    "Seeded from a real build with ~3% headroom: tight enough that a stray import fails,",
+    "loose enough that a dependency patch does not. Raise a number only with a reason."
+  ],
+  "routes": {
+    "/": 166,
+    "/dashboard": 209,
+    "/_not-found": 146
+  }
+}

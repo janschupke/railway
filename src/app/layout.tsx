@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
-import { ToastProvider } from "@/components/ui/toast";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -10,10 +11,10 @@ const interTight = Inter_Tight({
   weight: ["500", "600", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "Container Console",
-  description: "Spin containers up and down on Railway.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("app");
+  return { title: t("name"), description: t("description") };
+}
 
 /**
  * Applies the stored theme before first paint. Without this the page renders at the OS
@@ -21,10 +22,12 @@ export const metadata: Metadata = {
  */
 const NO_FLASH_THEME = `(function(){try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}}catch(e){}})()`;
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const locale = await getLocale();
+
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${inter.variable} ${interTight.variable} h-full antialiased`}
       suppressHydrationWarning
     >
@@ -35,7 +38,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           React discards the server tree and renders a second copy alongside it.
         */}
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
-        <ToastProvider>{children}</ToastProvider>
+        {/*
+          ToastProvider deliberately lives in the dashboard layout, not here: it is the
+          only subtree that raises toasts, and mounting Radix Toast globally cost the
+          landing page and the 404 ~12 kB gzip they could never use.
+        */}
+        <NextIntlClientProvider>{children}</NextIntlClientProvider>
       </body>
     </html>
   );

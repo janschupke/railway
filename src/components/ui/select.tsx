@@ -2,6 +2,7 @@
 
 import { Select as Primitive } from "radix-ui";
 import { Check, ChevronDown } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 type SelectOption = { value: string; label: string };
@@ -20,7 +21,7 @@ export function Select({
   options,
   onValueChange,
   disabled,
-  placeholder = "Select…",
+  placeholder,
 }: {
   /** Accessible name; this control has no visible <label> of its own. */
   label: string;
@@ -30,6 +31,8 @@ export function Select({
   disabled?: boolean;
   placeholder?: string;
 }) {
+  const t = useTranslations("common");
+
   return (
     <Primitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <Primitive.Trigger
@@ -40,7 +43,7 @@ export function Select({
           "hover:bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
         )}
       >
-        <Primitive.Value placeholder={placeholder} />
+        <Primitive.Value placeholder={placeholder ?? t("selectPlaceholder")} />
         <Primitive.Icon>
           <ChevronDown aria-hidden className="text-text-subtle size-4" />
         </Primitive.Icon>

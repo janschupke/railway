@@ -110,7 +110,8 @@ describe("ContainerRow", () => {
     await user.click(disclosure());
 
     expect(disclosure()).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("log")).toBeInTheDocument();
+    // findBy, not getBy: the log pane is a dynamic import, so it arrives a tick later.
+    expect(await screen.findByRole("log")).toBeInTheDocument();
 
     await user.click(disclosure());
     expect(screen.queryByRole("log")).toBeNull();

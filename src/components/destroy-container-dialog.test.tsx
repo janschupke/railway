@@ -26,7 +26,14 @@ function renderDialog() {
 
 const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole("button", { name: /destroy/i }));
-  return screen.findByRole("alertdialog");
+  const dialog = await screen.findByRole("alertdialog");
+  /*
+   * The dialog shell renders immediately; its body is a dynamic import that lands a
+   * tick later. Waiting for the confirm field means every spec below acts on a fully
+   * mounted form rather than racing the chunk.
+   */
+  await screen.findByLabelText(/to confirm/i);
+  return dialog;
 };
 
 describe("DestroyContainerDialog", () => {
@@ -53,10 +60,10 @@ describe("DestroyContainerDialog", () => {
     const confirm = screen.getByRole("button", { name: /destroy permanently/i });
     expect(confirm).toBeDisabled();
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "cach");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cach");
     expect(confirm).toBeDisabled();
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "e");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "e");
     expect(confirm).toBeEnabled();
   });
 
@@ -65,7 +72,7 @@ describe("DestroyContainerDialog", () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "wrong");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "wrong");
     await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
 
     expect(spinDown).not.toHaveBeenCalled();
@@ -76,7 +83,7 @@ describe("DestroyContainerDialog", () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "cache");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cache");
     await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
 
     await waitFor(() => expect(spinDown).toHaveBeenCalledTimes(1));
@@ -91,7 +98,7 @@ describe("DestroyContainerDialog", () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "cache");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cache");
     await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
 
     await waitFor(() =>
@@ -111,7 +118,7 @@ describe("DestroyContainerDialog", () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "cache");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cache");
     await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
 
     expect(await screen.findByText(/was not created here/i)).toBeInTheDocument();
@@ -124,11 +131,11 @@ describe("DestroyContainerDialog", () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(screen.getByLabelText(/type "cache" to confirm/i), "cache");
+    await user.type(screen.getByLabelText(/type .cache. to confirm/i), "cache");
     await user.click(screen.getByRole("button", { name: /cancel/i }));
 
     await openDialog(user);
-    expect(screen.getByLabelText(/type "cache" to confirm/i)).toHaveValue("");
+    expect(screen.getByLabelText(/type .cache. to confirm/i)).toHaveValue("");
     expect(screen.getByRole("button", { name: /destroy permanently/i })).toBeDisabled();
   });
 

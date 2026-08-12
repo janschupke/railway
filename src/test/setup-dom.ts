@@ -57,3 +57,29 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
   redirect: vi.fn(),
 }));
+
+/*
+ * Client components read copy through `useTranslations`, which needs a provider that no
+ * component test mounts. Rather than wrap every render, this swaps the hook for
+ * next-intl's own `createTranslator` over the real `messages/en.json`.
+ *
+ * The point is that assertions keep matching real catalog copy: a renamed key, a
+ * misnamed ICU argument or a broken plural fails the component test, which a
+ * key-echoing stub would sail straight past.
+ */
+vi.mock("next-intl", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next-intl")>();
+  const messages = (await import("../../messages/en.json")).default;
+
+  return {
+    ...actual,
+    useLocale: () => "en",
+    useTranslations: (namespace?: string) =>
+      actual.createTranslator({
+        locale: "en",
+        messages,
+        // The catalog's namespace union is not known to a plain string parameter.
+        ...(namespace ? { namespace: namespace as never } : {}),
+      }),
+  };
+});

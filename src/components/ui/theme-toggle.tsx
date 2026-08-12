@@ -2,16 +2,22 @@
 
 import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { ToggleGroup } from "radix-ui";
 import { cn } from "@/lib/utils";
 
 type ThemeChoice = "light" | "dark" | "system";
 
-const OPTIONS: Array<{ value: ThemeChoice; label: string; Icon: typeof Sun }> = [
-  { value: "light", label: "Light", Icon: Sun },
-  { value: "dark", label: "Dark", Icon: Moon },
-  { value: "system", label: "System", Icon: Monitor },
-];
+/** `labelKey` rather than a label: the catalog owns the wording, this owns the order. */
+const OPTIONS = [
+  { value: "light", labelKey: "themeLight", Icon: Sun },
+  { value: "dark", labelKey: "themeDark", Icon: Moon },
+  { value: "system", labelKey: "themeSystem", Icon: Monitor },
+] as const satisfies ReadonlyArray<{
+  value: ThemeChoice;
+  labelKey: "themeLight" | "themeDark" | "themeSystem";
+  Icon: typeof Sun;
+}>;
 
 const STORAGE_KEY = "theme";
 
@@ -61,23 +67,24 @@ function apply(choice: ThemeChoice) {
  * rather than freezing whatever the OS happened to be at the time.
  */
 export function ThemeToggle() {
+  const t = useTranslations("common");
   const choice = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return (
     <ToggleGroup.Root
       type="single"
       value={choice}
-      aria-label="Colour theme"
+      aria-label={t("themeLabel")}
       onValueChange={(next) => {
         if (next) apply(next as ThemeChoice);
       }}
       className="border-border flex rounded-md border p-0.5"
     >
-      {OPTIONS.map(({ value, label, Icon }) => (
+      {OPTIONS.map(({ value, labelKey, Icon }) => (
         <ToggleGroup.Item
           key={value}
           value={value}
-          aria-label={label}
+          aria-label={t(labelKey)}
           className={cn(
             "focus-ring text-text-subtle rounded p-1.5 transition-colors",
             "hover:text-text data-[state=on]:bg-subtle data-[state=on]:text-text",

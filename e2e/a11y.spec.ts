@@ -5,6 +5,7 @@ import {
   expectNoA11yViolations,
   field,
   onlyVisible,
+  openDestroyDialog,
   row,
   setTheme,
   signIn,
@@ -61,10 +62,7 @@ test.describe("accessibility", () => {
       await spinUp(page, "cache");
       await setTheme(page, theme);
 
-      await row(page, "cache")
-        .getByRole("button", { name: /^destroy$/i })
-        .click();
-      await expect(onlyVisible(page.getByRole("alertdialog"))).toBeVisible();
+      await openDestroyDialog(page, "cache");
 
       await expectNoA11yViolations(page, `destroy-dialog/${theme}`);
     });

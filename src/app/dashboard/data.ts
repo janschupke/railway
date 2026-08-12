@@ -1,8 +1,10 @@
 import "server-only";
 
+import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { getProjectContainers, listProjects } from "@/lib/railway/api";
 import { RailwayApiError } from "@/lib/railway/errors";
+import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
   RailwayEnvironment,
@@ -19,8 +21,18 @@ export type DashboardData = {
   error: string | null;
 };
 
-function describe(error: unknown, fallback: string): string {
-  return error instanceof RailwayApiError ? error.userMessage() : fallback;
+type Translator = Awaited<ReturnType<typeof getTranslations>>;
+
+/**
+ * A Railway failure explains itself where it can; anything else falls back to the
+ * message for the read that failed. Both come from the catalog.
+ */
+function describe(t: Translator, error: unknown, fallback: MessageKey): string {
+  const descriptor =
+    error instanceof RailwayApiError
+      ? error.describe()
+      : { key: fallback, values: undefined };
+  return t(descriptor.key as Parameters<Translator>[0], descriptor.values as never);
 }
 
 /**
@@ -40,6 +52,8 @@ export async function loadDashboard(params: {
   const session = await getSession();
   if (!session) return null;
 
+  const t = await getTranslations();
+
   const base: DashboardData = {
     user: { name: session.user.name, email: session.user.email },
     projects: [],
@@ -53,7 +67,7 @@ export async function loadDashboard(params: {
   try {
     ({ projects } = await listProjects(session.accessToken));
   } catch (error) {
-    return { ...base, error: describe(error, "Could not load your Railway projects.") };
+    return { ...base, error: describe(t, error, "errors.projectsFailed") };
   }
 
   const project =
@@ -80,7 +94,7 @@ export async function loadDashboard(params: {
       projects,
       project,
       environment,
-      error: describe(error, "Could not load containers for this environment."),
+      error: describe(t, error, "errors.containersFailed"),
     };
   }
 }

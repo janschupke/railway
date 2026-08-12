@@ -1,13 +1,16 @@
+import { getTranslations } from "next-intl/server";
 import { Skeleton } from "@/components/ui/misc";
 
 /** Mirrors the real dashboard markup so nothing shifts when data lands. */
-export default function DashboardLoading() {
+export default async function DashboardLoading() {
+  const t = await getTranslations();
+
   return (
     <>
       <header className="border-border bg-surface border-b">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3">
           <span className="font-display text-text font-semibold tracking-tight">
-            Container Console
+            {t("app.name")}
           </span>
           <Skeleton className="h-7 w-20" />
         </div>
@@ -16,7 +19,7 @@ export default function DashboardLoading() {
       <main
         className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6"
         aria-busy="true"
-        aria-label="Loading dashboard"
+        aria-label={t("dashboard.loading")}
       >
         <div className="flex gap-3">
           <Skeleton className="h-9 w-48 rounded-md" />

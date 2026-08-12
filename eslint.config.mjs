@@ -2,6 +2,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import i18next from "eslint-plugin-i18next";
 import prettier from "eslint-config-prettier";
 
 const eslintConfig = defineConfig([
@@ -13,7 +14,12 @@ const eslintConfig = defineConfig([
   //
   // Only the rules are spread, not the whole flat config: eslint-config-next already
   // registers the jsx-a11y plugin, and registering it twice is a hard config error.
+  //
+  // Scoped to JSX files on purpose: eslint-config-next registers the jsx-a11y plugin
+  // only for those, so an unscoped block fails to resolve the moment a plain .cjs or
+  // .mjs file enters the project.
   {
+    files: ["**/*.{jsx,tsx}"],
     rules: {
       ...jsxA11y.flatConfigs.strict.rules,
       // Radix primitives forward their own semantics; a wrapping <label> around a
@@ -57,6 +63,88 @@ const eslintConfig = defineConfig([
         },
       ],
     },
+  },
+
+  /*
+   * Every user-facing string lives in messages/. This is what stops the catalog
+   * decaying: without it the next component quietly hardcodes a sentence and nothing
+   * notices until someone tries to translate the app.
+   *
+   * Only rendered text is in scope — the allowlist below covers attributes whose values
+   * are identifiers, URLs, or CSS rather than copy.
+   */
+  {
+    files: ["src/**/*.tsx"],
+    ignores: ["src/**/*.test.tsx", "src/test/**"],
+    plugins: { i18next },
+    rules: {
+      "i18next/no-literal-string": [
+        "error",
+        {
+          mode: "jsx-only",
+          "should-validate-template": true,
+          message: "Move this string into messages/en.json and read it with t().",
+          /*
+           * A catalog key is not copy. Without these, `t("submit")` is itself reported
+           * as a hardcoded string and the rule argues with its own fix.
+           */
+          callees: {
+            exclude: [
+              "^t$",
+              "^t\\.rich$",
+              "^tCommon$",
+              "^useTranslations$",
+              "^getTranslations$",
+              "^(cn|cva|clsx|twMerge)$",
+              // A local error-lookup helper keyed by field name, not copy.
+              "^fieldError$",
+            ],
+          },
+          /*
+           * Props forwarded as an object (ScrollArea's viewportProps) carry ARIA roles
+           * and politeness values — protocol, not prose.
+           */
+          "object-properties": {
+            exclude: ["role", "aria-live", "aria-.*", ".*[Cc]lassName", "tone"],
+          },
+          "jsx-attributes": {
+            exclude: [
+              // Styling and identifiers.
+              "className",
+              "class",
+              "href",
+              "src",
+              "id",
+              "key",
+              "name",
+              "value",
+              "data-.*",
+              "aria-hidden",
+              // Component APIs whose values are enum members, not sentences.
+              "type",
+              "role",
+              "variant",
+              "size",
+              "tone",
+              "side",
+              "orientation",
+              "position",
+              "swipeDirection",
+              "autoComplete",
+              "labelKey",
+              ".*[Cc]lassName",
+            ],
+          },
+          words: { exclude: ["^[^a-zA-Z]*$", "^\\s*$"] },
+        },
+      ],
+    },
+  },
+
+  // Lighthouse's config format is CommonJS; it is not application code.
+  {
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 
   {

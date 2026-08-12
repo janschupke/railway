@@ -1,0 +1,146 @@
+{
+  "app": {
+    "name": "Container Console",
+    "description": "Spin containers up and down on Railway."
+  },
+  "common": {
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "signIn": "Sign in with Railway",
+    "signInPending": "Redirecting to Railway…",
+    "signOut": "Sign out",
+    "signOutPending": "Signing out…",
+    "signedIn": "Signed in",
+    "selectPlaceholder": "Select…",
+    "dismissNotification": "Dismiss notification",
+    "themeLabel": "Colour theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "noValue": "—"
+  },
+  "landing": {
+    "intro": "Spin containers up and down in your own Railway projects. Sign in with Railway and pick which projects this app may touch.",
+    "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy containers it created itself."
+  },
+  "dashboard": {
+    "loading": "Loading dashboard",
+    "containersHeading": "Containers",
+    "containersListLabel": "Containers",
+    "createdHere": "{managed, number} of {total, plural, =0 {no containers} one {# container} other {# containers}} created here",
+    "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
+    "noProjectsTitle": "No projects shared with this app",
+    "noProjectsDescription": "Railway's consent screen controls which projects are visible here. Sign in again and select at least one project.",
+    "chooseProjects": "Choose projects",
+    "emptyTitle": "Nothing running in this environment",
+    "emptyDescription": "Spin one up above and its build logs will stream here.",
+    "projectLabel": "Project",
+    "environmentLabel": "Environment",
+    "switchingProject": "Loading containers…",
+    "errorTitle": "The dashboard could not load",
+    "errorDescription": "This is usually a Railway API hiccup or an expired authorization. Retrying is safe — nothing was created or destroyed.",
+    "retryPending": "Retrying…",
+    "reauthorize": "Re-authorize",
+    "errorRef": "ref: {digest}"
+  },
+  "containers": {
+    "noSource": "no source",
+    "notManaged": "Not managed here",
+    "notManagedTooltip": "Only services created in this app can be destroyed here.",
+    "noDeployment": "This service has no deployment yet, so there is nothing to stream.",
+    "waitingForOutput": "Waiting for output…",
+    "noLogOutput": "No log output for this deployment.",
+    "connecting": "Connecting…",
+    "logsLabel": "Container logs",
+    "jumpToLatest": "Jump to latest",
+    "noTimestamp": "--:--:--",
+    "rawStatus": " (Railway status: {status})"
+  },
+  "states": {
+    "pending": "Queued",
+    "building": "Building",
+    "deploying": "Deploying",
+    "running": "Running",
+    "failed": "Failed",
+    "sleeping": "Sleeping",
+    "removing": "Removing",
+    "removed": "Removed",
+    "unknown": "Unknown"
+  },
+  "spinUp": {
+    "imageGroup": "Image",
+    "presetImages": "Preset images",
+    "imageLabel": "Image reference",
+    "imageHint": "Any public Docker image. Private registries are not supported yet.",
+    "imagePlaceholder": "redis:7-alpine",
+    "nameLabel": "Name",
+    "nameHint": "Prefixed automatically so this app can tell its own containers apart.",
+    "namePlaceholder": "cache",
+    "submit": "Spin up container",
+    "submitPending": "Spinning up…",
+    "announce": "Spinning up container…",
+    "selectProjectFirst": "Select a project and environment first.",
+    "failedTitle": "Could not spin up",
+    "presetRedis": "Redis",
+    "presetNginx": "Nginx",
+    "presetWhoami": "whoami",
+    "presetApache": "Apache"
+  },
+  "destroy": {
+    "trigger": "Destroy",
+    "title": "Destroy {name}?",
+    "description": "This permanently deletes the service and its deployment history from Railway. It cannot be undone.",
+    "confirmLabel": "Type “{name}” to confirm",
+    "submit": "Destroy permanently",
+    "submitPending": "Destroying…",
+    "announce": "Destroying {name}…",
+    "failedTitle": "Could not destroy container"
+  },
+  "actions": {
+    "invalidForm": "Check the form and try again.",
+    "duplicateName": "A container named “{name}” already exists here.",
+    "spinningUp": "Spinning up {name}",
+    "missingReference": "Missing container reference.",
+    "gone": "That container no longer exists.",
+    "notManaged": "This service was not created here, so it cannot be destroyed here.",
+    "destroyed": "Destroyed {name}"
+  },
+  "validation": {
+    "nameRequired": "Give the container a name",
+    "nameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
+    "imageRequired": "An image reference is required",
+    "imageTooLong": "Keep the image reference under {max, plural, one {# character} other {# characters}}",
+    "imageInvalid": "That does not look like a valid image reference",
+    "projectRequired": "Select a project before continuing",
+    "environmentRequired": "Select an environment before continuing",
+    "serviceRequired": "Missing container reference."
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "sessionExpired": "Your Railway session expired. Sign in again.",
+    "projectsFailed": "Could not load your Railway projects.",
+    "containersFailed": "Could not load containers for this environment.",
+    "logBackfillFailed": "Could not load earlier logs",
+    "streamInterrupted": "Log stream interrupted",
+    "streamInterruptedDetail": "Log stream interrupted: {detail}",
+    "api": {
+      "auth": "Railway rejected the request. Your authorization may have been revoked — sign in again.",
+      "rateLimitRetry": "Railway's rate limit was hit. Try again in {seconds, plural, one {# second} other {# seconds}}.",
+      "rateLimit": "Railway's rate limit was hit. Try again shortly.",
+      "network": "Could not reach Railway. Check your connection and retry.",
+      "server": "Railway returned a server error. This is usually transient — retry.",
+      "graphql": "Railway rejected the operation",
+      "graphqlDetail": "Railway rejected the operation: {detail}",
+      "empty": "Railway returned an empty response"
+    }
+  },
+  "signIn": {
+    "failed": "Sign-in failed. Try again.",
+    "session_expired": "Your Railway session expired and could not be renewed. Sign in again.",
+    "no_refresh_token": "Railway did not return a refresh token, so the session would expire in an hour. Sign in again and approve offline access when prompted.",
+    "token_exchange_failed": "Railway rejected the sign-in. Check that this app's redirect URI matches the one registered on the OAuth app.",
+    "missing_pkce_state": "The sign-in attempt timed out or the cookies were cleared. Start again.",
+    "missing_id_token": "Railway did not return an identity token. Try again.",
+    "access_denied": "You declined the authorization request."
+  }
+}

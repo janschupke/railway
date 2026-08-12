@@ -1,9 +1,6 @@
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
-import {
-  STATE_LABELS,
-  isTransitioning,
-  type ContainerState,
-} from "@/lib/railway/types";
+import { isTransitioning, type ContainerState } from "@/lib/railway/types";
 
 /**
  * Container lifecycle indicator.
@@ -22,6 +19,9 @@ export function StatusBadge({
   state: ContainerState;
   rawStatus?: string | null;
 }) {
+  const t = useTranslations();
+  const label = t(`states.${state}`);
+
   return (
     <span
       data-state-color={state}
@@ -37,9 +37,11 @@ export function StatusBadge({
           isTransitioning(state) && "animate-pulse-dot",
         )}
       />
-      {STATE_LABELS[state]}
-      {rawStatus && rawStatus !== STATE_LABELS[state] && (
-        <span className="sr-only"> (Railway status: {rawStatus})</span>
+      {label}
+      {rawStatus && rawStatus !== label && (
+        <span className="sr-only">
+          {t("containers.rawStatus", { status: rawStatus })}
+        </span>
       )}
     </span>
   );

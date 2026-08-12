@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { UI } from "@/lib/constants";
 import type { LogLine } from "@/lib/railway/types";
 import { ScrollArea } from "./ui/scroll-area";
@@ -15,12 +16,13 @@ import { Button } from "./ui/button";
 export function LogPane({
   lines,
   connected,
-  emptyLabel = "Waiting for output…",
+  emptyLabel,
 }: {
   lines: LogLine[];
   connected: boolean;
   emptyLabel?: string;
 }) {
+  const t = useTranslations("containers");
   const viewportRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
 
@@ -51,12 +53,12 @@ export function LogPane({
           role: "log",
           // Polite: a build emits hundreds of lines and assertive would be unusable.
           "aria-live": "polite",
-          "aria-label": "Container logs",
+          "aria-label": t("logsLabel"),
         }}
       >
         {lines.length === 0 ? (
           <p className="text-text-muted font-mono text-xs">
-            {connected ? emptyLabel : "Connecting…"}
+            {connected ? (emptyLabel ?? t("waitingForOutput")) : t("connecting")}
           </p>
         ) : (
           <div className="font-mono text-xs leading-relaxed">
@@ -68,7 +70,7 @@ export function LogPane({
                 <span className="text-text-subtle mr-2 select-none">
                   {/* `||`, not `??`: an empty timestamp slices to "" and must
                       still fall back to the placeholder. */}
-                  {line.timestamp?.slice(11, 19) || "--:--:--"}
+                  {line.timestamp?.slice(11, 19) || t("noTimestamp")}
                 </span>
                 {line.message}
               </div>
@@ -83,7 +85,7 @@ export function LogPane({
           onClick={() => setPinned(true)}
           className="absolute right-3 bottom-3 rounded-full shadow-sm"
         >
-          Jump to latest
+          {t("jumpToLatest")}
         </Button>
       )}
     </div>

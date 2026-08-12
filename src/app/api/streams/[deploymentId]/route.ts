@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { getTranslations } from "next-intl/server";
 import { requireAccessToken } from "@/lib/auth/server";
 import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
@@ -32,6 +33,8 @@ export async function GET(
     return new Response("Unauthorized", { status: 401 });
   }
 
+  const t = await getTranslations();
+
   return sseResponse(
     async (emit, signal) => {
       for await (const event of monitorDeployment({
@@ -41,7 +44,22 @@ export async function GET(
         signal,
       })) {
         const { type, ...payload } = event;
-        emit.send(type, payload);
+        /*
+         * The monitor names messages; this is the first layer with a request scope, so
+         * it is where a key becomes a sentence. The wire format stays `{ message }`.
+         */
+        emit.send(
+          type,
+          "message" in event
+            ? {
+                ...payload,
+                message: t(
+                  event.message.key as Parameters<typeof t>[0],
+                  event.message.values as never,
+                ),
+              }
+            : payload,
+        );
         if (type === "done" || type === "error") return;
       }
     },

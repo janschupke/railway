@@ -47,3 +47,7 @@ next-env.d.ts
 /playwright-report
 /test-results
 /coverage
+
+# Lighthouse
+/.lighthouseci
+/.lighthouse-cookie

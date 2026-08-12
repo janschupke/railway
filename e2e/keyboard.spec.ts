@@ -43,6 +43,8 @@ test.describe("keyboard operation", () => {
 
     const dialog = onlyVisible(page.getByRole("alertdialog"));
     await expect(dialog).toBeVisible();
+    // The dialog body is a dynamic import; tabbing before it lands proves nothing.
+    await expect(dialog.getByLabel(/to confirm/i)).toBeVisible();
 
     // Cycle well past the dialog's control count; focus must never escape it.
     for (let i = 0; i < 12; i++) {
@@ -68,7 +70,7 @@ test.describe("keyboard operation", () => {
     await page.keyboard.press("Enter");
 
     const dialog = onlyVisible(page.getByRole("alertdialog"));
-    await dialog.getByLabel(/type "cache" to confirm/i).focus();
+    await dialog.getByLabel(/type .cache. to confirm/i).focus();
     await page.keyboard.type("cache");
 
     await dialog.getByRole("button", { name: /destroy permanently/i }).focus();

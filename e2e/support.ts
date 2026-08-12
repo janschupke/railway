@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base, type Locator, type Page } from "@playwright/test";
 
-export const FIXTURE_URL = `http://localhost:${process.env.FAKE_RAILWAY_PORT ?? 4010}`;
+const FIXTURE_URL = `http://localhost:${process.env.FAKE_RAILWAY_PORT ?? 4010}`;
 
 /** Every spec starts from a known fixture state; workers:1 makes this safe. */
 export const test = base.extend<{ page: Page }>({
@@ -53,7 +53,7 @@ export function alerts(page: Page) {
  * Toast notifications. Radix Toast roots carry role="status", not role="alert", so
  * `alerts()` does not see them — the two are genuinely different regions.
  */
-export function toasts(page: Page) {
+function toasts(page: Page) {
   return onlyVisible(page.getByRole("status"));
 }
 
@@ -82,7 +82,7 @@ export const button = (page: Page, name: RegExp | string) =>
   onlyVisible(page.getByRole("button", { name }));
 
 /** The container list, named so it cannot be confused with the toast viewport. */
-export const containerList = (page: Page) =>
+const containerList = (page: Page) =>
   onlyVisible(page.getByRole("list", { name: "Containers" }));
 
 export function row(page: Page, name: string) {
@@ -112,6 +112,23 @@ export async function signIn(page: Page) {
     onlyVisible(page.getByRole("heading", { name: "Containers" })),
   ).toBeVisible();
   await settled(page);
+}
+
+/**
+ * Opens the destroy confirmation and waits until it is actually usable.
+ *
+ * The dialog shell renders immediately, but its body is a dynamic import — so a spec
+ * that acts as soon as `alertdialog` appears races the chunk. Waiting for the confirm
+ * field is the honest "the dialog is ready" signal.
+ */
+export async function openDestroyDialog(page: Page, name: string) {
+  await onlyVisible(
+    row(page, name).getByRole("button", { name: /^destroy$/i }),
+  ).click();
+  const dialog = onlyVisible(page.getByRole("alertdialog"));
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel(/to confirm/i)).toBeVisible();
+  return dialog;
 }
 
 export async function spinUp(page: Page, name: string, preset = "Redis") {

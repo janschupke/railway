@@ -3,9 +3,10 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { Toast } from "radix-ui";
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
-export type ToastTone = "success" | "error" | "info";
+type ToastTone = "success" | "error" | "info";
 
 type ToastRecord = {
   id: number;
@@ -54,6 +55,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((current) => current.filter((t) => t.id !== id));
   }, []);
 
+  const t = useTranslations("common");
   const api = useMemo(() => ({ toast }), [toast]);
 
   return (
@@ -86,7 +88,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 )}
               </div>
               <Toast.Close
-                aria-label="Dismiss notification"
+                aria-label={t("dismissNotification")}
                 className="focus-ring text-text-subtle hover:text-text rounded p-0.5"
               >
                 <X aria-hidden className="size-3.5" />

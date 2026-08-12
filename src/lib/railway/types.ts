@@ -55,18 +55,6 @@ export function isTransitioning(state: ContainerState): boolean {
   );
 }
 
-export const STATE_LABELS: Record<ContainerState, string> = {
-  pending: "Queued",
-  building: "Building",
-  deploying: "Deploying",
-  running: "Running",
-  failed: "Failed",
-  sleeping: "Sleeping",
-  removing: "Removing",
-  removed: "Removed",
-  unknown: "Unknown",
-};
-
 export type RailwayEnvironment = {
   id: string;
   name: string;

@@ -1,17 +1,34 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Info } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 import { isTerminal, isTransitioning, type Container } from "@/lib/railway/types";
 import { cn, relativeTime } from "@/lib/utils";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
-import { LogPane } from "./log-pane";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
+
+/*
+ * The log pane only mounts once a row is expanded, and it drags Radix ScrollArea in
+ * with it — so loading it with the dashboard made every visitor pay for a panel most
+ * of them never open.
+ *
+ * `ssr: false` is deliberate: it is gated on `expanded`, which is always false on the
+ * server, so there is nothing to hydrate and no flash to avoid.
+ *
+ * Tooltip is *not* deferred, even though it is also Radix: it wraps the button rather
+ * than replacing it, so a lazy version would blank out a visible control while its
+ * chunk loaded.
+ */
+const LogPane = dynamic(() => import("./log-pane").then((m) => m.LogPane), {
+  ssr: false,
+});
 
 /**
  * One container in the list.
@@ -28,6 +45,9 @@ export function ContainerRow({
   projectId: string;
   environmentId: string;
 }) {
+  const t = useTranslations("containers");
+  const tCommon = useTranslations("common");
+  const locale = useLocale();
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
@@ -72,7 +92,7 @@ export function ContainerRow({
               {container.displayName}
             </span>
             <span className="text-text-subtle block truncate font-mono text-xs">
-              {container.image ?? container.repo ?? "no source"}
+              {container.image ?? container.repo ?? t("noSource")}
             </span>
           </span>
         </button>
@@ -87,7 +107,8 @@ export function ContainerRow({
           // Relative time is computed from the client clock; the server's value differs.
           suppressHydrationWarning
         >
-          {relativeTime(container.updatedAt ?? container.createdAt)}
+          {relativeTime(container.updatedAt ?? container.createdAt, locale) ??
+            tCommon("noValue")}
         </time>
 
         {container.managed ? (
@@ -105,10 +126,10 @@ export function ContainerRow({
            * control could not address the control it can see (WCAG 2.5.3 Label in
            * Name). The tooltip supplies the explanation as a description instead.
            */
-          <Tooltip content="Only services created in this app can be destroyed here.">
+          <Tooltip content={t("notManagedTooltip")}>
             <Button variant="ghost" size="sm">
               <Info aria-hidden />
-              Not managed here
+              {t("notManaged")}
             </Button>
           </Tooltip>
         )}
@@ -128,15 +149,11 @@ export function ContainerRow({
                 lines={stream.logs}
                 connected={stream.connected}
                 emptyLabel={
-                  isTransitioning(state)
-                    ? "Waiting for output…"
-                    : "No log output for this deployment."
+                  isTransitioning(state) ? t("waitingForOutput") : t("noLogOutput")
                 }
               />
             ) : (
-              <Banner tone="info">
-                This service has no deployment yet, so there is nothing to stream.
-              </Banner>
+              <Banner tone="info">{t("noDeployment")}</Banner>
             )}
           </>
         )}

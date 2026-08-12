@@ -4,6 +4,7 @@ import {
   field,
   injectFaults,
   onlyVisible,
+  openDestroyDialog,
   row,
   signIn,
   spinUp,
@@ -53,15 +54,13 @@ test.describe("container lifecycle", () => {
     const cache = row(page, "cache");
     await expect(cache).toBeVisible();
 
-    await onlyVisible(cache.getByRole("button", { name: /^destroy$/i })).click();
-
-    const dialog = page.getByRole("alertdialog");
+    const dialog = await openDestroyDialog(page, "cache");
     await expect(dialog).toContainText("Destroy cache?");
 
     const confirm = dialog.getByRole("button", { name: /destroy permanently/i });
     await expect(confirm).toBeDisabled();
 
-    await dialog.getByLabel(/type "cache" to confirm/i).fill("cache");
+    await dialog.getByLabel(/type .cache. to confirm/i).fill("cache");
     await expect(confirm).toBeEnabled();
     await confirm.click();
 

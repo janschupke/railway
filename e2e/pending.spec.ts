@@ -70,7 +70,7 @@ test("destroy marks its button busy and locks cancel", async ({ page }) => {
   await injectFaults(page, { slowMs: 1500 });
   await row(page, "doomed").getByRole("button", { name: "Destroy" }).click();
 
-  await onlyVisible(page.getByLabel(/type "doomed" to confirm/i)).fill("doomed");
+  await onlyVisible(page.getByLabel(/type .doomed. to confirm/i)).fill("doomed");
   const confirm = button(page, /destroy permanently|destroying/i);
   await confirm.click();
 

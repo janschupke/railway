@@ -41,6 +41,10 @@ jobs:
       - name: TypeScript
         run: pnpm typecheck
 
+      # Unused files, dependencies and exports. Findings fail; they are not advisory.
+      - name: knip (dead code)
+        run: pnpm knip
+
       # Fails the job if any threshold in vitest.config.mts is missed.
       - name: Unit, component and integration tests with coverage
         run: pnpm test:coverage
@@ -64,6 +68,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
+      # Next 16 no longer prints route sizes, so this is the only thing standing
+      # between a stray import and a silently heavier page.
+      - name: Per-route bundle budget
+        run: pnpm size
 
   e2e:
     name: End-to-end and accessibility
@@ -103,6 +112,51 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  lighthouse:
+    name: Lighthouse (performance, a11y, budgets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # lh-auth.ts drives the real OAuth flow with Playwright to reach the dashboard.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm build
+
+      # Backgrounded because both servers must stay up for the whole Lighthouse run;
+      # the script exits only on failure, and prints "ready" once both answer.
+      - name: Start app and fake Railway
+        run: |
+          pnpm serve:e2e &
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:3100/api/health > /dev/null && break
+            sleep 2
+          done
+
+      # numberOfRuns is 1 in lighthouserc.cjs — one Chrome, never a pool.
+      - name: Lighthouse CI
+        run: pnpm lighthouse
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: lighthouse-report
+          path: .lighthouseci/
+          retention-days: 7
+
   schema:
     name: Railway schema drift
     runs-on: ubuntu-latest
@@ -123,7 +177,7 @@ jobs:
   required:
     name: All checks
     runs-on: ubuntu-latest
-    needs: [quality, build, e2e, schema]
+    needs: [quality, build, e2e, lighthouse, schema]
     if: always()
     steps:
       - name: Fail if any dependency failed

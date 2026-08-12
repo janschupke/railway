@@ -170,13 +170,78 @@ The app deploys itself the same way it deploys containers.
 ### Checks
 
 ```bash
-pnpm check      # format:check + lint (0 warnings) + typecheck + coverage gate
-pnpm test:e2e   # Playwright against the fake Railway fixture
+pnpm check          # format + lint (0 warnings) + types + knip + coverage gate
+pnpm test:e2e       # Playwright against the fake Railway fixture
+pnpm build && pnpm size   # per-route first-load JS against bundle-budgets.json
+pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 ```
 
-CI runs these on every push and pull request to `master`, as four parallel jobs behind a
+CI runs these on every push and pull request to `master`, as five parallel jobs behind a
 single `All checks` gate for branch protection to require. Enabling that protection is a
 GitHub repo setting, not a file — it is the one manual step.
+
+---
+
+## Internationalisation
+
+Every user-facing string lives in `messages/en.json`. Components read it through
+next-intl: `getTranslations` on the server, `useTranslations` on the client.
+
+There is one locale, and that is a stopping point rather than an unfinished job — adding
+a second is a translation task, not a refactor. Three things make that claim real rather
+than aspirational:
+
+- **`no-literal-string` (eslint-plugin-i18next)** on `src/**/*.tsx`. A hardcoded sentence
+  fails the build. Without it the catalog decays on the next commit.
+- **Typed keys.** `global.d.ts` declares the catalog as next-intl's `Messages`, so
+  `t("dashboard.emptyTitle")` is checked by `tsc`. A renamed key breaks the build
+  instead of rendering a missing-message marker.
+- **Tests assert real copy.** The Vitest setup swaps next-intl's hooks for its own
+  `createTranslator` over the actual `en.json`, so a misnamed ICU argument or a malformed
+  plural fails a component test. A key-echoing stub would have hidden all of it.
+
+Code that has no request scope — error classes, the log monitor — returns a
+`MessageDescriptor` (`{ key, values }`) instead of a sentence, and the layer that renders
+resolves it. That is what keeps a Railway failure one catalog key rather than English
+frozen inside a `throw`.
+
+Some cases needed more than a placeholder: `{managed} of {total} created here` is an ICU
+plural, the managed-prefix note is rich text with a `<code>` chunk that translators can
+move, and `relativeTime` now uses `Intl.RelativeTimeFormat` — the previous `${n}s ago`
+was plural-blind and assumed the marker was a suffix, which it is not in German.
+
+---
+
+## Performance
+
+Next 16 stopped printing route sizes, so `pnpm size` reads
+`.next/diagnostics/route-bundle-stats.json`, gzips each chunk a route loads first, and
+compares against `bundle-budgets.json`. Per route, no browser, ~2 seconds. (size-limit
+cannot express this: Turbopack hashes every chunk name, so its config could only hold
+globs, and a glob sums a directory instead of answering "what does /dashboard cost".)
+
+Current: **/dashboard 203.5 kB**, **/ 161.5 kB**, **/\_not-found 142.1 kB** gzipped.
+
+Two changes moved those numbers, and one that looked obvious did not:
+
+- `ToastProvider` moved from the root layout to `dashboard/layout.tsx`. The landing page
+  and the 404 were shipping Radix Toast — ~12 kB gzip — to render UI with no actions.
+- The log pane is `next/dynamic`. It only mounts once a row is expanded, and it brings
+  Radix ScrollArea with it.
+- **Lazy-loading the destroy dialog's body was reverted.** It saved ~10 kB on paper, but
+  Radix traps focus in whatever the dialog contains when it opens — and for the tick
+  before the chunk arrived, that was nothing, so Tab walked straight out into the page
+  behind. `e2e/keyboard.spec.ts` caught it. Removing the `next/dynamic` wrapper also made
+  the route _smaller_, because the wrapper cost more than the split saved.
+
+Lighthouse CI covers what a byte count cannot — fonts, CSS, and the rendered result — on
+the landing page **and the authenticated dashboard**, which `scripts/lh-auth.ts` reaches
+by driving the real OAuth flow against the fake Railway with Playwright. Accessibility is
+gated at 100; the performance _score_ is a warning, because it swings on shared CI runners
+and a gate that flakes is a gate everyone learns to ignore. The resource budgets beside it
+are deterministic, so they gate hard.
+
+`numberOfRuns` is 1. One Chrome, never a pool.
 
 ---
 

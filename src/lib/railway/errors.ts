@@ -1,3 +1,5 @@
+import type { MessageDescriptor } from "@/lib/messages";
+
 export type RailwayErrorKind =
   | "auth" // 401/403 — token rejected or scope insufficient
   | "rate_limit" // 429 — retries exhausted
@@ -30,25 +32,34 @@ export class RailwayApiError extends Error {
     this.cause = options.cause;
   }
 
-  /** Copy safe to hand to the browser — never includes token or header material. */
-  toClientError(): { message: string; kind: RailwayErrorKind } {
-    return { message: this.userMessage(), kind: this.kind };
-  }
-
-  userMessage(): string {
+  /**
+   * Which message to show, not the message itself — this class has no translator and
+   * is constructed deep in the network layer, well outside any request scope.
+   */
+  describe(): MessageDescriptor {
     switch (this.kind) {
       case "auth":
-        return "Railway rejected the request. Your authorization may have been revoked — sign in again.";
+        return { key: "errors.api.auth" };
       case "rate_limit":
         return this.retryAfterSeconds
-          ? `Railway's rate limit was hit. Try again in ${this.retryAfterSeconds}s.`
-          : "Railway's rate limit was hit. Try again shortly.";
+          ? {
+              key: "errors.api.rateLimitRetry",
+              values: { seconds: this.retryAfterSeconds },
+            }
+          : { key: "errors.api.rateLimit" };
       case "network":
-        return "Could not reach Railway. Check your connection and retry.";
+        return { key: "errors.api.network" };
       case "server":
-        return "Railway returned a server error. This is usually transient — retry.";
+        return { key: "errors.api.server" };
       case "graphql":
-        return this.message;
+        /*
+         * Railway's own GraphQL text is the only detail we have and it arrives in
+         * English. Wrapping it keeps the sentence around it translatable instead of
+         * handing the user a raw upstream string.
+         */
+        return this.message
+          ? { key: "errors.api.graphqlDetail", values: { detail: this.message } }
+          : { key: "errors.api.graphql" };
     }
   }
 }

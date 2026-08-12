@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useNavigationPending } from "@/hooks/use-navigation-pending";
 import { Button } from "./ui/button";
 
@@ -13,10 +14,8 @@ type SignInButtonProps = Omit<
  * adds is feedback: /api/auth/login generates a PKCE challenge, writes cookies and
  * redirects to Railway — slow enough that a bare anchor reads as a dead click.
  */
-export function SignInButton({
-  label = "Sign in with Railway",
-  ...buttonProps
-}: SignInButtonProps) {
+export function SignInButton({ label, ...buttonProps }: SignInButtonProps) {
+  const t = useTranslations("common");
   const { pending, start } = useNavigationPending();
 
   return (
@@ -24,7 +23,7 @@ export function SignInButton({
       {/* The label is swapped here rather than via `pendingLabel`, which cannot reach
           inside a slotted element. */}
       <a href="/api/auth/login" onClick={start}>
-        {pending ? "Redirecting to Railway…" : label}
+        {pending ? t("signInPending") : (label ?? t("signIn"))}
       </a>
     </Button>
   );

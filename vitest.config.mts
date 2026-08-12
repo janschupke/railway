@@ -19,7 +19,7 @@ export default defineConfig({
           environment: "node",
           include: ["src/**/*.test.ts"],
           exclude: ["src/**/*.integration.test.ts"],
-          setupFiles: ["src/test/setup.ts"],
+          setupFiles: ["src/test/setup.ts", "src/test/setup-intl.ts"],
         },
       },
       {
@@ -37,7 +37,7 @@ export default defineConfig({
           name: "integration",
           environment: "node",
           include: ["src/**/*.integration.test.ts"],
-          setupFiles: ["src/test/setup.ts"],
+          setupFiles: ["src/test/setup.ts", "src/test/setup-intl.ts"],
         },
       },
     ],

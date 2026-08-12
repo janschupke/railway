@@ -5,7 +5,7 @@ export const SESSION_COOKIE = "rc_session";
 export const PKCE_COOKIE = "rc_pkce";
 export const STATE_COOKIE = "rc_state";
 
-export type SessionUser = {
+type SessionUser = {
   id: string;
   name?: string;
   email?: string;

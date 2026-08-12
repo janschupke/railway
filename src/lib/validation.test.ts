@@ -37,10 +37,37 @@ describe("spinUpSchema", () => {
     expect(parsed.success && parsed.data.name).toBe("cache");
   });
 
-  it("rejects an empty name with a message a user can act on", () => {
+  it("rejects an empty name, naming a catalog key rather than a sentence", () => {
+    // Schemas carry message ids; the Server Action resolves them against the catalog.
     const parsed = spinUpSchema.safeParse({ ...valid, name: "   " });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.message).toBe("Give the container a name");
+    expect(parsed.error?.issues[0]?.message).toBe("validation.nameRequired");
+  });
+
+  it("gives every rule a message id, so none falls back to zod's own English", () => {
+    /*
+     * Four rules used to carry no message at all — a >255-char image reference
+     * rendered zod's built-in text, which no translation could ever reach.
+     */
+    const cases = [
+      { ...valid, projectId: "" },
+      { ...valid, environmentId: "" },
+      { ...valid, name: "" },
+      { ...valid, name: "x".repeat(LIMITS.CONTAINER_NAME_MAX + 1) },
+      { ...valid, image: "" },
+      { ...valid, image: `${"x".repeat(LIMITS.IMAGE_REF_MAX + 1)}` },
+      { ...valid, image: "NOT A VALID IMAGE" },
+    ];
+
+    for (const input of cases) {
+      const parsed = spinUpSchema.safeParse(input);
+      expect(parsed.success).toBe(false);
+      for (const issue of parsed.error?.issues ?? []) {
+        expect(issue.message, JSON.stringify(input).slice(0, 60)).toMatch(
+          /^validation\./,
+        );
+      }
+    }
   });
 
   it("bounds the name length", () => {

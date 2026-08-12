@@ -1,6 +1,10 @@
 # esbuild powers tsx, which runs the E2E fixture server; msw builds its
 # service-worker asset. The rest stay off.
 allowBuilds:
+  # knip's optional native accelerators. It runs correctly without either, so we
+  # skip the native compile rather than pay for it on every install.
+  "@parcel/watcher": false
+  "@swc/core": false
   esbuild: true
   msw: true
   sharp: false

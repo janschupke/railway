@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // Next's App Router has no single entry: every page/layout/route file is one, and so
+  // are the proxy, the E2E specs and the fixture server. Without these, knip would
+  // report the entire app as unreachable.
+  "entry": [
+    "src/app/**/{page,layout,route,error,loading,not-found,global-error}.tsx",
+    "src/app/**/{page,layout,route}.ts",
+    "scripts/*.ts",
+    "e2e/**/*.spec.ts",
+    "e2e/fixtures/fake-railway/server.ts",
+  ],
+  "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "scripts/**/*.ts"],
+
+  "ignoreDependencies": [
+    // Loaded by name from postcss.config / the Prettier config, not imported.
+    "tailwindcss",
+    // Referenced only inside a Playwright `webServer` command string
+    // ("pnpm exec tsx e2e/fixtures/fake-railway/server.ts"), which no static
+    // analysis can see. Removing it breaks the E2E fixture.
+    "tsx",
+  ],
+
+  "ignore": ["src/test/**"],
+  "vitest": { "config": ["vitest.config.mts"] },
+  "playwright": { "config": ["playwright.config.ts"] },
+}

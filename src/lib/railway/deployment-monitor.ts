@@ -12,6 +12,7 @@ import {
   type ContainerState,
   type LogLine,
 } from "./types";
+import type { MessageDescriptor } from "@/lib/messages";
 
 export type LogPhase = "build" | "deploy";
 
@@ -25,8 +26,9 @@ export type MonitorEvent =
       rawStatus: string | null;
       updatedAt: string | null;
     }
-  | { type: "warning"; message: string }
-  | { type: "error"; message: string }
+  // Descriptors, not sentences: the monitor has no translator and no request scope.
+  | { type: "warning"; message: MessageDescriptor }
+  | { type: "error"; message: MessageDescriptor }
   | { type: "done"; deploymentId: string; state: ContainerState };
 
 /** Injection seam so the monitor is testable without a network or a socket. */
@@ -109,8 +111,8 @@ export async function* monitorDeployment(
       type: "warning",
       message:
         error instanceof RailwayApiError
-          ? error.userMessage()
-          : "Could not load earlier logs",
+          ? error.describe()
+          : { key: "errors.logBackfillFailed" },
     });
     queue.push({ type: "ready", deploymentId, phase, backfilled: 0 });
   }
@@ -138,7 +140,7 @@ export async function* monitorDeployment(
       }
     } catch (error) {
       if (error instanceof RailwayApiError && error.kind === "auth") {
-        queue.push({ type: "error", message: error.userMessage() });
+        queue.push({ type: "error", message: error.describe() });
         stop();
       }
       // Transient failures: the next tick retries.
@@ -169,8 +171,11 @@ export async function* monitorDeployment(
           type: "warning",
           message:
             error instanceof Error
-              ? `Log stream interrupted: ${error.message}`
-              : "Log stream interrupted",
+              ? {
+                  key: "errors.streamInterruptedDetail",
+                  values: { detail: error.message },
+                }
+              : { key: "errors.streamInterrupted" },
         });
       }
     }
