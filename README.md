@@ -30,6 +30,7 @@ SSE route multiplexes deployment status and log output into the open tab.
 | `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker          |
 | `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream   |
 | `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling              |
+| `src/lib/logger.ts`                     | Structured logs: request-scoped fields, the error serializer     |
 | `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it          |
 | `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses  |
 | `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class    |
@@ -232,6 +233,71 @@ not selection sets or nullability — so a renamed nested field surfaces as a ru
 `undefined`. The answer to that is codegen, which Apollo does not provide either. It is
 in "What I would do next".
 
+### ADR-9 — Structured logs on stdout, with the OTel seam cut but not used
+
+Before this, the entire server logged through one `console.error` in `report-error.ts`.
+It had already computed everything a query would want — the error's kind, HTTP status,
+operation name, Railway's `extensions.code`, the refused GraphQL path, the incident id —
+and then flattened all of it into a template string that only `grep` could read.
+
+**pino, and stdout only.** Railway captures stdout and nothing else, which the code
+already assumed. A shipper is a deployment decision, and no code change should be waiting
+on it. What this step buys is the part that is expensive to retrofit: stable event names,
+a request id that survives the proxy → render → stream handoff, and an error serializer
+that cannot leak a credential.
+
+**`msg` is an event name, not prose.** `container.created`, `auth.session.refresh_failed`.
+About twenty-five values, which is what makes it usable as a Loki label rather than a
+substring search. `reportError`'s existing `scope` argument already had this shape, so it
+became the event name unchanged.
+
+**The request id travels as a header, because it has to.** Next's own documentation says
+Proxy "is meant to be invoked separately of your render code and in optimized cases
+deployed to your CDN, you should not attempt relying on shared modules or globals" — so a
+module-level handoff is unavailable in principle, not merely discouraged. The nonce
+already rides `forwarded()` for the same reason (ADR-2's neighbour), and the id rides
+along with it. Inbound values are never adopted on a proxied path: an attacker-chosen id
+is a log-injection vector and an unbounded Loki label. `api/auth` is outside the matcher,
+so those handlers mint their own and say so at the call site.
+
+**AsyncLocalStorage on the app side only.** A stream is four layers deep — route →
+monitor → api → client — and the monitor outlives the request that created it, so an
+argument would have to survive a handoff no argument survives. It works because
+`new ReadableStream({ start })` runs `start` synchronously during construction, inside
+the handler's scope, so the 2.5s status poll created there stays correlated for the full
+fifteen minutes. That is a real invariant with a real test, not a happy accident.
+
+**The error serializer never reads `cause`.** This is the same finding the security
+review closed, one library away from returning: pino's stock `err` serializer walks
+`cause` recursively, and `cause` is where `oauth4webapi` puts a live access and refresh
+token. Three layers now: a field type that makes an object a compile error, an allow-list
+serializer, and redact paths as a labelled net. `describeOidcFailure` still owns the OIDC
+path, so the raw error never reaches the logger at all. See SECURITY.md.
+
+**`LOG_LEVEL` bypasses `src/env.ts`,** which is the one exception to "all configuration is
+validated in env.ts" and is deliberate: `/api/health` exists in order to log `env()`
+failing, and a logger that called `env()` could not report that failure. An unrecognised
+value clamps rather than throwing, for the same reason `withRequestScope` catches
+`headers()` — instrumentation that can fail the thing it observes is worse than none.
+
+**Three lines were tuned by reading real output rather than by reasoning about it,** and
+each was the same mistake — a warning that fires on an ordinary event teaches people to
+ignore the level. A status poll in flight when a tab closes aborts, which is teardown, not
+failure. A render that stops because the user navigated away is Next reporting a
+disconnect through the same hook as a genuine throw. And `RailwayApiError` stacks name
+this app's own mapper every time, at ~700 bytes a record on the noisiest path, so they are
+dropped in favour of the fields that were promoted out of them.
+
+**What is deliberately not logged:** container stdout (the user's data, unbounded, and it
+would multiply this deployment's own log volume by every open stream), email and display
+name, any token, and successful requests through the proxy — Railway already emits an
+access log and this app has no business duplicating it.
+
+**One open question, recorded rather than discovered later.** `formatters.level` emits a
+string, because Railway's log viewer colours on one and that is the actual reader today.
+The OTel bridge's severity mapping may prefer the number. It is one line in one file and
+the field name is the same either way.
+
 ---
 
 ## Schema verification
@@ -309,6 +375,49 @@ and `SESSION_SECRET` as service variables — `APP_URL` is derived from Railway'
 `RAILWAY_PUBLIC_DOMAIN`.
 
 The app deploys itself the same way it deploys containers.
+
+### Logs
+
+One JSON object per line on stdout, which is what Railway captures. Locally,
+`pnpm dev:pretty` pipes it through `pino-pretty` — a devDependency and a pipe, never a
+pino _transport_, because a transport runs in a worker thread and that is precisely the
+thing Next externalizes pino to work around.
+
+```
+{"level":"info","time":1786543673062,"service":"container-console","env":"production",
+ "version":"9f7f505","request_id":"a1b2c3d4e5f60718","subject_id":"user_42",
+ "route":"spinUp","project_id":"p_1","environment_id":"e_1",
+ "service_name":"spun-api","image":"nginx:1.27","service_id":"svc_9",
+ "msg":"container.created"}
+```
+
+| Field                       | What it is                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `msg`                       | The event name. ~25 stable values — the field to build a Loki label on                                               |
+| `level`, `time`             | String label, epoch ms. Both pino defaults, left alone so the OTel bridge reads them                                 |
+| `service`, `env`, `version` | Map onto OTel's `service.name` / `deployment.environment.name` / `service.version`                                   |
+| `request_id`                | Joins a proxy line to the render and stream lines that follow it                                                     |
+| `subject_id`                | The OIDC subject. Never the email or the display name                                                                |
+| `route`                     | The static route pattern, not the concrete path — bounded cardinality                                                |
+| `incident`                  | The id the user is shown. `jq 'select(.incident=="abc12345")'` finds its line                                        |
+| `err.*`                     | `type`, `message`, `stack`, and for a Railway failure `kind`, `status`, `operation`, `code`, `path`, `missing_scope` |
+
+`LOG_LEVEL` is `silent | error | warn | info | debug | trace`, defaulting to `info` in
+production and `debug` elsewhere. The Railway client's per-request timing and the
+steady-state poll failures sit at `debug` deliberately — at `info` they would be the
+dominant volume in the system.
+
+A misconfigured deployment now says so. `env()` throws in the proxy before `/api/health`
+can answer, so the app used to return an unlogged 500; it emits one `proxy.env_invalid`
+record naming the variables (never their values), once per process rather than on every
+healthcheck.
+
+**Getting to Grafana from here** is a deployment change and no code change: add the OTel
+packages, add `register()` to the `src/instrumentation.ts` this already created, and
+point Alloy at Railway's log drain (`stage.json` → labels on `level`/`service`/`env` →
+structured metadata for `request_id`/`incident`/`subject_id`). `trace_id`, `span_id` and
+`trace_flags` are left unwritten on purpose: `@opentelemetry/instrumentation-pino` injects
+exactly those, and hand-rolling them now would mean two spellings of one concept later.
 
 ### Checks
 
@@ -524,7 +633,12 @@ Four tiers, each answering something the others cannot.
 across `src/**`. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
 are excluded and covered end-to-end instead — counting them would either inflate the
 number or invite render tests that assert nothing. E2E does not feed the figure, so
-component tests have to carry the UI. Current: 360 tests, ~94% lines.
+component tests have to carry the UI.
+
+Log records are asserted, not printed past. `src/test/log-capture.ts` is installed
+globally from `src/test/setup.ts`, so every tier can read what was actually written —
+including the credential canary, which runs over the real OAuth callback handler and
+searches the raw serialized bytes rather than a parsed record.
 
 One deliberate split: the sign-in button's busy state is a component test, not an e2e
 one. It exists only between the click and the browser committing the next document, and
@@ -629,8 +743,15 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   upstream subscription per deployment and fanning out to N viewers, instead of one
   upstream connection per viewer per replica. That is what SSE's replica affinity forces
   once there is more than one instance.
-- **An audit log** of spin-up/spin-down per user — the one thing genuinely worth a
-  database, since Railway does not retain it once a service is deleted.
+- **An audit log** of spin-up/spin-down per user — now half done. The events are recorded
+  (`container.created`, `container.destroyed`, `container.destroy_refused`, with the
+  subject and the ids), and the field set is deliberately the shape a table would take, so
+  the remaining work is a parse rather than a re-instrumentation. What a database adds is
+  retention beyond the log window and a query the user can run themselves.
+- **Ship the logs somewhere.** ADR-9 cut the seam and left it unused: add the OTel
+  packages, add `register()` to `src/instrumentation.ts`, point Grafana Alloy at Railway's
+  log drain. Nothing in `src/**` outside that one file should need to change — that is the
+  test of whether the seam was cut in the right place.
 - **Idempotency keys** on create, replacing the name pre-check.
 - **Typed GraphQL documents** via codegen against the live schema, replacing the
   unchecked `gql<T>()` assertions (ADR-8). `verify-schema.ts` catches a renamed root

@@ -1,4 +1,5 @@
 import { newIncidentId } from "@/lib/incident";
+import { log } from "@/lib/logger";
 import { RailwayApiError } from "@/lib/railway/errors";
 import type { MessageDescriptor, MessageKey } from "@/lib/messages";
 
@@ -15,30 +16,14 @@ import type { MessageDescriptor, MessageKey } from "@/lib/messages";
  * short id; the browser gets a catalog key and that id. A screenshot now points at a log
  * line instead of being the only evidence.
  */
-function detailOf(error: unknown): string {
-  if (error instanceof RailwayApiError) {
-    const fields = [
-      `kind=${error.kind}`,
-      error.status ? `status=${error.status}` : null,
-      error.operation ? `op=${error.operation}` : null,
-      error.code ? `code=${error.code}` : null,
-      // The refused field, which is the difference between a dead token and a scope
-      // that was never granted. Without it the log says no more than the browser does.
-      error.path?.length ? `path=${error.path.join(".")}` : null,
-      error.missingScope ? `needs=${error.missingScope}` : null,
-      error.isSchemaRejection() ? "schemaRejection" : null,
-    ].filter(Boolean);
-    return `${fields.join(" ")} :: ${error.message}`;
-  }
-  if (error instanceof Error) return `${error.name}: ${error.message}`;
-  return String(error);
-}
-
 /**
  * Records a failure server-side and returns the descriptor the browser may see.
  *
- * `scope` names the operation rather than the error — "railway.logStream", "action" —
- * so the log is greppable by subsystem as well as by id.
+ * `scope` names the operation rather than the error — "railway.logStream", "action" — and
+ * is emitted as the log record's event name, so a subsystem is a query rather than a
+ * substring. The failure's own fields (kind, status, operation, code, the refused path,
+ * the scope it implies) used to be flattened into a template string here; they now go
+ * through the logger's error serializer and arrive as fields under `err`.
  */
 export function reportError(
   scope: string,
@@ -48,7 +33,10 @@ export function reportError(
   const incident =
     error instanceof RailwayApiError ? error.incidentId : newIncidentId();
 
-  console.error(`[${incident}] ${scope}: ${detailOf(error)}`);
+  // `incident` stays top-level rather than under `err`: it is the join key between a
+  // screenshot and a log line, and it exists for failures that are not RailwayApiErrors
+  // and therefore carry no id of their own.
+  log.error(scope, { incident, error });
 
   return error instanceof RailwayApiError
     ? error.describe()

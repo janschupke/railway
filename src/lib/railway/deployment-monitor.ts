@@ -2,6 +2,7 @@ import "server-only";
 
 import { AsyncQueue } from "@/lib/async-queue";
 import { STREAM } from "@/lib/constants";
+import { log } from "@/lib/logger";
 import { reportError } from "@/lib/report-error";
 import { getDeployment, getLogs } from "./api";
 import { RailwayApiError } from "./errors";
@@ -116,6 +117,7 @@ export async function* monitorDeployment(
   }
 
   let missingPolls = 0;
+  let consecutiveFailures = 0;
 
   const pollStatus = async () => {
     try {
@@ -129,11 +131,23 @@ export async function* monitorDeployment(
          * duration ceiling. Requests are cheap to make and were expensive to ignore.
          */
         if (++missingPolls < STREAM.MISSING_POLLS_BEFORE_STOP) return;
+        log.warn("railway.deployment.not_found", {
+          deployment_id: deploymentId,
+          polls: missingPolls,
+        });
         queue.push({ type: "error", message: { key: "errors.deploymentNotFound" } });
         stop();
         return;
       }
       missingPolls = 0;
+
+      if (consecutiveFailures > 0) {
+        log.warn("railway.deployment.poll_recovered", {
+          deployment_id: deploymentId,
+          after: consecutiveFailures,
+        });
+        consecutiveFailures = 0;
+      }
 
       const state = toContainerState(deployment.status);
       queue.push({
@@ -158,8 +172,36 @@ export async function* monitorDeployment(
           message: reportError("railway.deploymentPoll", error, "errors.generic"),
         });
         stop();
+        return;
       }
-      // Transient failures: the next tick retries.
+
+      /*
+       * A poll in flight when the browser hangs up aborts, and that is teardown rather
+       * than failure — the log subscription below already guards on the same condition.
+       * Without this, closing a tab produced an AbortError at `warn` on every stream
+       * that happened to be mid-poll, which is precisely the false positive that teaches
+       * people to ignore warnings.
+       */
+      if (signal.aborted) return;
+
+      /*
+       * Transient failures: the next tick retries — and until now that comment was the
+       * only evidence they had happened at all. A deployment could poll-fail for the
+       * full fifteen-minute ceiling in silence.
+       *
+       * Logged on the transition rather than per tick, because a naive line here is 360
+       * records per wedged stream (2.5s × 15 min) and Railway charges for retained
+       * stdout. First failure and recovery are `warn`; the steady state is `debug`, so a
+       * fifteen-minute outage costs two lines and the detail is still there on request.
+       */
+      consecutiveFailures += 1;
+      const fields = {
+        deployment_id: deploymentId,
+        consecutive: consecutiveFailures,
+        error,
+      };
+      if (consecutiveFailures === 1) log.warn("railway.deployment.poll_failed", fields);
+      else log.debug("railway.deployment.poll_failed", fields);
     }
   };
 

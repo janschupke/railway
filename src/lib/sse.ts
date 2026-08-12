@@ -7,6 +7,24 @@ export type SseEmitter = {
   close: () => void;
 };
 
+/**
+ * Which teardown path ended the stream.
+ *
+ * Reported rather than logged: deciding that a `deadline` close is worth a warning and a
+ * `client-abort` is not belongs to the route, which knows what it opened the stream for.
+ * This module stays a transport with no opinion and no logger import.
+ */
+type SseCloseReason =
+  | "producer" // the producer returned normally
+  | "producer-error" // the producer threw
+  | "client-abort" // clientSignal fired — the browser went away
+  | "deadline" // maxDurationMs elapsed
+  | "cancel"; // ReadableStream.cancel(), the runtime's own hangup path
+
+// Not exported: callers destructure it off `onClose`'s parameter and never name it, and
+// an export nothing imports is a knip failure.
+type SseCloseInfo = { reason: SseCloseReason; durationMs: number };
+
 export type SseOptions = {
   keepaliveMs?: number;
   maxDurationMs?: number;
@@ -19,7 +37,7 @@ export type SseOptions = {
    * abort signal would never return, so a `finally` in the caller would never run and
    * whatever it releases would leak for the life of the process.
    */
-  onClose?: () => void;
+  onClose?: (info: SseCloseInfo) => void;
 };
 
 /**
@@ -44,8 +62,31 @@ export function sseResponse(
   const encoder = new TextEncoder();
   const controller = new AbortController();
 
-  clientSignal?.addEventListener("abort", () => controller.abort(), { once: true });
-  const deadline = setTimeout(() => controller.abort(), maxDurationMs);
+  const startedAt = Date.now();
+  let reason: SseCloseReason | null = null;
+  /*
+   * First writer wins, and `??=` is what makes that safe: a client disconnect fires both
+   * `clientSignal` and `cancel()`, so the second call has to be a no-op — the same
+   * property `emit.close()`'s own `closed` flag has. Every caller claims on the line
+   * *before* `controller.abort()`, so the reason is set by the time `emit.close` runs
+   * synchronously inside the abort.
+   */
+  const claim = (next: SseCloseReason) => {
+    reason ??= next;
+  };
+
+  clientSignal?.addEventListener(
+    "abort",
+    () => {
+      claim("client-abort");
+      controller.abort();
+    },
+    { once: true },
+  );
+  const deadline = setTimeout(() => {
+    claim("deadline");
+    controller.abort();
+  }, maxDurationMs);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(streamController) {
@@ -71,7 +112,10 @@ export function sseResponse(
           closed = true;
           // The single funnel for every teardown path, which is what makes onClose
           // exactly-once without a second guard.
-          onClose?.();
+          onClose?.({
+            reason: reason ?? "producer",
+            durationMs: Date.now() - startedAt,
+          });
           clearTimeout(deadline);
           clearInterval(keepalive);
           controller.abort();
@@ -93,12 +137,19 @@ export function sseResponse(
 
       try {
         await produce(emit, controller.signal);
+        claim("producer");
+      } catch (error) {
+        // Claimed before the rethrow, and `??=` means an abort that already named the
+        // close still wins — a producer throwing *because* it was aborted is not news.
+        claim("producer-error");
+        throw error;
       } finally {
         emit.close();
       }
     },
 
     cancel() {
+      claim("cancel");
       clearTimeout(deadline);
       controller.abort();
     },

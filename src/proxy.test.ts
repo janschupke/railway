@@ -217,3 +217,49 @@ describe("content security policy", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src");
   });
 });
+
+describe("request id", () => {
+  const ID = /^[0-9a-f]{16}$/;
+
+  it("forwards one to the render and echoes it on the response", async () => {
+    // The proxy and the render are separate invocations, so a header is the only channel
+    // between them. Same transport as the nonce, observed the same way.
+    const response = await proxy(await request("/", session()));
+
+    const forwarded = response.headers.get("x-middleware-request-x-request-id");
+    expect(forwarded).toMatch(ID);
+    expect(response.headers.get("x-request-id")).toBe(forwarded);
+  });
+
+  it("mints a new one per request", async () => {
+    const first = await proxy(await request("/", session()));
+    const second = await proxy(await request("/", session()));
+
+    expect(first.headers.get("x-request-id")).not.toBe(
+      second.headers.get("x-request-id"),
+    );
+  });
+
+  it("never adopts one the caller supplied", async () => {
+    /*
+     * An attacker-chosen id would put arbitrary bytes into a field operators grep, hand
+     * Loki an unbounded label, and let a caller staple its requests onto someone else's
+     * correlation chain. `headers.set` overwrites unconditionally; this proves it.
+     */
+    const req = await request("/", session());
+    req.headers.set("x-request-id", "<script>alert(1)</script>");
+
+    const response = await proxy(req);
+
+    expect(response.headers.get("x-request-id")).toMatch(ID);
+    expect(response.headers.get("x-middleware-request-x-request-id")).toMatch(ID);
+  });
+
+  it("carries one on a redirect, where there is no forwarded request to read", async () => {
+    const response = await proxy(
+      new NextRequest(new URL("/dashboard", "http://localhost:3000")),
+    );
+
+    expect(response.headers.get("x-request-id")).toMatch(ID);
+  });
+});

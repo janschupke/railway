@@ -37,6 +37,7 @@ upstream call.
 | 7   | Session cookie had no `__Host-` prefix, and `APP_URL` could be `http://` on a real host                                                        | `src/lib/auth/session.ts:87`, `src/env.ts`                                    | `src/lib/auth/session.ts`, `src/env.ts`                                               | Medium   |
 | 8   | Logout POST had no origin check, so a cross-site form could sign a user out                                                                    | `src/app/api/auth/logout/route.ts`                                            | `src/app/api/auth/logout/route.ts`                                                    | Low      |
 | 9   | No dependency audit in CI                                                                                                                      | `.github/workflows/ci.yml`                                                    | `.github/workflows/ci.yml`                                                            | Medium   |
+| 10  | Adopting pino would have re-opened finding 2: its stock `err` serializer walks `Error.cause`, and both error classes here assign it            | pino's `pino-std-serializers` default                                         | `src/lib/log/serialize-error.ts`, `src/lib/logger.ts`, `eslint.config.mjs`            | Medium   |
 
 ### Notes on the two worth explaining
 
@@ -62,6 +63,35 @@ server-side and mapped to its own sentence: a rejected credential, a scope Railw
 withheld (named, from the refused field's `path`), a rate limit, an outage. The incident
 id rides along with all of them rather than only the two GraphQL keys, so the log join
 works for every failure a user can screenshot.
+
+**Finding 10 is finding 2 arriving through a different door**, and it is worth stating
+because it is what a routine "add structured logging" change would have shipped. pino's
+default `err` serializer walks `Error.cause` recursively; `RailwayApiError` and
+`SessionExpiredError` both assign `this.cause`, and it is an enumerable own property, so
+anything that stringifies an error wholesale emits it. `describeOidcFailure` guards one
+call site; the logger is reachable from every one.
+
+The rule from finding 2 — read an allow-list, never stringify an object you did not take
+apart field by field — now has four enforcers, in the order they fire:
+
+1. **A type.** `log.*` accepts scalars only, with `error` as the single sanctioned
+   non-scalar key. Passing a session, a token response or a bare `Error` under any other
+   name is a compile error. This matters because pino's serializers are keyed by field
+   _name_: `{ error }` rather than `{ err }` would get no serializer at all, and the leak
+   is one character wide.
+2. **`errorFields`** (`src/lib/log/serialize-error.ts`) reads a named allow-list, never
+   touches `cause` at any depth, and never enumerates keys or `String()`s a non-Error
+   object.
+3. **`describeOidcFailure`** still owns the OIDC path, so the raw error never enters the
+   logging path there at all.
+4. **pino `redact` paths** as a labelled net — one level deep, so it is a backstop and the
+   comment says so rather than pretending otherwise.
+
+Three canary tests, at three layers: the serializer directly, the `log.*` facade, and the
+pre-existing one over the real callback handler, which searches the raw written bytes
+rather than a parsed record. `no-console` is now an error across `src/**` (one documented
+exception, the browser-side error boundary), because a stray `console.error(error)` is how
+this class of leak gets in.
 
 ## What was already sound
 
@@ -149,7 +179,24 @@ reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm light
   the `__Host-` prefix applies, so an http value silently downgraded the session to a
   cleartext cookie.
 - **Incident ids** are 8 hex characters and appear in the UI as "Reference abc12345".
-  `grep` the deployment log for that string to find the verbatim upstream failure.
+  They are now a first-class `incident` field, so `jq 'select(.incident=="abc12345")'`
+  works as well as `grep`.
+- **Logs are structured JSON on stdout.** Recorded: the OIDC subject id, project /
+  environment / service / deployment ids, image references, incident ids, and an event
+  name per line. Never recorded: email, display name, profile image, access, refresh or
+  id tokens, `Error.cause`, the sealed cookie, or container stdout. Auth events
+  (sign-in, sign-out, refresh, refresh failure, CSRF rejection) and state-changing
+  actions (`container.created`, `container.destroyed`, `container.destroy_refused`) are
+  logged at `info` or `warn` — this is the audit trail Railway does not keep once a
+  service is deleted.
+- **The rejected `deploymentId` is deliberately not logged.** It is an unbounded,
+  attacker-controlled string straight off the URL, and putting it in a field an operator
+  greps is the injection surface the validator exists to close. `id_length` carries the
+  diagnostic content instead.
+- **`LOG_LEVEL` is read straight from the environment**, not through `src/env.ts`, and an
+  unrecognised value clamps rather than throwing. `/api/health` exists in order to log
+  `env()` failing, so a logger that depended on `env()` succeeding could not report the
+  one failure it is there for. Same reason `withRequestScope` catches `headers()`.
 
 ## Reporting a vulnerability
 

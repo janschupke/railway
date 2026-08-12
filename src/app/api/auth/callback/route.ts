@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { oidcConfig } from "@/lib/auth/oidc";
 import { describeOidcFailure } from "@/lib/auth/redact";
+import { log } from "@/lib/logger";
+import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
 import {
   CONSENT_COOKIE,
@@ -22,7 +24,14 @@ function clearTransients<T extends NextResponse>(response: T): T {
   return response;
 }
 
+/**
+ * The single exit for every rejected callback, which is why the log line lives here:
+ * five branches — a missing PKCE verifier or state, the provider's own `?error=`, a
+ * failed exchange, a response with no `sub`, and a grant that withheld a refresh token —
+ * were all silent, and one line closes all five without any chance of drifting apart.
+ */
 function fail(request: NextRequest, reason: string) {
+  log.warn("auth.callback.failed", { reason });
   const url = new URL(`/?error=${encodeURIComponent(reason)}`, request.url);
   return clearTransients(NextResponse.redirect(url));
 }
@@ -36,12 +45,25 @@ function fail(request: NextRequest, reason: string) {
  * was the wrong instinct: on one branch `cause` is the parsed token response, so the
  * line wrote a live access and refresh token into Railway's retained logs. The reason
  * still has to be recorded — through an allow-list. See lib/auth/redact.ts.
+ *
+ * The redactor's *string* result is what reaches the logger, so the raw error never
+ * enters the logging path at all and the guarantee does not depend on the serializer.
  */
 function logExchangeFailure(error: unknown) {
-  console.error("token exchange failed:", describeOidcFailure(error));
+  log.error("auth.callback.token_exchange_failed", {
+    reason: describeOidcFailure(error),
+  });
 }
 
 export async function GET(request: NextRequest) {
+  // trustInboundId: false — the proxy matcher excludes api/auth, so nothing has
+  // overwritten a client-supplied header by the time it gets here.
+  return withRequestScope("/api/auth/callback", { trustInboundId: false }, () =>
+    complete(request),
+  );
+}
+
+async function complete(request: NextRequest) {
   const { APP_URL, SESSION_SECRET } = env();
 
   const codeVerifier = request.cookies.get(PKCE_COOKIE)?.value;
@@ -110,6 +132,18 @@ export async function GET(request: NextRequest) {
     expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 3600),
     scope: tokens.scope ?? "",
   };
+
+  /*
+   * `scope` is recorded once, here, rather than on every dashboard render: it is what
+   * makes an under-scoped session diagnosable after the fact, and the render-time
+   * `missingScopes` computation is derivable from it. Subject only — never the email,
+   * name or picture the claims also carry.
+   */
+  log.info("auth.session.created", {
+    subject_id: claims.sub,
+    scope: session.scope,
+    expires_in_s: session.expiresAt - Math.floor(Date.now() / 1000),
+  });
 
   const response = NextResponse.redirect(new URL("/dashboard", request.url));
   response.cookies.set(

@@ -5,6 +5,8 @@ import { getSession } from "@/lib/auth/server";
 import { getProjectContainers, listProjects } from "@/lib/railway/api";
 import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
 import { reportError } from "@/lib/report-error";
+import { log } from "@/lib/logger";
+import { withRequestScope } from "@/lib/log/request-scope";
 import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
@@ -106,6 +108,19 @@ export async function loadDashboardShell(params: {
   projectId?: string;
   environmentId?: string;
 }): Promise<DashboardShell | null> {
+  /*
+   * A Server Component render cannot be wrapped from outside, so the scope is entered at
+   * the loaders instead. That is the right granularity anyway: they are the only RSC code
+   * that logs, and loadContainers runs in its own Suspense subtree where `headers()`
+   * still resolves this same request.
+   */
+  return withRequestScope("/dashboard", { trustInboundId: true }, () => shell(params));
+}
+
+async function shell(params: {
+  projectId?: string;
+  environmentId?: string;
+}): Promise<DashboardShell | null> {
   const session = await getSession();
   if (!session) return null;
 
@@ -144,6 +159,14 @@ export async function loadDashboardShell(params: {
     project?.environments[0] ??
     null;
 
+  if (Boolean(params.projectId) && !requested && projects.length > 0) {
+    // debug: a genuine anomaly — the URL names a project this session can no longer see —
+    // but it is per-render and the UI already says so.
+    log.debug("dashboard.selection_dropped", {
+      requested_project_id: params.projectId,
+    });
+  }
+
   return {
     ...base,
     projects,
@@ -168,6 +191,15 @@ export async function loadDashboardShell(params: {
  * second time costs nothing and keeps this independently callable and testable.
  */
 export async function loadContainers(
+  projectId: string,
+  environmentId: string,
+): Promise<ContainerListData> {
+  return withRequestScope("/dashboard", { trustInboundId: true }, () =>
+    containerList(projectId, environmentId),
+  );
+}
+
+async function containerList(
   projectId: string,
   environmentId: string,
 ): Promise<ContainerListData> {

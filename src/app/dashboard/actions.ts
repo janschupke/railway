@@ -9,6 +9,8 @@ import {
   destroyContainer,
   getProjectContainers,
 } from "@/lib/railway/api";
+import { log } from "@/lib/logger";
+import { withRequestScope } from "@/lib/log/request-scope";
 import { toManagedName } from "@/lib/railway/managed";
 import { VALIDATION_VALUES, spinDownSchema, spinUpSchema } from "@/lib/validation";
 import type { MessageKey, Translate } from "@/lib/messages";
@@ -37,6 +39,10 @@ export async function spinUp(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  return withRequestScope("spinUp", { trustInboundId: true }, () => create(formData));
+}
+
+async function create(formData: FormData): Promise<ActionResult> {
   const t = await getTranslations();
 
   const parsed = spinUpSchema.safeParse({
@@ -75,6 +81,12 @@ export async function spinUp(
       environmentId,
     );
     if (containers.some((c) => c.rawName === managedName)) {
+      log.info("container.create_rejected", {
+        reason: "duplicate_name",
+        project_id: projectId,
+        environment_id: environmentId,
+        service_name: managedName,
+      });
       return {
         ok: false,
         field: "name",
@@ -82,11 +94,29 @@ export async function spinUp(
       };
     }
 
-    await createContainer(accessToken, {
+    const created = await createContainer(accessToken, {
       projectId,
       environmentId,
       name: managedName,
       image,
+    });
+
+    /*
+     * The audit trail. This action creates billable infrastructure, and once a service is
+     * deleted Railway retains no record that it existed — so without this line there is
+     * nothing anywhere that says who created what, from which image, and when. `image` is
+     * user-supplied but validated and bounded at LIMITS.IMAGE_REF_MAX, and it is the
+     * single most useful field in the record. The field set is deliberately the shape a
+     * database table would take, so promoting this to one later is a parse rather than a
+     * re-instrumentation.
+     */
+    log.info("container.created", {
+      project_id: projectId,
+      environment_id: environmentId,
+      service_name: managedName,
+      image,
+      service_id: created.serviceId,
+      deployment_id: created.deploymentId,
     });
 
     revalidatePath("/dashboard");
@@ -101,6 +131,12 @@ export async function spinDown(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  return withRequestScope("spinDown", { trustInboundId: true }, () =>
+    destroy(formData),
+  );
+}
+
+async function destroy(formData: FormData): Promise<ActionResult> {
   const t = await getTranslations();
 
   const parsed = spinDownSchema.safeParse({
@@ -130,14 +166,39 @@ export async function spinDown(
     const target = containers.find((c) => c.serviceId === serviceId);
 
     if (!target) {
+      log.info("container.destroy_skipped", {
+        reason: "gone",
+        project_id: projectId,
+        service_id: serviceId,
+      });
       revalidatePath("/dashboard");
       return { ok: false, error: t("actions.gone") };
     }
     if (!target.managed) {
+      /*
+       * The ownership boundary refusing a request, at warn because it should never
+       * happen through the UI — the destroy control is only rendered for managed
+       * services. Silent, this was indistinguishable from a UI bug; named, it is the
+       * difference between a stale page and someone posting service ids by hand.
+       */
+      log.warn("container.destroy_refused", {
+        reason: "unmanaged",
+        project_id: projectId,
+        service_id: serviceId,
+      });
       return { ok: false, error: t("actions.notManaged") };
     }
 
     await destroyContainer(accessToken, serviceId);
+
+    // The other half of the audit trail. After this, Railway has no record it existed.
+    log.info("container.destroyed", {
+      project_id: projectId,
+      environment_id: environmentId,
+      service_id: serviceId,
+      service_name: target.rawName,
+    });
+
     revalidatePath("/dashboard");
     return { ok: true, message: t("actions.destroyed", { name: target.displayName }) };
   } catch (error) {

@@ -205,10 +205,34 @@ const eslintConfig = defineConfig([
               message:
                 "Session handling is server-side. Pass what the component needs as a prop.",
             },
+            {
+              // Same reasoning one layer over: the logger writes to the server's stdout,
+              // which a browser does not have. A client component importing it would
+              // bundle pino and log into a void.
+              group: ["**/lib/logger", "**/lib/log/*"],
+              message:
+                "The logger writes to the server's stdout. Client-side failures reach the server through instrumentation.ts.",
+            },
           ],
         },
       ],
     },
+  },
+
+  /*
+   * A structured record is only worth having if nothing bypasses it. A stray
+   * `console.error(error)` is also how the OAuth token leak got in — `error.cause` is
+   * where oauth4webapi puts a live access token — so this rule is a security ratchet as
+   * much as a formatting one. `eslint-config-next` does not enable it, so this is
+   * additive; the e2e/scripts block above keeps its exemption, because those print
+   * aligned tables for a person at a terminal and JSON would be a regression.
+   *
+   * Exactly one inline disable exists, in src/app/dashboard/error.tsx, which runs in the
+   * browser.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "no-console": "error" },
   },
 
   globalIgnores([

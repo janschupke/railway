@@ -2,6 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { env } from "@/env";
+import { setSubjectId } from "@/lib/log/context";
 import { SESSION } from "@/lib/constants";
 import {
   cookieOptions,
@@ -51,6 +52,13 @@ export async function clearSession(): Promise<void> {
 export async function requireSession(): Promise<RailwaySession> {
   const session = await getSession();
   if (!session) throw new SessionExpiredError("no session");
+
+  /*
+   * One place to attach identity to the request's log context. Every authenticated entry
+   * point passes through here, so putting it at each of them would be the same call
+   * written five times with five chances to forget it.
+   */
+  setSubjectId(session.user.id);
 
   if (!isExpiring(session)) return session;
 

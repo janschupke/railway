@@ -1,6 +1,7 @@
 import "server-only";
 
 import { STREAM } from "@/lib/constants";
+import { log } from "@/lib/logger";
 import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
 import {
@@ -96,6 +97,21 @@ export async function listProjects(
   const failures = sources
     .map((source) => source.error)
     .filter((error): error is RailwayApiError => error !== null);
+
+  /*
+   * Per source, because the caller only ever surfaces `failures[0]` and never says which
+   * read it came from. "The workspace source has been refused for a week and nobody
+   * noticed because the personal one still answers" is exactly the shape of degradation
+   * a merged list hides, and this is the only place that distinction still exists.
+   */
+  for (const source of sources) {
+    if (!source.error) continue;
+    log.warn("railway.projects.source_failed", {
+      source: source.name,
+      answered: source.viewer !== null,
+      error: source.error,
+    });
+  }
 
   /*
    * Nothing answered at all. The first failure is thrown rather than a summary, because

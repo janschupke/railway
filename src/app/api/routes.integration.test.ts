@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetEnv } from "@/env";
+import { logRecords } from "@/test/log-capture";
 import {
   CONSENT_COOKIE,
   PKCE_COOKIE,
@@ -53,7 +54,6 @@ describe("GET /api/health", () => {
 
   it("names the misconfigured variables in the log, not in the response", async () => {
     // Unauthenticated endpoint: the issue list is a map of this deployment's env vars.
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubEnv("SESSION_SECRET", "too-short");
     __resetEnv();
 
@@ -62,9 +62,13 @@ describe("GET /api/health", () => {
     expect(response.status).toBe(503);
     // toEqual, not toMatchObject: a future field that re-opens the leak must fail here.
     await expect(response.json()).resolves.toEqual({ status: "misconfigured" });
-    expect(JSON.stringify(logged.mock.calls)).toContain("SESSION_SECRET");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "health.env_invalid",
+        issues: expect.stringContaining("SESSION_SECRET"),
+      }),
+    );
 
-    logged.mockRestore();
     __resetEnv();
   });
 });

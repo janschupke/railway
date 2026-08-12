@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecords, rawLogLines } from "@/test/log-capture";
 import {
   CONSENT_COOKIE,
   openSession,
@@ -110,7 +111,6 @@ describe("GET /api/auth/callback", () => {
   });
 
   it("reports a failed token exchange without leaking the reason to the browser", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     authorizationCodeGrant.mockImplementation(async () => {
       throw new Error("invalid_client: bad secret");
     });
@@ -122,11 +122,12 @@ describe("GET /api/auth/callback", () => {
     // The reason has to reach the server log, or the failure is undiagnosable from
     // the outside — which is how an id_token alg mismatch once passed for a
     // redirect-URI problem.
-    expect(logged).toHaveBeenCalledWith(
-      "token exchange failed:",
-      "Error: invalid_client: bad secret",
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "auth.callback.token_exchange_failed",
+        reason: "Error: invalid_client: bad secret",
+      }),
     );
-    logged.mockRestore();
   });
 
   it("never writes the token response to the log, whatever openid-client attaches", async () => {
@@ -137,11 +138,11 @@ describe("GET /api/auth/callback", () => {
      * live access and refresh token. Railway retains stdout, so one such line outlives
      * the request that produced it.
      *
-     * Stringifying the whole call log, rather than matching an expected argument list,
-     * is what makes this a real statement: it fails no matter which argument slot or
-     * nested field a future edit puts the credential in.
+     * Searching the raw written bytes, rather than matching an expected record shape, is
+     * what makes this a real statement: it fails no matter which field or nested key a
+     * future edit puts the credential in, and it reads what was actually serialized
+     * rather than what a parser was willing to give back.
      */
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     authorizationCodeGrant.mockImplementation(async () => {
       const error = new Error("unsupported `token_type` value", {
         cause: { body: { access_token: "AT-CANARY", refresh_token: "RT-CANARY" } },
@@ -154,18 +155,15 @@ describe("GET /api/auth/callback", () => {
       "token_exchange_failed",
     );
 
-    const everythingLogged = JSON.stringify(logged.mock.calls);
+    const everythingLogged = rawLogLines().join("");
     expect(everythingLogged).not.toContain("AT-CANARY");
     expect(everythingLogged).not.toContain("RT-CANARY");
-    // …and the line is still there. Deleting the console.error would satisfy the two
+    // …and the line is still there. Deleting the log call would satisfy the two
     // assertions above and leave the failure undiagnosable.
     expect(everythingLogged).toContain("UnsupportedOperationError");
-
-    logged.mockRestore();
   });
 
   it("logs the OAuth error body when the token endpoint rejects the request", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     authorizationCodeGrant.mockImplementation(async () => {
       throw Object.assign(new Error("server responded with an error"), {
         error: "invalid_grant",
@@ -177,11 +175,13 @@ describe("GET /api/auth/callback", () => {
     expect(errorParam(await GET(request("?code=abc&state=st")))).toBe(
       "token_exchange_failed",
     );
-    expect(logged).toHaveBeenCalledWith(
-      "token exchange failed:",
-      "Error: server responded with an error — invalid_grant · HTTP 400 · code is expired",
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "auth.callback.token_exchange_failed",
+        reason:
+          "Error: server responded with an error — invalid_grant · HTTP 400 · code is expired",
+      }),
     );
-    logged.mockRestore();
   });
 
   it("rejects a response with no identity claims", async () => {

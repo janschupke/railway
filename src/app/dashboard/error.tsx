@@ -20,7 +20,14 @@ export default function DashboardError({
   const [retrying, startTransition] = useTransition();
 
   useEffect(() => {
-    // Server-side detail is redacted in production builds; the digest is the join key.
+    /*
+     * The one sanctioned console call in src/. This runs in the browser, where the
+     * server's stdout logger has no meaning and no sink; server-side detail is redacted
+     * in production builds anyway. The digest is the join key — the same digest that
+     * `render.failed` records from src/instrumentation.ts, which is where the cause
+     * actually is.
+     */
+    // eslint-disable-next-line no-console -- browser console; see above.
     console.error("dashboard error", error.digest ?? error.message);
   }, [error]);
 

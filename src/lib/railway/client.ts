@@ -2,6 +2,7 @@ import "server-only";
 
 import { env } from "@/env";
 import { NETWORK } from "@/lib/constants";
+import { log } from "@/lib/logger";
 import { RailwayApiError } from "./errors";
 
 /** Configurable so the E2E fixture can stand in for Railway. Defaults to production. */
@@ -86,6 +87,30 @@ function parseRetryAfter(headers: Headers): number | undefined {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Retries were entirely silent, which meant Railway rate-limiting this app was invisible
+ * until the third attempt threw — and by then the record says "rate limited" without
+ * saying it had been degrading for a second and a half first.
+ *
+ * Bounded by construction at MAX_ATTEMPTS - 1 lines per failing call. The successful
+ * calls are not logged here at all; see the `debug` line in `execute`'s caller.
+ */
+function logRetry(
+  operation: string,
+  attempt: number,
+  reason: string,
+  backoff: number,
+  status?: number,
+): void {
+  log.warn("railway.request.retry", {
+    operation,
+    attempt,
+    reason,
+    backoff_ms: backoff,
+    ...(status === undefined ? {} : { status }),
+  });
+}
+
+/**
  * Single choke point for every Railway GraphQL call.
  *
  * Handles the three things that make this API awkward to use naively:
@@ -107,6 +132,8 @@ async function execute<T>(
     signal,
     timeoutMs = NETWORK.REQUEST_TIMEOUT_MS,
   } = options;
+
+  const startedAt = Date.now();
 
   for (let attempt = 1; attempt <= NETWORK.MAX_ATTEMPTS; attempt++) {
     const timeout = AbortSignal.timeout(timeoutMs);
@@ -134,6 +161,7 @@ async function execute<T>(
           cause,
         });
       }
+      logRetry(operationName, attempt, "network", backoffMs(attempt));
       await sleep(backoffMs(attempt));
       continue;
     }
@@ -156,6 +184,13 @@ async function execute<T>(
           retryAfterSeconds,
         });
       }
+      logRetry(
+        operationName,
+        attempt,
+        "rate_limit",
+        backoffMs(attempt, retryAfterSeconds),
+        429,
+      );
       await sleep(backoffMs(attempt, retryAfterSeconds));
       continue;
     }
@@ -168,6 +203,7 @@ async function execute<T>(
           operation: operationName,
         });
       }
+      logRetry(operationName, attempt, "server", backoffMs(attempt), response.status);
       await sleep(backoffMs(attempt));
       continue;
     }
@@ -183,6 +219,20 @@ async function execute<T>(
         cause,
       });
     }
+
+    /*
+     * `debug`, not `info`, and the level is the whole decision: this is the only place
+     * every Railway call passes through, so latency lives here — but a dashboard render
+     * issues several calls and the stream monitor polls every 2.5 seconds, which at
+     * `info` would make this line the dominant volume in the system by an order of
+     * magnitude. Available when a latency question is being asked, silent otherwise.
+     */
+    log.debug("railway.request", {
+      operation: operationName,
+      status: response.status,
+      attempt,
+      duration_ms: Date.now() - startedAt,
+    });
 
     // The status rides along so a GraphQL-layer refusal keeps the code Railway answered
     // with, rather than being recorded as a flat 200 it may not have been.

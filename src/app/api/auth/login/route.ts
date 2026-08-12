@@ -2,6 +2,8 @@ import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { SCOPES, oidcConfig } from "@/lib/auth/oidc";
+import { log } from "@/lib/logger";
+import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
 import {
   CONSENT_COOKIE,
@@ -21,6 +23,12 @@ import {
  * projects again was the price of every single sign-in.
  */
 export async function GET(request: NextRequest) {
+  return withRequestScope("/api/auth/login", { trustInboundId: false }, () =>
+    start(request),
+  );
+}
+
+async function start(request: NextRequest) {
   const { APP_URL } = env();
   const forceConsent = request.nextUrl.searchParams.get(CONSENT_PARAM) === "1";
 
@@ -54,6 +62,10 @@ export async function GET(request: NextRequest) {
   // Records which kind of attempt this is, so the callback's retry cannot become a loop.
   if (forceConsent) response.cookies.set(CONSENT_COOKIE, "1", opts);
   else response.cookies.delete(CONSENT_COOKIE);
+
+  // debug: no identity is known yet and it is one redirect. It earns its place only as
+  // the denominator for an abandoned-sign-in rate, which is not an every-deploy question.
+  log.debug("auth.login.started", { forced_consent: forceConsent });
 
   return response;
 }

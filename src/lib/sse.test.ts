@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requestContext, runWithRequestContext } from "@/lib/log/context";
 import { sseResponse } from "./sse";
 
 async function readAll(response: Response): Promise<string> {
@@ -222,6 +223,200 @@ describe("sseResponse", () => {
       await vi.advanceTimersByTimeAsync(10);
 
       expect(closes).toBe(1);
+    });
+  });
+
+  it("keeps the producer inside the caller's async context", async () => {
+    /*
+     * The property the entire correlation design rests on, and one that fails silently:
+     * records would simply lack request_id and nothing would break.
+     *
+     * `new ReadableStream({ start })` runs `start` synchronously during construction, so
+     * `produce` — and every timer the deployment monitor creates inside it — is an async
+     * resource created while the route handler's scope is still open. AsyncLocalStorage
+     * captures the store at creation, not at execution, which is why a status poll firing
+     * fourteen minutes later still carries the id. A refactor that deferred `produce` to
+     * a later tick would break this and pass every other test in this file.
+     */
+    const seen: Array<string | undefined> = [];
+
+    await runWithRequestContext({ requestId: "scoped" }, async () => {
+      const response = sseResponse(
+        async (emit) => {
+          seen.push(requestContext()?.requestId);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          seen.push(requestContext()?.requestId);
+          emit.send("done", {});
+        },
+        {
+          keepaliveMs: 10_000,
+          onClose: () => void seen.push(requestContext()?.requestId),
+        },
+      );
+      await readAll(response);
+    });
+
+    expect(seen).toEqual(["scoped", "scoped", "scoped"]);
+  });
+
+  it("loses the context on the abort teardown paths, which callers must handle", async () => {
+    /*
+     * The limit of the property above, found by reading real e2e output rather than by
+     * reasoning: teardown carries the context only when the trigger fires inside it. A
+     * client hangup does not — the abort arrives from the runtime after the handler has
+     * returned, and the listener runs in whatever context aborted it. `stream.closed`
+     * came out with no request_id, unjoinable to the `stream.opened` it belonged to.
+     *
+     * Fixing it inside the transport would mean importing the log context here, which is
+     * exactly the coupling this module does not have. The route captures the context and
+     * re-enters it instead; this test is what stops someone assuming it is unnecessary.
+     */
+    let seen: string | undefined = "unset";
+    const client = new AbortController();
+
+    // Constructed in scope, exactly as the route does…
+    const response = runWithRequestContext({ requestId: "scoped" }, () =>
+      sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        {
+          clientSignal: client.signal,
+          keepaliveMs: 10_000,
+          onClose: () => void (seen = requestContext()?.requestId),
+        },
+      ),
+    );
+
+    const body = readAll(response);
+    // …then aborted from outside it, as the runtime does when the socket closes.
+    client.abort();
+    await body;
+
+    expect(seen).toBeUndefined();
+  });
+
+  /*
+   * The reason is what makes stream.closed worth logging at all: a tab closing and the
+   * fifteen-minute ceiling firing are otherwise the same line, and only one of them is a
+   * problem. Every path names itself, and the naming must not disturb the exactly-once
+   * property above — hence the double-fire case at the end.
+   */
+  describe("close reason", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    const closeInfo = () => {
+      const seen: Array<{ reason: string; durationMs: number }> = [];
+      return {
+        seen,
+        onClose: (info: { reason: string; durationMs: number }) => void seen.push(info),
+      };
+    };
+
+    it("names a producer that returned", async () => {
+      const { seen, onClose } = closeInfo();
+      await readAll(
+        sseResponse(async (emit) => emit.send("done", {}), {
+          onClose,
+          keepaliveMs: 10_000,
+        }),
+      );
+
+      expect(seen[0]?.reason).toBe("producer");
+      expect(seen[0]?.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("names a producer that threw", async () => {
+      const { seen, onClose } = closeInfo();
+      const response = sseResponse(
+        async () => {
+          throw new Error("upstream gone");
+        },
+        { onClose, keepaliveMs: 10_000 },
+      );
+
+      await readAll(response).catch(() => {});
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(seen[0]?.reason).toBe("producer-error");
+    });
+
+    it("names a client that disconnected", async () => {
+      const { seen, onClose } = closeInfo();
+      const client = new AbortController();
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { clientSignal: client.signal, onClose, keepaliveMs: 10_000 },
+      );
+
+      const body = readAll(response);
+      client.abort();
+      await vi.advanceTimersByTimeAsync(10);
+      await body;
+
+      expect(seen[0]?.reason).toBe("client-abort");
+    });
+
+    it("names the duration ceiling, which is invisible otherwise", async () => {
+      const { seen, onClose } = closeInfo();
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { onClose, keepaliveMs: 10_000, maxDurationMs: 500 },
+      );
+
+      readAll(response);
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(seen[0]?.reason).toBe("deadline");
+      expect(seen[0]?.durationMs).toBeGreaterThanOrEqual(500);
+    });
+
+    it("names a consumer cancellation", async () => {
+      const { seen, onClose } = closeInfo();
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { onClose, keepaliveMs: 10_000 },
+      );
+
+      await response.body!.cancel();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(seen[0]?.reason).toBe("cancel");
+    });
+
+    it("lets the first path win when two fire, and still closes once", async () => {
+      /*
+       * A real disconnect fires clientSignal and then cancel(). `??=` is what makes the
+       * second a no-op, matching emit.close()'s own guard — without it the last writer
+       * would win and every client disconnect would be reported as a cancellation.
+       */
+      const { seen, onClose } = closeInfo();
+      const client = new AbortController();
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { clientSignal: client.signal, onClose, keepaliveMs: 10_000 },
+      );
+
+      client.abort();
+      await response.body!.cancel();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.reason).toBe("client-abort");
     });
   });
 });

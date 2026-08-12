@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { log } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,7 @@ export function GET() {
      * deployment is already broken. The detail goes to the log; the body says only that
      * the check failed.
      */
-    console.error(
-      "health: invalid environment configuration\n",
-      (error as Error).message,
-    );
+    log.error("health.env_invalid", { issues: (error as Error).message });
     return Response.json({ status: "misconfigured" }, { status: 503 });
   }
   return Response.json({ status: "ok" });
