@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { getProjectContainers, listProjects } from "@/lib/railway/api";
 import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
+import { reportError } from "@/lib/report-error";
 import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
@@ -67,13 +68,11 @@ function missingScopes(granted: string): string[] {
 
 /**
  * A Railway failure explains itself where it can; anything else falls back to the
- * message for the read that failed. Both come from the catalog.
+ * message for the read that failed. Both come from the catalog, and reportError has
+ * already written the upstream text to the log against the id the sentence carries.
  */
 function describe(t: Translator, error: unknown, fallback: MessageKey): string {
-  const descriptor =
-    error instanceof RailwayApiError
-      ? error.describe()
-      : { key: fallback, values: undefined };
+  const descriptor = reportError("dashboard", error, fallback);
   return t(descriptor.key as Parameters<Translator>[0], descriptor.values as never);
 }
 

@@ -1,8 +1,11 @@
 import { type NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
-import { requireAccessToken } from "@/lib/auth/server";
+import { requireSession } from "@/lib/auth/server";
 import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
+import { acquireStreamSlot } from "@/lib/stream-slots";
+import { DEPLOYMENT_ID_PATTERN } from "@/lib/validation";
+import type { RailwaySession } from "@/lib/auth/session";
 
 // `ws` needs Node, and this is a long-lived response.
 export const runtime = "nodejs";
@@ -26,14 +29,32 @@ export async function GET(
   const phase =
     request.nextUrl.searchParams.get("phase") === "build" ? "build" : "deploy";
 
-  let accessToken: string;
+  // Before anything expensive: an unbounded identifier from the URL used to reach the
+  // GraphQL layer and open an upstream socket on the strength of nothing.
+  if (!DEPLOYMENT_ID_PATTERN.test(deploymentId)) {
+    return new Response("Bad Request", { status: 400 });
+  }
+
+  let session: RailwaySession;
   try {
-    accessToken = await requireAccessToken();
+    session = await requireSession();
   } catch {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // Resolved before the slot is taken: nothing between acquiring and returning the
+  // response may throw, or the slot is stranded until the process restarts.
   const t = await getTranslations();
+
+  const release = acquireStreamSlot(session.user.id);
+  if (!release) {
+    return new Response("Too Many Streams", {
+      status: 429,
+      headers: { "retry-after": "5" },
+    });
+  }
+
+  const accessToken = session.accessToken;
 
   return sseResponse(
     async (emit, signal) => {
@@ -63,6 +84,8 @@ export async function GET(
         if (type === "done" || type === "error") return;
       }
     },
-    { clientSignal: request.signal },
+    // onClose rather than a finally in the producer: the transport runs it on every
+    // teardown path, including the one where the producer never returns at all.
+    { clientSignal: request.signal, onClose: release },
   );
 }

@@ -133,4 +133,95 @@ describe("sseResponse", () => {
       expect(aborted).toBe(true);
     });
   });
+
+  /*
+   * onClose is what releases a stream slot, so "exactly once, on every path" is a
+   * correctness property rather than a nicety: miss a path and the user is locked out
+   * of their own log panes until the process restarts; double-fire and the cap can be
+   * walked past. Every teardown route the transport has is enumerated here.
+   */
+  describe("onClose", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("runs when the producer finishes normally", async () => {
+      let closes = 0;
+      const response = sseResponse(async (emit) => emit.send("done", {}), {
+        onClose: () => closes++,
+        keepaliveMs: 10_000,
+      });
+
+      await readAll(response);
+      expect(closes).toBe(1);
+    });
+
+    it("runs once even when the producer closes explicitly first", async () => {
+      let closes = 0;
+      const response = sseResponse(
+        async (emit) => {
+          emit.close();
+          emit.close();
+        },
+        { onClose: () => closes++, keepaliveMs: 10_000 },
+      );
+
+      await readAll(response);
+      expect(closes).toBe(1);
+    });
+
+    it("runs when the client disconnects", async () => {
+      let closes = 0;
+      const client = new AbortController();
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { clientSignal: client.signal, onClose: () => closes++, keepaliveMs: 10_000 },
+      );
+
+      const body = readAll(response);
+      client.abort();
+      await vi.advanceTimersByTimeAsync(10);
+      await body;
+
+      expect(closes).toBe(1);
+    });
+
+    it("runs at the duration ceiling, even if the producer never returns", async () => {
+      // The reason onClose lives in the transport and not in a producer `finally`.
+      let closes = 0;
+      const response = sseResponse(async () => new Promise<void>(() => {}), {
+        maxDurationMs: 500,
+        keepaliveMs: 10_000,
+        onClose: () => closes++,
+      });
+
+      readAll(response);
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(closes).toBe(1);
+    });
+
+    it("runs when the consumer cancels the stream", async () => {
+      /*
+       * The path Next takes when a browser tab vanishes, and the one the rest of this
+       * suite never exercised. It works only because the abort listener is registered
+       * synchronously in start(), before the first await.
+       */
+      let closes = 0;
+      const response = sseResponse(
+        async (_emit, signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve()),
+          ),
+        { onClose: () => closes++, keepaliveMs: 10_000 },
+      );
+
+      await response.body!.cancel();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(closes).toBe(1);
+    });
+  });
 });

@@ -12,6 +12,14 @@ export type SseOptions = {
   maxDurationMs?: number;
   /** Aborts when the client disconnects. */
   clientSignal?: AbortSignal;
+  /**
+   * Runs exactly once, on whichever teardown path fires first.
+   *
+   * Belongs here rather than in the producer: a producer that failed to observe its
+   * abort signal would never return, so a `finally` in the caller would never run and
+   * whatever it releases would leak for the life of the process.
+   */
+  onClose?: () => void;
 };
 
 /**
@@ -30,6 +38,7 @@ export function sseResponse(
     keepaliveMs = STREAM.KEEPALIVE_MS,
     maxDurationMs = STREAM.MAX_DURATION_MS,
     clientSignal,
+    onClose,
   } = options;
 
   const encoder = new TextEncoder();
@@ -60,6 +69,9 @@ export function sseResponse(
         close: () => {
           if (closed) return;
           closed = true;
+          // The single funnel for every teardown path, which is what makes onClose
+          // exactly-once without a second guard.
+          onClose?.();
           clearTimeout(deadline);
           clearInterval(keepalive);
           controller.abort();
@@ -71,6 +83,12 @@ export function sseResponse(
         },
       };
 
+      /*
+       * Registered synchronously, before the first await below. That is load-bearing:
+       * `cancel()` aborts this controller, and if the listener were attached after
+       * `produce` started, a client that vanished during the first tick would abort
+       * before anything was listening and teardown would never run.
+       */
       controller.signal.addEventListener("abort", emit.close, { once: true });
 
       try {

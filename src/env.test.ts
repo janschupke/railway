@@ -101,3 +101,27 @@ describe("callbackUrl", () => {
     expect(callbackUrl()).toBe("https://console.up.railway.app/api/auth/callback");
   });
 });
+
+describe("APP_URL transport", () => {
+  it("accepts an https origin", () => {
+    setEnv({ ...REQUIRED, APP_URL: "https://console.up.railway.app" });
+    expect(env().APP_URL).toBe("https://console.up.railway.app");
+  });
+
+  it("accepts http on loopback, which is how dev and the e2e fixture run", () => {
+    setEnv({ ...REQUIRED, APP_URL: "http://localhost:3100" });
+    expect(env().APP_URL).toBe("http://localhost:3100");
+    setEnv({ ...REQUIRED, APP_URL: "http://127.0.0.1:3000" });
+    expect(env().APP_URL).toBe("http://127.0.0.1:3000");
+  });
+
+  it("refuses http on a real host", () => {
+    /*
+     * This one variable decides `secure` on the session cookie and whether it carries
+     * the __Host- prefix, so an http APP_URL in production silently ships Railway
+     * tokens in the clear. Failing at boot is the only place that is cheap to notice.
+     */
+    setEnv({ ...REQUIRED, APP_URL: "http://console.up.railway.app" });
+    expect(() => env()).toThrow(/https/i);
+  });
+});

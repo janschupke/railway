@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { SESSION } from "@/lib/constants";
-import { isExpiring, openSession, sealSession, type RailwaySession } from "./session";
+import {
+  cookieOptions,
+  isExpiring,
+  openSession,
+  sealSession,
+  sessionCookieName,
+  type RailwaySession,
+} from "./session";
 
 const SECRET = "a-secret-that-is-at-least-32-characters";
 
@@ -62,5 +69,41 @@ describe("isExpiring", () => {
 
   it("is true once already expired", () => {
     expect(isExpiring({ expiresAt: now - 10 }, now)).toBe(true);
+  });
+});
+
+describe("sessionCookieName", () => {
+  it("prefixes the cookie with __Host- on an https origin", () => {
+    /*
+     * __Host- forbids a Domain attribute, so no sibling subdomain can overwrite the
+     * session. Without it, an attacker with a cookie-write primitive on a related host
+     * plants their own session and the victim acts inside the attacker's account —
+     * skipping the OIDC flow entirely, since state and PKCE only guard the callback.
+     */
+    expect(sessionCookieName("https://console.up.railway.app")).toBe(
+      "__Host-rc_session",
+    );
+  });
+
+  it("keeps the plain name on localhost, where Secure is impossible", () => {
+    // The prefix requires Secure. Rather than depend on how each browser resolves that
+    // over http://localhost, dev and the e2e fixture keep the unprefixed name.
+    expect(sessionCookieName("http://localhost:3100")).toBe("rc_session");
+  });
+});
+
+describe("cookieOptions", () => {
+  it("meets every __Host- requirement on an https origin", () => {
+    const options = cookieOptions("https://console.up.railway.app");
+
+    expect(options.secure).toBe(true);
+    expect(options.path).toBe("/");
+    // A `domain` would make the browser silently reject the prefixed cookie, which
+    // presents as an endless sign-in loop rather than as an error.
+    expect(Object.keys(options)).not.toContain("domain");
+  });
+
+  it("drops Secure on http, so the local session still works", () => {
+    expect(cookieOptions("http://localhost:3000").secure).toBe(false);
   });
 });

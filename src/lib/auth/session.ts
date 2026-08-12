@@ -5,6 +5,24 @@ export const SESSION_COOKIE = "rc_session";
 export const PKCE_COOKIE = "rc_pkce";
 export const STATE_COOKIE = "rc_state";
 
+/**
+ * The session cookie's name, which depends on the origin serving it.
+ *
+ * `__Host-` binds a cookie to exactly one origin: no sibling subdomain can overwrite it
+ * and a `Domain` attribute is forbidden, which closes cookie-tossing — an attacker with
+ * a write primitive on a related host planting *their* session and having the victim
+ * act in it. Without the prefix nothing in the OIDC flow prevents that, because state
+ * and PKCE only guard the callback, and this path skips the callback entirely.
+ *
+ * The prefix also *requires* Secure, which plain-http localhost cannot satisfy. Rather
+ * than depend on how each browser resolves that contradiction, the name follows the
+ * origin: dev, the E2E fixture on http://localhost:3100 and Lighthouse keep the
+ * unprefixed name and behave exactly as before.
+ */
+export function sessionCookieName(appUrl: string): string {
+  return appUrl.startsWith("https://") ? `__Host-${SESSION_COOKIE}` : SESSION_COOKIE;
+}
+
 type SessionUser = {
   id: string;
   name?: string;
@@ -84,6 +102,11 @@ export function isExpiring(
   return session.expiresAt - nowSeconds <= SESSION.REFRESH_SKEW_SECONDS;
 }
 
+/**
+ * `secure`, `path: "/"` and the absence of `domain` are the three things `__Host-`
+ * requires — see sessionCookieName. Adding a `domain` here would make the browser
+ * silently reject the cookie in production, which presents as an endless sign-in loop.
+ */
 export function cookieOptions(appUrl: string) {
   return {
     httpOnly: true,

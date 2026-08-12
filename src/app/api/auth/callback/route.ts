@@ -2,13 +2,14 @@ import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { oidcConfig } from "@/lib/auth/oidc";
+import { describeOidcFailure } from "@/lib/auth/redact";
 import { SESSION } from "@/lib/constants";
 import {
   PKCE_COOKIE,
-  SESSION_COOKIE,
   STATE_COOKIE,
   cookieOptions,
   sealSession,
+  sessionCookieName,
   type RailwaySession,
 } from "@/lib/auth/session";
 
@@ -23,32 +24,15 @@ function fail(request: NextRequest, reason: string) {
 /**
  * The browser only ever learns `token_exchange_failed`, so unless the real reason is
  * recorded here it is lost — which is how an id_token signing-algorithm mismatch spent
- * a while masquerading as a redirect-URI problem. Logged server-side only; nothing here
- * reaches the client.
+ * a while masquerading as a redirect-URI problem.
+ *
+ * This used to log `error.cause`, which is where openid-client puts the specifics. That
+ * was the wrong instinct: on one branch `cause` is the parsed token response, so the
+ * line wrote a live access and refresh token into Railway's retained logs. The reason
+ * still has to be recorded — through an allow-list. See lib/auth/redact.ts.
  */
 function logExchangeFailure(error: unknown) {
-  const oauth = error as {
-    error?: string;
-    error_description?: string;
-    status?: number;
-  };
-
-  if (oauth?.error) {
-    // The token endpoint rejected the request: bad secret, wrong redirect_uri, …
-    console.error(
-      `token exchange rejected: ${oauth.error} (HTTP ${oauth.status ?? "?"})`,
-      oauth.error_description ?? "",
-    );
-    return;
-  }
-
-  // The response itself was unacceptable — wrong id_token signing alg, issuer, or
-  // audience. openid-client puts the specifics on `cause`.
-  console.error(
-    "token exchange failed:",
-    error instanceof Error ? error.message : error,
-    error instanceof Error ? (error.cause ?? "") : "",
-  );
+  console.error("token exchange failed:", describeOidcFailure(error));
 }
 
 export async function GET(request: NextRequest) {
@@ -109,10 +93,11 @@ export async function GET(request: NextRequest) {
   };
 
   const response = NextResponse.redirect(new URL("/dashboard", request.url));
-  response.cookies.set(SESSION_COOKIE, await sealSession(session, SESSION_SECRET), {
-    ...cookieOptions(APP_URL),
-    maxAge: SESSION.MAX_AGE_SECONDS,
-  });
+  response.cookies.set(
+    sessionCookieName(APP_URL),
+    await sealSession(session, SESSION_SECRET),
+    { ...cookieOptions(APP_URL), maxAge: SESSION.MAX_AGE_SECONDS },
+  );
   response.cookies.delete(PKCE_COOKIE);
   response.cookies.delete(STATE_COOKIE);
   return response;

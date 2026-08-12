@@ -21,16 +21,35 @@ describe("describeActionError", () => {
     });
   });
 
-  it("wraps a Railway GraphQL message rather than surfacing it bare", () => {
-    // Railway's own text is English and untranslatable; the sentence around it is not.
-    expect(
-      describeActionError(
-        new RailwayApiError("Service not found", { kind: "graphql" }),
-      ),
-    ).toEqual({
-      key: "errors.api.graphqlDetail",
-      values: { detail: "Service not found" },
-    });
+  it("replaces Railway's own text with a reference to the log line holding it", () => {
+    /*
+     * Railway's GraphQL text names internal fields, and on a schema rejection it
+     * quotes the document we sent. It used to be interpolated into the sentence; now
+     * it goes to the log and the user carries the id that points at it.
+     */
+    const descriptor = describeActionError(
+      new RailwayApiError("Service 8f2c not found on project prj_internal", {
+        kind: "graphql",
+      }),
+    );
+
+    expect(descriptor.key).toBe("errors.api.graphqlRef");
+    expect(descriptor.values?.incident).toMatch(/^[0-9a-f]{8}$/);
+    expect(JSON.stringify(descriptor)).not.toContain("prj_internal");
+  });
+
+  it("says a schema rejection is one, without quoting the query", () => {
+    const descriptor = describeActionError(
+      new RailwayApiError('Cannot query field "workspaces" on type "User"', {
+        kind: "graphql",
+        code: "GRAPHQL_VALIDATION_FAILED",
+      }),
+    );
+
+    // A different problem from "Railway refused the operation", and the user can act
+    // on it differently — so it gets its own wording rather than only a log tag.
+    expect(descriptor.key).toBe("errors.api.graphqlSchema");
+    expect(JSON.stringify(descriptor)).not.toContain("workspaces");
   });
 
   it("carries the retry delay as a value, so the catalog can pluralise it", () => {
@@ -46,8 +65,9 @@ describe("describeActionError", () => {
     const descriptor = describeActionError(
       new Error("connect ECONNREFUSED 10.0.0.1:5432"),
     );
-    expect(descriptor).toEqual({ key: "errors.generic" });
+    expect(descriptor.key).toBe("errors.generic");
     expect(JSON.stringify(descriptor)).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(descriptor)).not.toContain("10.0.0.1");
   });
 
   it("handles non-Error throws", () => {

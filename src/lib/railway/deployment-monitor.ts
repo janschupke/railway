@@ -2,6 +2,7 @@ import "server-only";
 
 import { AsyncQueue } from "@/lib/async-queue";
 import { STREAM } from "@/lib/constants";
+import { reportError } from "@/lib/report-error";
 import { getDeployment, getLogs } from "./api";
 import { RailwayApiError } from "./errors";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
@@ -109,18 +110,30 @@ export async function* monitorDeployment(
     // Missing history is not fatal — the live subscription may still work.
     queue.push({
       type: "warning",
-      message:
-        error instanceof RailwayApiError
-          ? error.describe()
-          : { key: "errors.logBackfillFailed" },
+      message: reportError("railway.logBackfill", error, "errors.logBackfillFailed"),
     });
     queue.push({ type: "ready", deploymentId, phase, backfilled: 0 });
   }
 
+  let missingPolls = 0;
+
   const pollStatus = async () => {
     try {
       const deployment = await deps.getDeployment(accessToken, deploymentId, signal);
-      if (!deployment) return;
+      if (!deployment) {
+        /*
+         * A null on the first poll or two is normal — Railway is eventually consistent
+         * and this fires milliseconds after the deploy mutation returns. A sustained
+         * null is not: it used to `return` silently, so an identifier that never
+         * resolved kept this interval and an upstream socket alive for the full
+         * duration ceiling. Requests are cheap to make and were expensive to ignore.
+         */
+        if (++missingPolls < STREAM.MISSING_POLLS_BEFORE_STOP) return;
+        queue.push({ type: "error", message: { key: "errors.deploymentNotFound" } });
+        stop();
+        return;
+      }
+      missingPolls = 0;
 
       const state = toContainerState(deployment.status);
       queue.push({
@@ -140,7 +153,10 @@ export async function* monitorDeployment(
       }
     } catch (error) {
       if (error instanceof RailwayApiError && error.kind === "auth") {
-        queue.push({ type: "error", message: error.describe() });
+        queue.push({
+          type: "error",
+          message: reportError("railway.deploymentPoll", error, "errors.generic"),
+        });
         stop();
       }
       // Transient failures: the next tick retries.
@@ -167,15 +183,14 @@ export async function* monitorDeployment(
       }
     } catch (error) {
       if (!signal.aborted) {
+        /*
+         * This detail is not Railway's prose — it is whatever `ws` threw, which means
+         * `connect ECONNREFUSED <resolved-ip>:<port>` or `getaddrinfo ENOTFOUND <host>`.
+         * That was going straight into a Banner.
+         */
         queue.push({
           type: "warning",
-          message:
-            error instanceof Error
-              ? {
-                  key: "errors.streamInterruptedDetail",
-                  values: { detail: error.message },
-                }
-              : { key: "errors.streamInterrupted" },
+          message: reportError("railway.logStream", error, "errors.streamInterrupted"),
         });
       }
     }

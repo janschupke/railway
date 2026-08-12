@@ -1,5 +1,5 @@
 import { SessionExpiredError } from "@/lib/auth/refresh";
-import { RailwayApiError } from "@/lib/railway/errors";
+import { reportError } from "@/lib/report-error";
 import type { MessageDescriptor } from "@/lib/messages";
 
 /** Field names a Server Action can attribute an error to. */
@@ -18,10 +18,7 @@ export function describeActionError(error: unknown): MessageDescriptor {
   if (error instanceof SessionExpiredError) {
     return { key: "errors.sessionExpired" };
   }
-  if (error instanceof RailwayApiError) {
-    return error.describe();
-  }
-  return { key: "errors.generic" };
+  return reportError("action", error, "errors.generic");
 }
 
 export function isField(value: unknown): value is ActionField {

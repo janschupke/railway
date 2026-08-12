@@ -12,6 +12,18 @@ function inferredAppUrl(): string | undefined {
   return undefined;
 }
 
+/** Loopback is the only origin allowed to serve this app over plain http. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function isSecureOrLocal(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || LOCAL_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export const RAILWAY_DEFAULTS = {
   ISSUER: "https://backboard.railway.com",
   API_URL: "https://backboard.railway.com/graphql/v2",
@@ -23,7 +35,20 @@ const schema = z.object({
   RAILWAY_CLIENT_SECRET: z.string().min(1, "RAILWAY_CLIENT_SECRET is required"),
   /** Any high-entropy string; the AES key is derived from it via HKDF. */
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 chars"),
-  APP_URL: z.url("APP_URL must be an absolute URL"),
+  /**
+   * https, unless it is loopback.
+   *
+   * Every cookie decision reads this string: `secure` is derived from it, and so is
+   * whether the session cookie carries the `__Host-` prefix. So an APP_URL that says
+   * http silently downgrades the session to a cleartext, unprefixed cookie — one
+   * variable away from shipping Railway tokens in the clear, with nothing to warn you.
+   *
+   * Gated on the host rather than NODE_ENV on purpose: Playwright and serve-e2e both
+   * run NODE_ENV=production against http://localhost:3100.
+   */
+  APP_URL: z
+    .url("APP_URL must be an absolute URL")
+    .refine(isSecureOrLocal, "APP_URL must use https unless it points at localhost"),
   /**
    * Services this app creates are named `<prefix><name>`. The prefix is the
    * ownership marker that gates destructive actions — see lib/railway/managed.ts.

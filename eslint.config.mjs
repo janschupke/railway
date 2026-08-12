@@ -175,6 +175,42 @@ const eslintConfig = defineConfig([
     },
   },
 
+  /*
+   * Session handling must not reach a client bundle: those modules hold the JWE
+   * seal/open code, the HKDF derivation and the shape of RailwaySession.
+   *
+   * `import "server-only"` is the usual guard and is deliberately NOT used on them.
+   * Its exports map resolves to a bare `throw` outside the `react-server` condition,
+   * and two legitimate callers resolve it that way — `src/proxy.ts`, which runs in the
+   * middleware layer, and `scripts/probe-projects.ts`, which runs under plain tsx.
+   * Note which modules do carry `server-only` today: exactly the ones the proxy does
+   * not import. That is the constraint, not an oversight.
+   *
+   * So the boundary is enforced from the other side instead — at the only files that
+   * could pull it into the browser.
+   */
+  {
+    files: ["src/components/**/*.{ts,tsx}", "src/hooks/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/lib/auth/session",
+                "**/lib/auth/refresh",
+                "**/lib/auth/server",
+              ],
+              message:
+                "Session handling is server-side. Pass what the component needs as a prop.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   globalIgnores([
     ".next/**",
     "out/**",

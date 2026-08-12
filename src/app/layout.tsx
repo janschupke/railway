@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Inter, Inter_Tight } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -25,6 +26,13 @@ const NO_FLASH_THEME = `(function(){try{var t=localStorage.getItem("theme");if(t
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const locale = await getLocale();
+  /*
+   * Minted per request in src/proxy.ts. Next stamps its own injected scripts from the
+   * request's CSP header automatically; an author-written dangerouslySetInnerHTML
+   * script is not covered by that, so this one carries the nonce explicitly or the
+   * theme never applies and every load flashes.
+   */
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     <html
@@ -38,7 +46,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           scripts placed in <head>, which desynchronises hydration badly enough that
           React discards the server tree and renders a second copy alongside it.
         */}
-        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
         {/*
           ToastProvider deliberately lives in the dashboard layout, not here: it is the
           only subtree that raises toasts, and mounting Radix Toast globally cost the

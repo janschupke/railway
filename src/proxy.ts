@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/env";
 import { SESSION } from "@/lib/constants";
 import {
-  SESSION_COOKIE,
   cookieOptions,
   isExpiring,
   openSession,
   sealSession,
+  sessionCookieName,
 } from "@/lib/auth/session";
 import { refreshSession } from "@/lib/auth/refresh";
+import { contentSecurityPolicy, generateNonce } from "@/lib/security-headers";
 
 const PROTECTED = ["/dashboard"];
 
@@ -29,37 +30,77 @@ export async function proxy(request: NextRequest) {
   );
 
   const { SESSION_SECRET, APP_URL } = env();
-  const raw = request.cookies.get(SESSION_COOKIE)?.value;
+  const cookieName = sessionCookieName(APP_URL);
+
+  /*
+   * The nonce has to reach two places: Next's own injected inline scripts, and the
+   * theme script in layout.tsx.
+   *
+   * Next reads it off the *request* CSP header — app-render.js parses the header with
+   * getScriptNonceFromHeader and stamps the value onto every script it injects — so
+   * setting it on `request.headers` is not a workaround, it is the documented channel.
+   * x-nonce rides along for layout.tsx to read via headers().
+   *
+   * Two footguns, both load-bearing: the header set must be built from
+   * `new Headers(request.headers)`, because Next drops every request header absent from
+   * the override list; and no directive may be named such that it sorts before
+   * `script-src` under a `startsWith` scan — which is why there is no `script-src-elem`.
+   */
+  const nonce = generateNonce();
+  const csp = contentSecurityPolicy(nonce, {
+    https: APP_URL.startsWith("https://"),
+    dev: process.env.NODE_ENV !== "production",
+  });
+
+  /*
+   * Snapshotted at call time, not once up front: the refresh branch mutates
+   * request.cookies first, and that mutation has to be in the headers this forwards.
+   */
+  const forwarded = () => {
+    const headers = new Headers(request.headers);
+    headers.set("content-security-policy", csp);
+    headers.set("x-nonce", nonce);
+    return headers;
+  };
+
+  const proceed = () => NextResponse.next({ request: { headers: forwarded() } });
+
+  const withCsp = <T extends NextResponse>(response: T): T => {
+    response.headers.set("content-security-policy", csp);
+    return response;
+  };
+
+  const raw = request.cookies.get(cookieName)?.value;
   const session = await openSession(raw, SESSION_SECRET);
 
   if (!session) {
-    if (isProtected) return NextResponse.redirect(new URL("/", request.url));
-    return NextResponse.next();
+    if (isProtected) return withCsp(NextResponse.redirect(new URL("/", request.url)));
+    return withCsp(proceed());
   }
 
-  if (!isExpiring(session)) return NextResponse.next();
+  if (!isExpiring(session)) return withCsp(proceed());
 
   try {
     const refreshed = await refreshSession(session);
     const sealed = await sealSession(refreshed, SESSION_SECRET);
 
     // Set on the request first so this request's render sees the fresh token...
-    request.cookies.set(SESSION_COOKIE, sealed);
-    const response = NextResponse.next({ request });
+    request.cookies.set(cookieName, sealed);
+    const response = proceed();
     // ...and on the response so the browser keeps it.
-    response.cookies.set(SESSION_COOKIE, sealed, {
+    response.cookies.set(cookieName, sealed, {
       ...cookieOptions(APP_URL),
       maxAge: SESSION.MAX_AGE_SECONDS,
     });
-    return response;
+    return withCsp(response);
   } catch {
     // Refresh token spent, revoked, or the app's authorization was withdrawn.
     const target = isProtected
       ? new URL("/?error=session_expired", request.url)
       : request.url;
-    const response = isProtected ? NextResponse.redirect(target) : NextResponse.next();
-    response.cookies.delete(SESSION_COOKIE);
-    return response;
+    const response = isProtected ? NextResponse.redirect(target) : proceed();
+    response.cookies.delete(cookieName);
+    return withCsp(response);
   }
 }
 

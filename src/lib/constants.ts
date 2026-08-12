@@ -30,6 +30,20 @@ export const STREAM = {
   BACKFILL_LINES: 200,
   /** Bound on the browser-side buffer; a chatty container must not grow the tab. */
   MAX_BUFFERED_LINES: 1000,
+  /**
+   * Concurrent streams one user may hold. One per expanded row — but a reload briefly
+   * needs two per row, because the browser opens the new connection before the server
+   * observes the old one closing, so this sits well above the honest working set. A
+   * false 429 presents as a log pane that never connects and never says why.
+   */
+  MAX_CONCURRENT_PER_USER: 8,
+  /**
+   * Status polls tolerated before concluding a deployment does not exist. Railway is
+   * eventually consistent, so the first poll after a deploy legitimately returns null;
+   * without a ceiling, an id that never resolves kept a poll and an upstream socket
+   * alive for the full MAX_DURATION_MS.
+   */
+  MISSING_POLLS_BEFORE_STOP: 3,
 } as const;
 
 /** Session cookie and token lifetimes. */

@@ -122,10 +122,60 @@ describe("monitorDeployment", () => {
 
     expect(events[0]).toMatchObject({
       type: "warning",
-      // A descriptor, not a sentence: the monitor has no translator of its own.
-      message: { key: "errors.api.graphqlDetail", values: { detail: "nope" } },
+      // A descriptor, not a sentence: the monitor has no translator of its own — and
+      // not Railway's own text either, which goes to the log against this incident id.
+      message: { key: "errors.api.graphqlRef" },
     });
+    expect(JSON.stringify(events[0])).not.toContain("nope");
     expect(events.map((e) => e.type)).toContain("ready");
+    expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("gives up on a deployment that never appears, instead of polling for 15 minutes", async () => {
+    /*
+     * An identifier that resolves to nothing used to be a silent `return`, so the poll
+     * interval and the upstream socket stayed alive until the duration ceiling. That
+     * made an arbitrary id the cheapest way to hold this server's resources.
+     */
+    const events = await drain(
+      monitorDeployment(params(), deps({ getDeployment: vi.fn(async () => null) })),
+      async () => {
+        await vi.advanceTimersByTimeAsync(
+          STREAM.STATUS_POLL_MS * (STREAM.MISSING_POLLS_BEFORE_STOP + 1),
+        );
+      },
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: { key: "errors.deploymentNotFound" },
+    });
+    // drain() only resolves once the generator completes, so reaching this line is
+    // itself the proof that stop() cleared the interval.
+  });
+
+  it("tolerates the eventual consistency of a just-created deployment", async () => {
+    // The first poll fires milliseconds after the deploy mutation returns; a null there
+    // is normal, and treating it as fatal would break every real spin-up.
+    let calls = 0;
+    const events = await drain(
+      monitorDeployment(
+        params(),
+        deps({
+          getDeployment: vi.fn(async () => {
+            calls += 1;
+            return calls <= 2
+              ? null
+              : { id: "dep_1", status: "SUCCESS", updatedAt: null };
+          }),
+        }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS * 3 + STREAM.DRAIN_MS);
+      },
+    );
+
+    expect(events.map((e) => e.type)).not.toContain("error");
     expect(events.at(-1)?.type).toBe("done");
   });
 

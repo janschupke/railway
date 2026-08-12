@@ -108,7 +108,7 @@ describe("GET /api/auth/callback", () => {
     expect(errorParam(response)).toBe("access_denied");
   });
 
-  it("reports a failed token exchange without leaking the cause", async () => {
+  it("reports a failed token exchange without leaking the reason to the browser", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     authorizationCodeGrant.mockImplementation(async () => {
       throw new Error("invalid_client: bad secret");
@@ -123,9 +123,43 @@ describe("GET /api/auth/callback", () => {
     // redirect-URI problem.
     expect(logged).toHaveBeenCalledWith(
       "token exchange failed:",
-      "invalid_client: bad secret",
-      "",
+      "Error: invalid_client: bad secret",
     );
+    logged.mockRestore();
+  });
+
+  it("never writes the token response to the log, whatever openid-client attaches", async () => {
+    /*
+     * The assertion that matters, made over the real handler rather than the redactor
+     * alone. oauth4webapi throws this exact shape when the token endpoint returns an
+     * unrecognised `token_type` — and `cause.body` is the parsed response, holding a
+     * live access and refresh token. Railway retains stdout, so one such line outlives
+     * the request that produced it.
+     *
+     * Stringifying the whole call log, rather than matching an expected argument list,
+     * is what makes this a real statement: it fails no matter which argument slot or
+     * nested field a future edit puts the credential in.
+     */
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    authorizationCodeGrant.mockImplementation(async () => {
+      const error = new Error("unsupported `token_type` value", {
+        cause: { body: { access_token: "AT-CANARY", refresh_token: "RT-CANARY" } },
+      });
+      error.name = "UnsupportedOperationError";
+      throw error;
+    });
+
+    expect(errorParam(await GET(request("?code=abc&state=st")))).toBe(
+      "token_exchange_failed",
+    );
+
+    const everythingLogged = JSON.stringify(logged.mock.calls);
+    expect(everythingLogged).not.toContain("AT-CANARY");
+    expect(everythingLogged).not.toContain("RT-CANARY");
+    // …and the line is still there. Deleting the console.error would satisfy the two
+    // assertions above and leave the failure undiagnosable.
+    expect(everythingLogged).toContain("UnsupportedOperationError");
+
     logged.mockRestore();
   });
 
@@ -143,8 +177,8 @@ describe("GET /api/auth/callback", () => {
       "token_exchange_failed",
     );
     expect(logged).toHaveBeenCalledWith(
-      "token exchange rejected: invalid_grant (HTTP 400)",
-      "code is expired",
+      "token exchange failed:",
+      "Error: server responded with an error — invalid_grant · HTTP 400 · code is expired",
     );
     logged.mockRestore();
   });

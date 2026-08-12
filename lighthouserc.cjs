@@ -58,13 +58,20 @@ module.exports = {
          * These apply to every URL, so they track the worst case — and they cover what
          * `pnpm size` cannot: fonts, CSS and the document itself.
          *
-         * Measured at the time of writing: script 210.2 kB, font 91.7 kB,
-         * stylesheet 7.5 kB, total 347.3 kB.
+         * Re-seeded 2026-08-12 against a measured run: script 223.0 kB, font 95.0 kB,
+         * stylesheet 8.6 kB, total 370.2 kB — the previous total ceiling of 370 kB was
+         * exceeded by 175 bytes. Roughly 1.2 kB gzip of that growth is the security
+         * pass (CSP construction, the stream slot counter, the error reporter); the
+         * rest is the Text primitive and the widened project query.
+         *
+         * Raising a budget is a decision, not a formality: `pnpm size` still gates
+         * first-load JS per route at the tighter, unchanged numbers in
+         * bundle-budgets.json, and these exist to catch what that cannot.
          */
-        "resource-summary:script:size": ["error", { maxNumericValue: 226000 }],
+        "resource-summary:script:size": ["error", { maxNumericValue: 234000 }],
         "resource-summary:stylesheet:size": ["error", { maxNumericValue: 12000 }],
         "resource-summary:font:size": ["error", { maxNumericValue: 100000 }],
-        "resource-summary:total:size": ["error", { maxNumericValue: 370000 }],
+        "resource-summary:total:size": ["error", { maxNumericValue: 389000 }],
       },
     },
 

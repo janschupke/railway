@@ -183,9 +183,13 @@ describe("spinUp", () => {
     );
 
     const result = await spinUp(null, spinUpForm());
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      error: "Railway rejected the operation: Too many requests",
+      // Railway's own text is not repeated to the user; the reference points at the
+      // log line that has it verbatim.
+      error: expect.stringMatching(
+        /^Railway rejected the operation\. Reference [0-9a-f]{8}\.$/,
+      ),
     });
   });
 
@@ -295,10 +299,13 @@ describe("spinDown", () => {
     );
 
     const result = await spinDown(null, downForm("svc_managed"));
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      // Railway's own text is wrapped so the sentence around it stays translatable.
-      error: "Railway rejected the operation: Service is locked",
+      // "Service is locked" names Railway's internal state; the user gets a reference
+      // and the operator greps the log for it.
+      error: expect.stringMatching(
+        /^Railway rejected the operation\. Reference [0-9a-f]{8}\.$/,
+      ),
     });
   });
 });

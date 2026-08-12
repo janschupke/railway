@@ -18,16 +18,15 @@ export type MessageKey =
   | "errors.projectsFailed"
   | "errors.containersFailed"
   | "errors.logBackfillFailed"
+  | "errors.deploymentNotFound"
   | "errors.streamInterrupted"
-  | "errors.streamInterruptedDetail"
   | "errors.api.auth"
   | "errors.api.rateLimit"
   | "errors.api.rateLimitRetry"
   | "errors.api.network"
   | "errors.api.server"
-  | "errors.api.graphql"
-  | "errors.api.graphqlDetail"
-  | "errors.api.empty";
+  | "errors.api.graphqlRef"
+  | "errors.api.graphqlSchema";
 
 /** Narrow shape of next-intl's translator, so callers can pass `t` directly. */
 export type Translate = (

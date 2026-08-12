@@ -134,3 +134,51 @@ describe("proxy", () => {
     expect(refreshSession).not.toHaveBeenCalled();
   });
 });
+
+describe("content security policy", () => {
+  const nonceOf = (policy: string | null) =>
+    /'nonce-([A-Za-z0-9+/]+={0,2})'/.exec(policy ?? "")?.[1];
+
+  it("sets a policy on a plain pass-through", async () => {
+    const response = await proxy(await request("/", session()));
+    const policy = response.headers.get("content-security-policy");
+
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(nonceOf(policy)).toBeDefined();
+  });
+
+  it("hands Next the same nonce it puts in the response policy", async () => {
+    /*
+     * The wiring that makes the whole thing work, and the part that fails invisibly:
+     * Next parses the nonce out of the *request* CSP header and stamps it onto the
+     * scripts it injects. NextResponse.next({ request }) transports request headers as
+     * `x-middleware-request-*`, so that is where the override is observable from here.
+     */
+    const response = await proxy(await request("/", session()));
+
+    const sent = nonceOf(response.headers.get("content-security-policy"));
+    const forwarded = nonceOf(
+      response.headers.get("x-middleware-request-content-security-policy"),
+    );
+
+    expect(forwarded).toBe(sent);
+    expect(response.headers.get("x-middleware-request-x-nonce")).toBe(sent);
+  });
+
+  it("mints a new nonce per request", async () => {
+    const first = await proxy(await request("/", session()));
+    const second = await proxy(await request("/", session()));
+
+    expect(nonceOf(first.headers.get("content-security-policy"))).not.toBe(
+      nonceOf(second.headers.get("content-security-policy")),
+    );
+  });
+
+  it("applies to a redirect too, so no branch is left uncovered", async () => {
+    const response = await proxy(
+      new NextRequest(new URL("/dashboard", "http://localhost:3000")),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("content-security-policy")).toContain("default-src");
+  });
+});

@@ -135,16 +135,16 @@
     "projectsFailed": "Could not load your Railway projects.",
     "containersFailed": "Could not load containers for this environment.",
     "logBackfillFailed": "Could not load earlier logs",
-    "streamInterrupted": "Log stream interrupted",
-    "streamInterruptedDetail": "Log stream interrupted: {detail}",
+    "deploymentNotFound": "That deployment no longer exists, so there is nothing to stream.",
+    "streamInterrupted": "Log stream interrupted. Reference {incident}.",
     "api": {
       "auth": "Railway rejected the request. Your authorization may have been revoked — sign in again.",
       "rateLimitRetry": "Railway's rate limit was hit. Try again in {seconds, plural, one {# second} other {# seconds}}.",
       "rateLimit": "Railway's rate limit was hit. Try again shortly.",
       "network": "Could not reach Railway. Check your connection and retry.",
       "server": "Railway returned a server error. This is usually transient — retry.",
-      "graphql": "Railway rejected the operation",
-      "graphqlDetail": "Railway rejected the operation: {detail}",
+      "graphqlRef": "Railway rejected the operation. Reference {incident}.",
+      "graphqlSchema": "Railway rejected this query — the app asked for something the API does not offer. Reference {incident}.",
       "empty": "Railway returned an empty response"
     }
   },

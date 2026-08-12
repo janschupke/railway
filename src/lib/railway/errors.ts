@@ -1,3 +1,4 @@
+import { newIncidentId } from "@/lib/incident";
 import type { MessageDescriptor } from "@/lib/messages";
 
 export type RailwayErrorKind =
@@ -14,6 +15,12 @@ export class RailwayApiError extends Error {
   readonly retryAfterSeconds?: number;
   /** `errors[].extensions.code` verbatim, when Railway sent one. */
   readonly code?: string;
+  /**
+   * Ties the sentence the user sees to the log line holding Railway's own text. Minted
+   * in the constructor so the id is the same one `reportError` logs, however many
+   * layers later `describe()` is called.
+   */
+  readonly incidentId: string = newIncidentId();
 
   constructor(
     message: string,
@@ -72,13 +79,18 @@ export class RailwayApiError extends Error {
         return { key: "errors.api.server" };
       case "graphql":
         /*
-         * Railway's own GraphQL text is the only detail we have and it arrives in
-         * English. Wrapping it keeps the sentence around it translatable instead of
-         * handing the user a raw upstream string.
+         * Railway's own GraphQL text used to be interpolated straight into this
+         * sentence. It names internal fields, and on a schema rejection it quotes the
+         * document we sent — neither belongs in a browser. reportError has already
+         * written it to the log against this id, so the reference is the detail.
+         *
+         * isSchemaRejection picks the wording rather than only tagging the log: "the
+         * app asked for something the API does not offer" is a different problem from
+         * "Railway refused the operation", and the user can tell them apart.
          */
-        return this.message
-          ? { key: "errors.api.graphqlDetail", values: { detail: this.message } }
-          : { key: "errors.api.graphql" };
+        return this.isSchemaRejection()
+          ? { key: "errors.api.graphqlSchema", values: { incident: this.incidentId } }
+          : { key: "errors.api.graphqlRef", values: { incident: this.incidentId } };
     }
   }
 }

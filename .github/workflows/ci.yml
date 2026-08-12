@@ -32,6 +32,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # `--prod` is deliberate, not a softening. The three advisories open today all sit
+      # under @lhci/cli, which never runs in a deployment — an unqualified
+      # `--audit-level=high` would fail this build immediately on GHSA-ph9p-34f9-6g65
+      # and train everyone to ignore the step. `--prod` re-evaluates reachability on
+      # every run, which an ignore-list of advisory ids would not.
+      - name: Dependency audit (shipped tree)
+        run: pnpm audit --prod --audit-level=high
+
+      # Advisory: surfaces dev-tree findings without gating the merge on tooling.
+      - name: Dependency audit (full tree)
+        run: pnpm audit --audit-level=moderate
+        continue-on-error: true
+
       - name: Prettier
         run: pnpm format:check
 

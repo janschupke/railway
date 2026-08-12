@@ -4,11 +4,11 @@ import { cookies } from "next/headers";
 import { env } from "@/env";
 import { SESSION } from "@/lib/constants";
 import {
-  SESSION_COOKIE,
   cookieOptions,
   isExpiring,
   openSession,
   sealSession,
+  sessionCookieName,
   type RailwaySession,
 } from "./session";
 import { SessionExpiredError, refreshSession } from "./refresh";
@@ -22,14 +22,15 @@ import { SessionExpiredError, refreshSession } from "./refresh";
  */
 export async function getSession(): Promise<RailwaySession | null> {
   const jar = await cookies();
-  return openSession(jar.get(SESSION_COOKIE)?.value, env().SESSION_SECRET);
+  const { APP_URL, SESSION_SECRET } = env();
+  return openSession(jar.get(sessionCookieName(APP_URL))?.value, SESSION_SECRET);
 }
 
 /** Write the session cookie. Only valid inside a Server Action or Route Handler. */
 export async function persistSession(session: RailwaySession): Promise<void> {
   const jar = await cookies();
   const { APP_URL, SESSION_SECRET } = env();
-  jar.set(SESSION_COOKIE, await sealSession(session, SESSION_SECRET), {
+  jar.set(sessionCookieName(APP_URL), await sealSession(session, SESSION_SECRET), {
     ...cookieOptions(APP_URL),
     maxAge: SESSION.MAX_AGE_SECONDS,
   });
@@ -37,7 +38,7 @@ export async function persistSession(session: RailwaySession): Promise<void> {
 
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
+  jar.delete(sessionCookieName(env().APP_URL));
 }
 
 /**
@@ -47,15 +48,20 @@ export async function clearSession(): Promise<void> {
  * stale token (long-running page open past expiry, middleware skipped for the path).
  * Server Actions and Route Handlers *can* write cookies, so this is the safe fallback.
  */
-export async function requireAccessToken(): Promise<string> {
+export async function requireSession(): Promise<RailwaySession> {
   const session = await getSession();
   if (!session) throw new SessionExpiredError("no session");
 
-  if (!isExpiring(session)) return session.accessToken;
+  if (!isExpiring(session)) return session;
 
   const refreshed = await refreshSession(session);
   await persistSession(refreshed);
-  return refreshed.accessToken;
+  return refreshed;
+}
+
+/** The token alone, for callers that need nothing else. One refresh path, above. */
+export async function requireAccessToken(): Promise<string> {
+  return (await requireSession()).accessToken;
 }
 
 export { SessionExpiredError };

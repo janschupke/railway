@@ -1,11 +1,20 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetEnv } from "@/env";
 import { PKCE_COOKIE, SESSION_COOKIE, STATE_COOKIE } from "@/lib/auth/session";
-import { SESSION } from "@/lib/constants";
+import { SESSION, STREAM } from "@/lib/constants";
 
-const requireAccessToken = vi.fn(async () => "token");
+const session = {
+  user: { id: "u1", name: "Ada", email: "ada@example.com" },
+  accessToken: "token",
+  refreshToken: "refresh",
+  expiresAt: 9_999_999_999,
+  scope: "openid project:admin",
+};
+const requireSession = vi.fn(async () => session);
 vi.mock("@/lib/auth/server", () => ({
-  requireAccessToken: () => requireAccessToken(),
+  requireSession: () => requireSession(),
+  requireAccessToken: async () => (await requireSession()).accessToken,
 }));
 
 const monitorDeployment = vi.fn();
@@ -19,10 +28,11 @@ const { POST: logout } = await import("./auth/logout/route");
 const { GET: stream } = await import("./streams/[deploymentId]/route");
 
 const url = (path: string) => new URL(path, "http://localhost:3000");
-const request = (path: string) => new NextRequest(url(path));
+const request = (path: string, headers?: Record<string, string>) =>
+  new NextRequest(url(path), headers ? { headers } : undefined);
 
 beforeEach(() => {
-  requireAccessToken.mockReset().mockResolvedValue("token");
+  requireSession.mockReset().mockResolvedValue(session);
   monitorDeployment.mockReset();
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -34,6 +44,23 @@ describe("GET /api/health", () => {
     const response = health();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: "ok" });
+  });
+
+  it("names the misconfigured variables in the log, not in the response", async () => {
+    // Unauthenticated endpoint: the issue list is a map of this deployment's env vars.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("SESSION_SECRET", "too-short");
+    __resetEnv();
+
+    const response = health();
+
+    expect(response.status).toBe(503);
+    // toEqual, not toMatchObject: a future field that re-opens the leak must fail here.
+    await expect(response.json()).resolves.toEqual({ status: "misconfigured" });
+    expect(JSON.stringify(logged.mock.calls)).toContain("SESSION_SECRET");
+
+    logged.mockRestore();
+    __resetEnv();
   });
 });
 
@@ -90,13 +117,40 @@ describe("GET /api/auth/login", () => {
 });
 
 describe("POST /api/auth/logout", () => {
+  const sameSite = { "sec-fetch-site": "same-origin" };
+
   it("clears the session and sends the browser home with a GET", async () => {
-    const response = await logout(request("/api/auth/logout"));
+    const response = await logout(request("/api/auth/logout", sameSite));
 
     // 303 so the browser follows with GET rather than re-POSTing.
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("http://localhost:3000/");
-    expect(response.cookies.get(SESSION_COOKIE)?.value).toBe("");
+    // Asserted on the wire rather than through NextResponse.cookies: the refusal path
+    // returns a plain Response, and this is what the browser actually acts on.
+    expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=;`);
+  });
+
+  it("accepts a form POST identified by its Origin", async () => {
+    // Safari has historically been late to Sec-Fetch-Site; Origin is the fallback and
+    // the fetch spec requires a form submission to send it.
+    const response = await logout(
+      request("/api/auth/logout", { origin: "http://localhost:3000" }),
+    );
+    expect(response.status).toBe(303);
+  });
+
+  it("refuses a cross-site POST rather than signing the user out", async () => {
+    const response = await logout(
+      request("/api/auth/logout", { origin: "https://evil.test" }),
+    );
+
+    expect(response.status).toBe(403);
+    // The point: no Set-Cookie at all, so a forged request cannot clear the session.
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses a request that identifies itself with neither header", async () => {
+    expect((await logout(request("/api/auth/logout"))).status).toBe(403);
   });
 });
 
@@ -118,7 +172,7 @@ describe("GET /api/streams/[deploymentId]", () => {
   }
 
   it("refuses an unauthenticated request", async () => {
-    requireAccessToken.mockImplementation(async () => {
+    requireSession.mockImplementation(async () => {
       throw new Error("no session");
     });
 
@@ -126,6 +180,52 @@ describe("GET /api/streams/[deploymentId]", () => {
 
     expect(response.status).toBe(401);
     expect(monitorDeployment).not.toHaveBeenCalled();
+  });
+
+  it.each(["../../etc/passwd", "a".repeat(65), "dep 1", "dep/1", ""])(
+    "rejects %j before doing any upstream work",
+    async (id) => {
+      /*
+       * The identifier came off the URL and went straight to the GraphQL layer and an
+       * upstream WebSocket. The assertion that matters is not the status code but that
+       * nothing was spent: a rejected request must not reach the monitor at all.
+       */
+      const response = await stream(request(`/api/streams/${id}`), params(id));
+
+      expect(response.status).toBe(400);
+      expect(monitorDeployment).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses to open more concurrent streams than one user may hold", async () => {
+    // Each stream costs a held response, an upstream socket and a recurring poll;
+    // before the cap, one session could open as many as it liked.
+    monitorDeployment.mockImplementation(
+      () =>
+        ({
+          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        }) as AsyncIterable<never>,
+    );
+
+    const open = [];
+    for (let i = 0; i < STREAM.MAX_CONCURRENT_PER_USER; i++) {
+      open.push(await stream(request("/api/streams/dep_1"), params("dep_1")));
+    }
+    expect(open.every((r) => r.status === 200)).toBe(true);
+
+    const refused = await stream(request("/api/streams/dep_1"), params("dep_1"));
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("5");
+
+    // Releasing one frees exactly one slot — the counter is not one-way.
+    await open[0]!.body!.cancel();
+    await vi.waitFor(async () => {
+      const retried = await stream(request("/api/streams/dep_1"), params("dep_1"));
+      expect(retried.status).toBe(200);
+      await retried.body!.cancel();
+    });
+
+    for (const response of open.slice(1)) await response.body!.cancel();
   });
 
   it("relays monitor events as SSE frames, in order, and stops at done", async () => {
