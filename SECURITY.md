@@ -53,6 +53,16 @@ disappeared. `reportError` writes the verbatim failure to the deployment log aga
 points at a log line; before, the screenshot _was_ the only evidence, and it was also
 the leak.
 
+**Redaction is not the same as silence, and the first pass conflated them.** Every
+GraphQL failure resolved to one sentence — "Railway rejected the operation. Reference
+…" — which is a redaction so complete that the user cannot tell a missing permission
+from an outage, and so cannot tell whether to retry, re-authorize, or stop. The upstream
+text is still never rendered; what changed is that the _cause_ is now classified
+server-side and mapped to its own sentence: a rejected credential, a scope Railway
+withheld (named, from the refused field's `path`), a rate limit, an outage. The incident
+id rides along with all of them rather than only the two GraphQL keys, so the log join
+works for every failure a user can screenshot.
+
 ## What was already sound
 
 Recorded because a review that reports only problems misrepresents the system.

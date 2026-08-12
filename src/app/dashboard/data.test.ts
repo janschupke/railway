@@ -36,7 +36,7 @@ const projects = [
 
 beforeEach(() => {
   getSession.mockReset().mockResolvedValue(session);
-  listProjects.mockReset().mockResolvedValue({ viewer: {}, projects });
+  listProjects.mockReset().mockResolvedValue({ viewer: {}, projects, failures: [] });
   getProjectContainers
     .mockReset()
     .mockResolvedValue({ project: projects[0], containers: [] });
@@ -98,7 +98,7 @@ describe("loadDashboardShell", () => {
   });
 
   it("does not report a substitution when there was nothing to substitute", async () => {
-    listProjects.mockResolvedValue({ viewer: {}, projects: [] });
+    listProjects.mockResolvedValue({ viewer: {}, projects: [], failures: [] });
 
     const shell = await loadDashboardShell({ projectId: "gone" });
 
@@ -112,13 +112,17 @@ describe("loadDashboardShell", () => {
 
     const shell = await loadDashboardShell({});
 
-    expect(shell?.missingScopes).toEqual(["project:admin", "offline_access"]);
+    expect(shell?.missingScopes).toEqual([
+      "project:admin",
+      "workspace:viewer",
+      "offline_access",
+    ]);
   });
 
   it("reports no missing scopes when consent granted everything that matters", async () => {
     getSession.mockResolvedValue({
       ...session,
-      scope: "openid email profile offline_access project:admin",
+      scope: "openid email profile offline_access project:admin workspace:viewer",
     });
 
     expect((await loadDashboardShell({}))?.missingScopes).toEqual([]);
@@ -149,12 +153,14 @@ describe("loadDashboardShell", () => {
 
     const shell = await loadDashboardShell({});
 
-    expect(shell?.error).toBe("Could not load your Railway projects.");
+    expect(shell?.error).toMatch(
+      /^Could not load your Railway projects\. Reference \w+\.$/,
+    );
     expect(shell?.error).not.toContain("socket");
   });
 
   it("handles a user with no projects shared", async () => {
-    listProjects.mockResolvedValue({ viewer: {}, projects: [] });
+    listProjects.mockResolvedValue({ viewer: {}, projects: [], failures: [] });
 
     const shell = await loadDashboardShell({});
 
@@ -168,6 +174,7 @@ describe("loadDashboardShell", () => {
     listProjects.mockResolvedValue({
       viewer: {},
       projects: [{ id: "p9", name: "Empty", environments: [] }],
+      failures: [],
     });
 
     const shell = await loadDashboardShell({});
@@ -212,7 +219,9 @@ describe("loadContainers", () => {
 
     const data = await loadContainers("p1", "e1");
 
-    expect(data.error).toBe("Could not load containers for this environment.");
+    expect(data.error).toMatch(
+      /^Could not load containers for this environment\. Reference \w+\.$/,
+    );
     expect(data.error).not.toContain("socket");
   });
 

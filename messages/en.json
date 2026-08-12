@@ -47,6 +47,9 @@
     "emptyDescription": "Spin one up above and its build logs will stream here.",
     "projectLabel": "Project",
     "environmentLabel": "Environment",
+    "noProjectsAvailable": "No projects to choose from.",
+    "noEnvironments": "This project has no environments.",
+    "selectProjectFirst": "Choose a project first.",
     "switchingProject": "Loading containers…",
     "errorTitle": "The dashboard could not load",
     "errorDescription": "This is usually a Railway API hiccup or an expired authorization. Retrying is safe — nothing was created or destroyed.",
@@ -130,22 +133,23 @@
     "serviceRequired": "Missing container reference."
   },
   "errors": {
-    "generic": "Something went wrong. Please try again.",
+    "generic": "Something went wrong. Please try again. Reference {incident}.",
     "sessionExpired": "Your Railway session expired. Sign in again.",
-    "projectsFailed": "Could not load your Railway projects.",
-    "containersFailed": "Could not load containers for this environment.",
+    "projectsFailed": "Could not load your Railway projects. Reference {incident}.",
+    "containersFailed": "Could not load containers for this environment. Reference {incident}.",
     "logBackfillFailed": "Could not load earlier logs",
     "deploymentNotFound": "That deployment no longer exists, so there is nothing to stream.",
     "streamInterrupted": "Log stream interrupted. Reference {incident}.",
     "api": {
-      "auth": "Railway rejected the request. Your authorization may have been revoked — sign in again.",
-      "rateLimitRetry": "Railway's rate limit was hit. Try again in {seconds, plural, one {# second} other {# seconds}}.",
-      "rateLimit": "Railway's rate limit was hit. Try again shortly.",
-      "network": "Could not reach Railway. Check your connection and retry.",
-      "server": "Railway returned a server error. This is usually transient — retry.",
-      "graphqlRef": "Railway rejected the operation. Reference {incident}.",
-      "graphqlSchema": "Railway rejected this query — the app asked for something the API does not offer. Reference {incident}.",
-      "empty": "Railway returned an empty response"
+      "auth": "Railway rejected your credentials, so the authorization is no longer valid. Signing in again will restore it. Reference {incident}.",
+      "notAuthorized": "Railway refused this request for your account. The authorization is live but does not cover what the app asked for, so retrying will not help — authorize again and approve access. Reference {incident}.",
+      "missingScope": "Railway did not grant this app {scope} access, so it cannot read this. Authorize again and approve it on the consent screen. Reference {incident}.",
+      "rateLimitRetry": "Railway's rate limit was hit. Try again in {seconds, plural, one {# second} other {# seconds}}. Reference {incident}.",
+      "rateLimit": "Railway's rate limit was hit. Try again shortly. Reference {incident}.",
+      "network": "Could not reach Railway. Check your connection and retry. Reference {incident}.",
+      "server": "Railway returned a server error. This is usually transient — retry. Reference {incident}.",
+      "graphqlUnexpected": "Railway refused this operation for a reason the app does not recognise, so retrying is unlikely to help. The server log records what Railway said. Reference {incident}.",
+      "graphqlSchema": "Railway rejected this query — the app asked for something the API does not offer. Reference {incident}."
     }
   },
   "signIn": {

@@ -2,11 +2,31 @@ import { newIncidentId } from "@/lib/incident";
 import type { MessageDescriptor } from "@/lib/messages";
 
 export type RailwayErrorKind =
-  | "auth" // 401/403 — token rejected or scope insufficient
+  | "auth" // 401/403, or a GraphQL-layer refusal — token rejected or scope insufficient
   | "rate_limit" // 429 — retries exhausted
   | "graphql" // HTTP 200 with an errors[] payload
   | "network" // transport failure or timeout
   | "server"; // 5xx after retries
+
+/**
+ * The consent scope a refused field would have needed.
+ *
+ * Railway's scopes are granted per resource family, and its refusal says only "Not
+ * Authorized" — the path is the only thing distinguishing "you did not grant workspace
+ * access" from "your token is dead". Naming the scope is what makes re-authorizing a
+ * fix rather than a guess, which is the loop this app kept sending people round.
+ */
+function scopeForPath(path?: Array<string | number>): string | undefined {
+  if (!path?.length) return undefined;
+  const fields = path.filter((s): s is string => typeof s === "string");
+  if (fields.includes("workspaces") || fields.includes("workspace")) {
+    return "workspace:viewer";
+  }
+  if (fields.some((f) => f === "project" || f === "projects" || f === "service")) {
+    return "project:admin";
+  }
+  return undefined;
+}
 
 export class RailwayApiError extends Error {
   readonly kind: RailwayErrorKind;
@@ -15,6 +35,8 @@ export class RailwayApiError extends Error {
   readonly retryAfterSeconds?: number;
   /** `errors[].extensions.code` verbatim, when Railway sent one. */
   readonly code?: string;
+  /** `errors[].path` verbatim — which field was refused. */
+  readonly path?: Array<string | number>;
   /**
    * Ties the sentence the user sees to the log line holding Railway's own text. Minted
    * in the constructor so the id is the same one `reportError` logs, however many
@@ -30,6 +52,7 @@ export class RailwayApiError extends Error {
       operation?: string;
       retryAfterSeconds?: number;
       code?: string;
+      path?: Array<string | number>;
       cause?: unknown;
     },
   ) {
@@ -40,7 +63,27 @@ export class RailwayApiError extends Error {
     this.operation = options.operation;
     this.retryAfterSeconds = options.retryAfterSeconds;
     this.code = options.code;
+    this.path = options.path;
     this.cause = options.cause;
+  }
+
+  /** The scope this failure implies is missing, if it implies one. */
+  get missingScope(): string | undefined {
+    return this.kind === "auth" ? scopeForPath(this.path) : undefined;
+  }
+
+  /**
+   * True when Railway rejected the credential itself rather than what it may reach.
+   *
+   * The two need opposite advice — a dead token is fixed by signing in, a live token
+   * that does not cover a resource is fixed by approving that resource at consent — and
+   * only an HTTP 401/403 or a spec-conformant UNAUTHENTICATED says which one this is.
+   * Railway's own `Not Authorized` says neither, so it is read as the narrower case.
+   */
+  credentialRejected(): boolean {
+    return (
+      this.status === 401 || this.status === 403 || this.code === "UNAUTHENTICATED"
+    );
   }
 
   /**
@@ -63,20 +106,38 @@ export class RailwayApiError extends Error {
    * is constructed deep in the network layer, well outside any request scope.
    */
   describe(): MessageDescriptor {
+    const incident = this.incidentId;
+
     switch (this.kind) {
       case "auth":
-        return { key: "errors.api.auth" };
+        /*
+         * Three different problems wearing one kind, and they need three different
+         * actions. A named missing scope means authorize again and approve it; an HTTP
+         * 401 means the whole authorization is gone; a GraphQL-layer refusal means the
+         * token is live but does not cover this. Collapsing them into one sentence is
+         * how "re-authorize" became the button that never worked.
+         */
+        if (this.credentialRejected()) {
+          return { key: "errors.api.auth", values: { incident } };
+        }
+        if (this.missingScope) {
+          return {
+            key: "errors.api.missingScope",
+            values: { scope: this.missingScope, incident },
+          };
+        }
+        return { key: "errors.api.notAuthorized", values: { incident } };
       case "rate_limit":
         return this.retryAfterSeconds
           ? {
               key: "errors.api.rateLimitRetry",
-              values: { seconds: this.retryAfterSeconds },
+              values: { seconds: this.retryAfterSeconds, incident },
             }
-          : { key: "errors.api.rateLimit" };
+          : { key: "errors.api.rateLimit", values: { incident } };
       case "network":
-        return { key: "errors.api.network" };
+        return { key: "errors.api.network", values: { incident } };
       case "server":
-        return { key: "errors.api.server" };
+        return { key: "errors.api.server", values: { incident } };
       case "graphql":
         /*
          * Railway's own GraphQL text used to be interpolated straight into this
@@ -89,8 +150,8 @@ export class RailwayApiError extends Error {
          * "Railway refused the operation", and the user can tell them apart.
          */
         return this.isSchemaRejection()
-          ? { key: "errors.api.graphqlSchema", values: { incident: this.incidentId } }
-          : { key: "errors.api.graphqlRef", values: { incident: this.incidentId } };
+          ? { key: "errors.api.graphqlSchema", values: { incident } }
+          : { key: "errors.api.graphqlUnexpected", values: { incident } };
     }
   }
 }

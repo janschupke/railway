@@ -7,11 +7,16 @@ export { discoveryUrl, railwayMetadata } from "@/lib/auth/oidc-metadata";
 /**
  * Scopes requested at consent.
  *
- * - `offline_access` is what earns a refresh token, and it only takes effect when
- *   the authorization request also carries `prompt=consent`.
+ * - `offline_access` is what earns a refresh token. Railway issues one on the flow
+ *   where consent is granted; see the callback route for the path taken when a later,
+ *   silent authorization returns none.
  * - `project:admin` is the write-capable project scope. It appears in the live
  *   discovery document's `scopes_supported` but is absent from the prose scope
  *   table in Railway's docs, which lists only viewer/member for projects.
+ * - `workspace:viewer` is read-only, and is not optional despite sounding it. Railway
+ *   scopes workspaces separately from projects, so without it `me.workspaces` is
+ *   refused outright — which is exactly what broke the dashboard: the app asked for a
+ *   field it had never been granted and treated the refusal as a total failure.
  */
 export const SCOPES = [
   "openid",
@@ -19,6 +24,7 @@ export const SCOPES = [
   "profile",
   "offline_access",
   "project:admin",
+  "workspace:viewer",
 ] as const;
 
 let config: client.Configuration | undefined;

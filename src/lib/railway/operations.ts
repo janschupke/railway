@@ -22,44 +22,42 @@ const PROJECT_FIELDS = /* GraphQL */ `
   }
 `;
 
-/**
- * Every project this credential can reach, from every source Railway exposes.
+/*
+ * The project list is read as three independent documents rather than one.
  *
- * `me.projects` alone is not enough to trust. Railway organises projects under
- * workspaces, and an OAuth token's view of `me.projects` is not documented — a project
- * the user can plainly see in Railway's own dashboard can come back in neither, one, or
- * both connections. Reading all of them and de-duplicating by id is the only shape that
- * cannot silently show an empty dashboard to someone who has projects.
+ * They used to be a single query, and that is what broke the dashboard outright: an
+ * OAuth token holding `project:admin` but no workspace scope makes Railway refuse the
+ * `workspaces` field, and a refusal anywhere in the document was treated as a refusal
+ * of the whole thing — so a personal project list that had arrived perfectly intact was
+ * thrown away, on every load, forever.
+ *
+ * Separate documents mean one source failing costs exactly that source. `listProjects`
+ * merges whatever answered and only fails when nothing did.
  *
  * `pnpm probe:projects` prints what each source actually returns for a real session;
- * run that before editing this, rather than reasoning about which one "should" work.
+ * run that before editing these, rather than reasoning about which one "should" work.
  */
-export const PROJECTS_QUERY = /* GraphQL */ `
-  ${PROJECT_FIELDS}
-  query Projects {
+
+/** Identity only. Cheap, and it answers "is this token usable at all?" on its own. */
+export const VIEWER_QUERY = /* GraphQL */ `
+  query Viewer {
     me {
       id
       name
       email
+    }
+  }
+`;
+
+export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
+  ${PROJECT_FIELDS}
+  query ProjectsPersonal {
+    me {
+      id
       projects {
         edges {
           node {
             ...ProjectFields
-          }
-        }
-      }
-      workspaces {
-        id
-        name
-        team {
-          id
-          name
-          projects {
-            edges {
-              node {
-                ...ProjectFields
-              }
-            }
           }
         }
       }
@@ -68,25 +66,26 @@ export const PROJECTS_QUERY = /* GraphQL */ `
 `;
 
 /**
- * The pre-workspaces query, kept as a fallback.
+ * Projects owned by a workspace the user belongs to.
  *
- * A GraphQL validation error is all-or-nothing: if Railway does not know `workspaces`,
- * the document above fails as a whole and the dashboard would go from "empty" — the bug
- * — to "broken", which is worse. `listProjects` retries with this one in that single
- * case, so a schema change on Railway's side degrades to today's behaviour instead of
- * an error screen.
+ * Selects `workspace.projects` rather than `workspace.team.projects`: both survive
+ * validation, but only the former appears in the live introspected field list for
+ * `Workspace`, so the latter is the one liable to disappear without notice. Requires a
+ * `workspace:*` scope at consent — see SCOPES in lib/auth/oidc.ts.
  */
-export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
+export const PROJECTS_WORKSPACE_QUERY = /* GraphQL */ `
   ${PROJECT_FIELDS}
-  query ProjectsPersonal {
+  query ProjectsWorkspace {
     me {
       id
-      name
-      email
-      projects {
-        edges {
-          node {
-            ...ProjectFields
+      workspaces {
+        id
+        name
+        projects {
+          edges {
+            node {
+              ...ProjectFields
+            }
           }
         }
       }

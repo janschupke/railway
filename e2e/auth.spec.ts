@@ -28,8 +28,14 @@ test.describe("authentication", () => {
     const url = new URL((await authorizeRequest).url());
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("code_challenge")).toBeTruthy();
-    expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("scope")).toContain("project:admin");
+    expect(url.searchParams.get("scope")).toContain("workspace:viewer");
+    /*
+     * No prompt: Railway decides whether consent is needed, which is what makes
+     * authorizing a one-time act. Forcing it here meant the consent screen — and
+     * re-picking every shared project — was the price of every single sign-in.
+     */
+    expect(url.searchParams.get("prompt")).toBeNull();
   });
 
   test("keeps the session across a reload", async ({ page }) => {

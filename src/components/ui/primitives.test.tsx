@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Banner } from "./banner";
 import { Button } from "./button";
 import { Card } from "./card";
+import { ErrorBlock } from "./error-block";
 import { EmptyState, PendingStatus } from "./misc";
 import { Skeleton } from "./skeleton";
 import { ScrollArea } from "./scroll-area";
@@ -152,6 +153,36 @@ describe("Banner", () => {
   });
 });
 
+describe("ErrorBlock", () => {
+  it("keeps the actions inside the block that reports the failure", () => {
+    /*
+     * The reason this exists. Banner is a <p>, so a button could not live in it, and
+     * the dashboard's Retry ended up on its own line underneath in the default colour —
+     * reading as a control unrelated to the failure it was there to answer.
+     */
+    render(
+      <ErrorBlock
+        message="Railway refused this request."
+        actions={<Button variant="danger">Authorize again</Button>}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Railway refused this request.");
+    expect(
+      within(alert).getByRole("button", { name: "Authorize again" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders without actions, for a failure with nothing to do about it", () => {
+    render(<ErrorBlock message="Nothing to be done." />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Nothing to be done.");
+    expect(within(alert).queryByRole("button")).toBeNull();
+  });
+});
+
 describe("Card", () => {
   it("passes props through to the element", () => {
     render(<Card data-testid="card">body</Card>);
@@ -239,11 +270,45 @@ describe("Select", () => {
     { value: "b", label: "Beta" },
   ];
 
-  it("carries an accessible name even without a visible label", () => {
+  it("names itself with a real label, not only in the accessibility tree", () => {
+    // It used to pass its label as aria-label alone, so the control's name was legible
+    // to a screen reader and to nobody looking at the page.
     render(
       <Select label="Project" value="a" options={options} onValueChange={vi.fn()} />,
     );
-    expect(screen.getByRole("combobox", { name: "Project" })).toBeInTheDocument();
+
+    const combobox = screen.getByRole("combobox", { name: "Project" });
+    const label = screen.getByText("Project");
+    expect(label.tagName).toBe("LABEL");
+    expect(label).toHaveAttribute("for", combobox.id);
+  });
+
+  it("disables itself and says why when there is nothing to choose", async () => {
+    /*
+     * An enabled trigger that opens an empty popup reads as a broken control rather
+     * than an empty one — which is exactly how a failed project read presented.
+     */
+    const user = userEvent.setup();
+    render(
+      <Select
+        label="Environment"
+        value={undefined}
+        options={[]}
+        onValueChange={vi.fn()}
+        disabledReason="Choose a project first."
+      />,
+    );
+
+    const combobox = screen.getByRole("combobox");
+    expect(combobox).toBeDisabled();
+    expect(screen.getByText("Choose a project first.")).toBeInTheDocument();
+    expect(combobox).toHaveAttribute(
+      "aria-describedby",
+      screen.getByText("Choose a project first.").id,
+    );
+
+    await user.click(combobox);
+    expect(screen.queryByRole("option")).toBeNull();
   });
 
   it("shows the selected option's label", () => {

@@ -118,7 +118,9 @@ async function checkDiscovery() {
   }
 
   const scopes = (doc.scopes_supported as string[] | undefined) ?? [];
-  const needed = ["openid", "offline_access", "project:admin"];
+  // workspace:viewer belongs here as much as project:admin: Railway scopes workspaces
+  // separately, and without it `me.workspaces` is refused rather than merely empty.
+  const needed = ["openid", "offline_access", "project:admin", "workspace:viewer"];
   for (const scope of needed) {
     if (scopes.includes(scope)) console.log(ok(`scope ${scope}`));
     else {

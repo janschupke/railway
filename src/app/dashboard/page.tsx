@@ -11,6 +11,7 @@ import { SpinUpForm } from "@/components/spin-up-form";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ErrorBlock } from "@/components/ui/error-block";
 import { EmptyState } from "@/components/ui/misc";
 import { LINKS } from "@/lib/constants";
 import { ContainerSection } from "./container-section";
@@ -42,14 +43,42 @@ export default async function DashboardPage({
    * only fix; with it, the list is genuinely empty and re-consent changes nothing —
    * which is the loop this page used to send people round.
    */
-  const deniedProjectAccess = missingScopes.includes("project:admin");
+  const deniedProjectAccess = missingScopes.some(
+    (scope) => scope === "project:admin" || scope === "workspace:viewer",
+  );
 
+  /*
+   * A failed project read means there is nothing to pick, nothing to spin up into and
+   * nothing to list. The page used to render the whole interactive shell anyway —
+   * `projects.length === 0 && !error` sent the failure case down the branch that draws
+   * the pickers — so a broken authorization presented as an enabled Project dropdown
+   * that opened an empty popup and explained nothing.
+   *
+   * Re-consent is offered only where it can help: a scope Railway withheld, or a
+   * credential it rejected. A rate limit or an outage wants the retry, and pairing every
+   * failure with a sign-in link is how "re-authorize" became the button that never works.
+   */
+  const reauthorizable = errorKind === "auth";
+
+  /*
+   * Two weights for the same escape hatch. On a plain card it is tertiary and stays
+   * ghost; inside the tinted error block muted text on a danger surface reads as
+   * disabled rather than quiet, so it takes the block's own weight.
+   */
+  const openRailwayLink = (
+    <a href={LINKS.RAILWAY_DASHBOARD} target="_blank" rel="noreferrer">
+      {t("openRailway")}
+      <ExternalLink aria-hidden />
+    </a>
+  );
   const openRailway = (
     <Button asChild variant="ghost" size="sm">
-      <a href={LINKS.RAILWAY_DASHBOARD} target="_blank" rel="noreferrer">
-        {t("openRailway")}
-        <ExternalLink aria-hidden />
-      </a>
+      {openRailwayLink}
+    </Button>
+  );
+  const openRailwayInError = (
+    <Button asChild variant="danger" size="sm">
+      {openRailwayLink}
     </Button>
   );
 
@@ -58,88 +87,103 @@ export default async function DashboardPage({
       <DashboardHeader {...shell.user} />
 
       <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
-        {error && (
-          <div className="space-y-2">
-            <Banner tone="error">{error}</Banner>
-            <div className="flex flex-wrap gap-2">
-              <RefreshButton
-                label={tCommon("retry")}
-                pendingLabel={t("retryPending")}
-                variant="secondary"
-                size="sm"
-              />
-              {/* Re-consent is offered only where it can help. A rate limit or an
-                  outage wants the retry above; pairing every failure with a sign-in
-                  link is how "re-authorize" became the button that never works. */}
-              {errorKind === "auth" && (
-                <SignInButton label={t("reauthorize")} variant="secondary" size="sm" />
-              )}
-            </div>
-          </div>
-        )}
-
-        {shell.droppedSelection && (
-          <Banner tone="warning">{t("droppedSelection")}</Banner>
-        )}
-
-        {projects.length === 0 && !error ? (
-          <Card>
-            <EmptyState
-              title={
-                deniedProjectAccess ? t("noProjectsScopeTitle") : t("noProjectsTitle")
-              }
-              description={
-                deniedProjectAccess
-                  ? t("noProjectsScopeDescription", {
-                      scopes: missingScopes.join(", "),
-                    })
-                  : t("noProjectsDescription")
-              }
-              action={
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {deniedProjectAccess ? (
-                    <SignInButton
-                      label={t("chooseProjects")}
-                      variant="primary"
-                      size="sm"
-                    />
-                  ) : (
-                    <>
-                      {/* Asking Railway again is both cheaper and likelier to help
-                          than a consent screen that already granted everything. */}
-                      <RefreshButton
-                        label={t("noProjectsRetry")}
-                        pendingLabel={t("noProjectsRetryPending")}
-                        variant="primary"
-                        size="sm"
-                      />
-                      <SignInButton
-                        label={t("chooseProjects")}
-                        variant="secondary"
-                        size="sm"
-                      />
-                    </>
-                  )}
-                  {openRailway}
-                </div>
-              }
-            />
-          </Card>
+        {error ? (
+          <ErrorBlock
+            message={error}
+            actions={
+              reauthorizable ? (
+                <>
+                  <SignInButton
+                    label={t("reauthorize")}
+                    consent
+                    variant="danger"
+                    size="sm"
+                  />
+                  {openRailwayInError}
+                </>
+              ) : (
+                <>
+                  <RefreshButton
+                    label={tCommon("retry")}
+                    pendingLabel={t("retryPending")}
+                    variant="danger"
+                    size="sm"
+                  />
+                  {openRailwayInError}
+                </>
+              )
+            }
+          />
         ) : (
           <>
-            <ProjectPicker
-              projects={projects}
-              projectId={project?.id ?? null}
-              environmentId={environment?.id ?? null}
-            />
+            {shell.partialError && <Banner tone="warning">{shell.partialError}</Banner>}
 
-            <SpinUpForm
-              projectId={project?.id ?? ""}
-              environmentId={environment?.id ?? ""}
-              disabled={!project || !environment}
-            />
+            {shell.droppedSelection && (
+              <Banner tone="warning">{t("droppedSelection")}</Banner>
+            )}
 
-            {/*
+            {projects.length === 0 ? (
+              <Card>
+                <EmptyState
+                  title={
+                    deniedProjectAccess
+                      ? t("noProjectsScopeTitle")
+                      : t("noProjectsTitle")
+                  }
+                  description={
+                    deniedProjectAccess
+                      ? t("noProjectsScopeDescription", {
+                          scopes: missingScopes.join(", "),
+                        })
+                      : t("noProjectsDescription")
+                  }
+                  action={
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {deniedProjectAccess ? (
+                        <SignInButton
+                          label={t("chooseProjects")}
+                          consent
+                          variant="primary"
+                          size="sm"
+                        />
+                      ) : (
+                        <>
+                          {/* Asking Railway again is both cheaper and likelier to help
+                              than a consent screen that already granted everything. */}
+                          <RefreshButton
+                            label={t("noProjectsRetry")}
+                            pendingLabel={t("noProjectsRetryPending")}
+                            variant="primary"
+                            size="sm"
+                          />
+                          <SignInButton
+                            label={t("chooseProjects")}
+                            consent
+                            variant="secondary"
+                            size="sm"
+                          />
+                        </>
+                      )}
+                      {openRailway}
+                    </div>
+                  }
+                />
+              </Card>
+            ) : (
+              <>
+                <ProjectPicker
+                  projects={projects}
+                  projectId={project?.id ?? null}
+                  environmentId={environment?.id ?? null}
+                />
+
+                <SpinUpForm
+                  projectId={project?.id ?? ""}
+                  environmentId={environment?.id ?? ""}
+                  disabled={!project || !environment}
+                />
+
+                {/*
               Keyed on the selection, not merely wrapped. React only reveals a fallback
               for a boundary it is mounting fresh; an update to a boundary that is
               already showing content suspends without committing, which is why
@@ -154,15 +198,19 @@ export default async function DashboardPage({
               A router.refresh() keeps the same key, so it deliberately does NOT blank
               the list; those call sites surface their own pending state instead.
             */}
-            <Suspense
-              key={`${project?.id ?? ""}:${environment?.id ?? ""}`}
-              fallback={<ContainerSectionSkeleton heading={t("containersHeading")} />}
-            >
-              <ContainerSection
-                projectId={project?.id ?? null}
-                environmentId={environment?.id ?? null}
-              />
-            </Suspense>
+                <Suspense
+                  key={`${project?.id ?? ""}:${environment?.id ?? ""}`}
+                  fallback={
+                    <ContainerSectionSkeleton heading={t("containersHeading")} />
+                  }
+                >
+                  <ContainerSection
+                    projectId={project?.id ?? null}
+                    environmentId={environment?.id ?? null}
+                  />
+                </Suspense>
+              </>
+            )}
           </>
         )}
       </main>

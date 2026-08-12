@@ -76,8 +76,39 @@ describe("ProjectPicker", () => {
     expect(screen.queryByRole("option", { name: "staging" })).toBeNull();
   });
 
-  it("disables the environment control when no project resolves", () => {
+  it("labels both controls visibly, not only in the accessibility tree", () => {
+    // These were the only controls in the app whose names existed nowhere on screen:
+    // an aria-label reads to a screen reader and to nobody else.
+    renderPicker();
+
+    for (const name of ["Project", "Environment"]) {
+      const label = screen.getByText(name);
+      expect(label.tagName).toBe("LABEL");
+      expect(label).toHaveAttribute("for", screen.getByRole("combobox", { name }).id);
+    }
+  });
+
+  it("disables the environment control when no project resolves, and says why", () => {
     renderPicker(null, null);
+
+    const environment = screen.getByRole("combobox", { name: "Environment" });
+    expect(environment).toBeDisabled();
+    // A dimmed control states that something is unavailable and nothing about why.
+    expect(screen.getByText("Choose a project first.")).toBeInTheDocument();
+  });
+
+  it("distinguishes a project with no environments from no project at all", () => {
+    render(
+      <ProjectPicker
+        projects={[{ id: "p3", name: "Bare", environments: [] }]}
+        projectId="p3"
+        environmentId={null}
+      />,
+    );
+
+    // Same greyed-out control, different cause, and only one of them is the user's to
+    // act on. Previously both rendered an enabled trigger opening an empty popup.
     expect(screen.getByRole("combobox", { name: "Environment" })).toBeDisabled();
+    expect(screen.getByText("This project has no environments.")).toBeInTheDocument();
   });
 });

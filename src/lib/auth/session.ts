@@ -4,6 +4,13 @@ import { SESSION } from "@/lib/constants";
 export const SESSION_COOKIE = "rc_session";
 export const PKCE_COOKIE = "rc_pkce";
 export const STATE_COOKIE = "rc_state";
+/**
+ * Marks that the current sign-in already went round with `prompt=consent`, so the
+ * callback's no-refresh-token retry can happen exactly once instead of looping.
+ */
+export const CONSENT_COOKIE = "rc_consent";
+/** Query parameter that forces Railway's consent screen. */
+export const CONSENT_PARAM = "consent";
 
 /**
  * The session cookie's name, which depends on the origin serving it.

@@ -11,11 +11,22 @@ const buttonVariants = cva(
   ),
   {
     variants: {
+      /*
+       * Four weights, and the choice is about how much the control should assert itself
+       * rather than what it does: `primary` for the one action a screen exists for,
+       * `secondary` for a real but ordinary action, `danger` for destructive ones and
+       * for anything answering a failure, `ghost` only for tertiary in-place actions
+       * (an inline menu trigger, a dialog's Cancel) that sit beside something louder.
+       *
+       * Chrome is not tertiary: Sign out reads as text when it is `ghost`, especially
+       * next to the bordered theme toggle, so it takes `secondary`.
+       */
       variant: {
         primary: "bg-accent text-accent-fg hover:bg-accent-hover",
         secondary: "border-border bg-surface hover:bg-subtle border",
-        danger:
-          "border-danger-border text-danger hover:bg-danger-bg border bg-transparent",
+        // Surface-backed rather than transparent, so it stays a legible control on a
+        // tinted danger block as well as on a plain card.
+        danger: "border-danger-border text-danger bg-surface hover:bg-danger-bg border",
         ghost: "text-text-muted hover:bg-subtle hover:text-text",
       },
       size: {

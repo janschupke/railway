@@ -24,6 +24,8 @@ export async function injectFaults(
     deploymentsFail: boolean;
     projectsSource: ProjectsSource;
     rejectWorkspaces: boolean;
+    rejectPersonal: boolean;
+    rejectViewer: boolean;
     slowMs: number;
   }>,
 ) {
@@ -101,9 +103,21 @@ export function row(page: Page, name: string) {
  * initial load does, so the container list momentarily exists twice. Asserting on the
  * count retries until exactly one remains — no fixed sleep, and it fails loudly if the
  * page genuinely renders two lists.
+ *
+ * The count alone was not enough. `spin-up-form` starts its refresh inside a
+ * `useTransition`, and a transition commits the *whole* new tree at once — so the list
+ * can read as settled while the refresh is still in flight, and the commit then
+ * reconciles the rows out from under whatever the test does next. That is how a dialog
+ * opened immediately afterwards swallowed the Escape meant to dismiss it. The form
+ * marks its own button busy for exactly that window, so waiting on it closes the race
+ * at the signal rather than by sleeping past it.
  */
 export async function settled(page: Page) {
   await expect(containerList(page)).toHaveCount(1);
+  await expect(button(page, /spin up container/i)).not.toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
 }
 
 /** Completes the real OAuth round trip and lands on the dashboard. */

@@ -60,8 +60,16 @@ export type Faults = {
   deploymentsFail: boolean;
   /** Where the Projects query finds projects, if anywhere. */
   projectsSource: ProjectsSource;
-  /** `me.workspaces` is rejected as an unknown field, exercising the narrow fallback. */
+  /**
+   * Railway refuses one project source, as it does for a token missing that scope.
+   *
+   * Separate knobs because the point of the split documents is that these are separate
+   * failures: refusing workspaces must leave the personal list on screen, and refusing
+   * everything must produce a named authorization error rather than an empty page.
+   */
   rejectWorkspaces: boolean;
+  rejectPersonal: boolean;
+  rejectViewer: boolean;
   /**
    * Hold every GraphQL response for this many ms.
    *
@@ -80,6 +88,8 @@ const DEFAULT_FAULTS: Faults = {
   deploymentsFail: false,
   projectsSource: "personal",
   rejectWorkspaces: false,
+  rejectPersonal: false,
+  rejectViewer: false,
   slowMs: 0,
 };
 

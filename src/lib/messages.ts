@@ -21,11 +21,13 @@ export type MessageKey =
   | "errors.deploymentNotFound"
   | "errors.streamInterrupted"
   | "errors.api.auth"
+  | "errors.api.notAuthorized"
+  | "errors.api.missingScope"
   | "errors.api.rateLimit"
   | "errors.api.rateLimitRetry"
   | "errors.api.network"
   | "errors.api.server"
-  | "errors.api.graphqlRef"
+  | "errors.api.graphqlUnexpected"
   | "errors.api.graphqlSchema";
 
 /** Narrow shape of next-intl's translator, so callers can pass `t` directly. */

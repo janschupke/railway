@@ -94,7 +94,30 @@ export async function proxy(request: NextRequest) {
     });
     return withCsp(response);
   } catch {
-    // Refresh token spent, revoked, or the app's authorization was withdrawn.
+    /*
+     * A failed refresh is not proof the session is gone.
+     *
+     * Refresh tokens rotate, so a request that lost a race spends a token another
+     * request has already replaced — and deleting the cookie here threw away a session
+     * that had just been refreshed successfully, sending the user back to the consent
+     * screen for no reason. refreshSession now shares one grant between concurrent
+     * callers, and this re-read closes the remaining window: if the jar already holds a
+     * newer session, use it and delete nothing.
+     */
+    const current = await openSession(
+      request.cookies.get(cookieName)?.value,
+      SESSION_SECRET,
+    );
+    if (current && current.expiresAt > session.expiresAt) return withCsp(proceed());
+
+    /*
+     * Genuinely spent, revoked, or the authorization was withdrawn. Cleared on the
+     * request *before* the response is built — `forwarded()` snapshots the jar at call
+     * time, and deleting only on the response left this render still seeing the dead
+     * session, so the landing page redirected to /dashboard, which redirected back: a
+     * bounce with no error shown.
+     */
+    request.cookies.delete(cookieName);
     const target = isProtected
       ? new URL("/?error=session_expired", request.url)
       : request.url;

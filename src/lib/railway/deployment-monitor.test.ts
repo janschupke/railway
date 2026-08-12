@@ -124,7 +124,7 @@ describe("monitorDeployment", () => {
       type: "warning",
       // A descriptor, not a sentence: the monitor has no translator of its own — and
       // not Railway's own text either, which goes to the log against this incident id.
-      message: { key: "errors.api.graphqlRef" },
+      message: { key: "errors.api.graphqlUnexpected" },
     });
     expect(JSON.stringify(events[0])).not.toContain("nope");
     expect(events.map((e) => e.type)).toContain("ready");

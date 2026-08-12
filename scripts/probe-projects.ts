@@ -24,9 +24,11 @@
 
 import { openSession } from "../src/lib/auth/session.ts";
 import { SCOPES } from "../src/lib/auth/oidc.ts";
+import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
 
 const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
+const ISSUER = process.env.RAILWAY_ISSUER ?? RAILWAY_DEFAULTS.ISSUER;
 
 const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
 const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
@@ -63,11 +65,19 @@ async function run(token: string, query: string): Promise<GraphQLBody> {
  */
 const SOURCES = [
   {
-    name: "me.projects (what the app queries today)",
-    query: `query { me { id name email projects { edges { node { id name } } } } }`,
+    name: "me (identity only — is the token usable at all?)",
+    query: `query { me { id name email } }`,
   },
   {
-    name: "me.workspaces[].team.projects",
+    name: "me.projects (personal source the app queries)",
+    query: `query { me { id projects { edges { node { id name } } } } }`,
+  },
+  {
+    name: "me.workspaces[].projects (workspace source the app queries)",
+    query: `query { me { workspaces { id name projects { edges { node { id name } } } } } }`,
+  },
+  {
+    name: "me.workspaces[].team.projects (the older shape, kept for comparison)",
     query: `query { me { workspaces { id name team { id name projects { edges { node { id name } } } } } } }`,
   },
   {
@@ -75,6 +85,28 @@ const SOURCES = [
     query: `query { projects { edges { node { id name } } } }`,
   },
 ];
+
+/**
+ * Does the OAuth token work anywhere at all?
+ *
+ * If userinfo answers and every GraphQL source says "Not Authorized", the token is
+ * fine and the GraphQL API simply does not accept it — a different class of problem
+ * from a missing scope, and one no amount of query-shape guessing would ever fix.
+ */
+async function probeUserinfo(token: string) {
+  const endpoint = railwayMetadata(ISSUER).userinfo_endpoint!;
+  const response = await fetch(endpoint, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    console.log(bad(`userinfo → HTTP ${response.status}`));
+    console.log(dim(`  ${body.slice(0, 300)}`));
+    return;
+  }
+  console.log(ok(`userinfo → HTTP ${response.status}`));
+  console.log(dim(`  ${body.slice(0, 300)}`));
+}
 
 /** Field names on a type, so we can see what actually hangs off `me`rather than guess. */
 const TYPE_FIELDS = `query TypeFields($name: String!) {
@@ -150,12 +182,25 @@ async function main() {
   );
   if (extra.length) console.log(dim(`  also granted: ${extra.join(", ")}`));
 
+  console.log("\nToken acceptance");
+  await probeUserinfo(session.accessToken);
+
   console.log("\nProject sources");
   for (const source of SOURCES) {
     const body = await run(session.accessToken, source.query);
     const [error] = body.errors ?? [];
     if (error) {
-      console.log(bad(`${source.name} → ${error.message}`));
+      // The code matters as much as the message: Railway answers an unauthorized field
+      // with INTERNAL_SERVER_ERROR, and a genuinely unknown one with
+      // GRAPHQL_VALIDATION_FAILED. Those are opposite problems.
+      console.log(
+        bad(
+          `${source.name} → ${error.message} [${error.extensions?.code ?? "no code"}]`,
+        ),
+      );
+      // Partial data is the interesting case: a refused field nulls itself and the rest
+      // still resolves, which is exactly what the app now keeps rather than discarding.
+      if (body.data) console.log(dim(`  partial data: ${JSON.stringify(body.data)}`));
       continue;
     }
     console.log(ok(source.name));

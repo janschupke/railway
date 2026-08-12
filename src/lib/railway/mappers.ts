@@ -30,7 +30,7 @@ export type ServiceNode = {
   }>;
 };
 
-/** `me`, with both project sources optional — the fallback query selects only one. */
+/** `me`, with every project source optional — each document selects only one of them. */
 export type ViewerNode = {
   id: string;
   name?: string;
@@ -39,8 +39,7 @@ export type ViewerNode = {
   workspaces?: Array<{
     id: string;
     name?: string | null;
-    /** Null for a personal workspace, which has no team behind it. */
-    team?: { id: string; name?: string | null; projects: Edges<ProjectNode> } | null;
+    projects?: Edges<ProjectNode>;
   }> | null;
 };
 
@@ -68,9 +67,8 @@ export function toProjects(viewer: ViewerNode): RailwayProject[] {
   }
 
   for (const workspace of viewer.workspaces ?? []) {
-    // The workspace's own name is the fallback: `team` is null for a personal workspace.
-    const label = workspace.team?.name ?? workspace.name ?? null;
-    for (const node of nodes(workspace.team?.projects)) {
+    const label = workspace.name ?? null;
+    for (const node of nodes(workspace.projects)) {
       if (byId.has(node.id)) continue;
       byId.set(node.id, {
         ...toProject(node),

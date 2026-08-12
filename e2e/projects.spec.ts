@@ -33,15 +33,21 @@ test.describe("project sources", () => {
     await expect(onlyVisible(page.getByText("No projects to show"))).toBeHidden();
   });
 
-  test("still lists projects when Railway rejects the workspace field", async ({
+  test("still lists projects when Railway refuses the workspace source", async ({
     page,
   }) => {
-    // A validation error kills the whole document, so the narrow query is what keeps
-    // a schema change from turning an empty list into a broken page.
+    /*
+     * The regression that made this dashboard unusable. A token without a workspace
+     * scope gets `me.workspaces` refused, and because the sources shared one document
+     * the refusal discarded the personal project list along with it — every load, with
+     * "Railway rejected the operation" and a Retry that could never work.
+     */
     await injectFaults(page, { projectsSource: "personal", rejectWorkspaces: true });
     await signInBare(page);
 
     await expect(projectSelect(page)).toContainText("Demo Project");
+    // Incomplete, and it says so: the refused source is named rather than hidden.
+    await expect(onlyVisible(page.getByText(/workspace:viewer/))).toBeVisible();
   });
 
   test("shows a project reachable through both connections exactly once", async ({
@@ -90,5 +96,57 @@ test.describe("the empty project list", () => {
 
     // Proves the button re-queries Railway rather than replaying a cached render.
     await expect(projectSelect(page)).toContainText("Demo Project");
+  });
+});
+
+test.describe("a project list that could not be read at all", () => {
+  test.beforeEach(async ({ page }) => {
+    await injectFaults(page, {
+      rejectViewer: true,
+      rejectPersonal: true,
+      rejectWorkspaces: true,
+    });
+    await signInBare(page);
+  });
+
+  test("does not render controls that cannot work", async ({ page }) => {
+    /*
+     * The complaint this exists to answer: with the project read failing, the page
+     * still drew a Project dropdown that opened an empty popup, an Environment dropdown
+     * dimmed for no stated reason, and a "Nothing running in this environment" empty
+     * state — none of which had anything to do with what had gone wrong.
+     */
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(onlyVisible(page.getByText(/nothing running/i))).toBeHidden();
+  });
+
+  /*
+   * Scoped to <main>: Next mounts its own empty role="alert" route announcer on the
+   * document, so an unscoped query matches two elements and resolves neither.
+   */
+  const errorBlock = (page: import("@playwright/test").Page) =>
+    onlyVisible(page.locator("main").getByRole("alert"));
+
+  test("names the cause and offers the one action that can fix it", async ({
+    page,
+  }) => {
+    const alert = errorBlock(page);
+
+    await expect(alert).toBeVisible();
+    // Not a bare reference id. The sentence has to say what went wrong.
+    await expect(alert).toContainText(/authoriz/i);
+    // Re-authorize, not Retry: retrying a refused permission is what never worked.
+    await expect(alert.getByRole("link", { name: /re-authorize/i })).toBeVisible();
+    await expect(alert.getByRole("button", { name: /^retry$/i })).toBeHidden();
+  });
+
+  test("keeps the action inside the block that reports the failure", async ({
+    page,
+  }) => {
+    // It used to sit on its own line underneath, in the default button colour, reading
+    // as an unrelated control.
+    await expect(
+      errorBlock(page).getByRole("link", { name: /re-authorize/i }),
+    ).toBeVisible();
   });
 });

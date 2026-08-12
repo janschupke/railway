@@ -1,12 +1,28 @@
 import * as client from "openid-client";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { SCOPES, oidcConfig } from "@/lib/auth/oidc";
 import { SESSION } from "@/lib/constants";
-import { PKCE_COOKIE, STATE_COOKIE, cookieOptions } from "@/lib/auth/session";
+import {
+  CONSENT_COOKIE,
+  CONSENT_PARAM,
+  PKCE_COOKIE,
+  STATE_COOKIE,
+  cookieOptions,
+} from "@/lib/auth/session";
 
-export async function GET() {
+/**
+ * Starts the authorization flow.
+ *
+ * `?consent=1` forces Railway's consent screen. Without it Railway decides, which is the
+ * behaviour worth having: the first sign-in shows the screen because no grant exists
+ * yet, and every later one redirects straight back. This used to send `prompt=consent`
+ * unconditionally — an override meaning "show it every time regardless" — so choosing
+ * projects again was the price of every single sign-in.
+ */
+export async function GET(request: NextRequest) {
   const { APP_URL } = env();
+  const forceConsent = request.nextUrl.searchParams.get(CONSENT_PARAM) === "1";
 
   const codeVerifier = client.randomPKCECodeVerifier();
   const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
@@ -18,9 +34,13 @@ export async function GET() {
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
-    // Required to actually receive a refresh token alongside `offline_access`.
-    // Without it Railway may skip consent and return an access token only.
-    prompt: "consent",
+    /*
+     * Only when asked for. A silent authorization can come back without a refresh
+     * token, since some providers mint one only on a flow where consent was displayed —
+     * the callback detects exactly that and retries here with consent forced, which
+     * costs one redirect in the rare case instead of a consent screen in every case.
+     */
+    ...(forceConsent ? { prompt: "consent" } : {}),
   });
 
   const response = NextResponse.redirect(authorizationUrl.href);
@@ -30,5 +50,10 @@ export async function GET() {
   };
   response.cookies.set(PKCE_COOKIE, codeVerifier, opts);
   response.cookies.set(STATE_COOKIE, state, opts);
+
+  // Records which kind of attempt this is, so the callback's retry cannot become a loop.
+  if (forceConsent) response.cookies.set(CONSENT_COOKIE, "1", opts);
+  else response.cookies.delete(CONSENT_COOKIE);
+
   return response;
 }

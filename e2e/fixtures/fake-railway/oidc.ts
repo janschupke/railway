@@ -144,7 +144,7 @@ export async function token(
         id_token: await idToken(context.issuer, context.clientId),
         token_type: "Bearer",
         expires_in: ttl,
-        scope: "openid email profile offline_access project:admin",
+        scope: "openid email profile offline_access project:admin workspace:viewer",
       },
     };
   };

@@ -188,7 +188,7 @@ describe("spinUp", () => {
       // Railway's own text is not repeated to the user; the reference points at the
       // log line that has it verbatim.
       error: expect.stringMatching(
-        /^Railway rejected the operation\. Reference [0-9a-f]{8}\.$/,
+        /^Railway refused this operation .* Reference [0-9a-f]{8}\.$/,
       ),
     });
   });
@@ -209,10 +209,13 @@ describe("spinUp", () => {
 
     const result = await spinUp(null, spinUpForm());
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      error: "Something went wrong. Please try again.",
+      error: expect.stringMatching(
+        /^Something went wrong\. Please try again\. Reference [0-9a-f]{8}\.$/,
+      ),
     });
+    expect(!result.ok && result.error).not.toContain("ECONNREFUSED");
   });
 });
 
@@ -287,7 +290,9 @@ describe("spinDown", () => {
     const result = await spinDown(null, downForm("svc_managed"));
 
     expect(result.ok).toBe(false);
-    expect(!result.ok && result.error).toContain("sign in again");
+    // A rejected credential, not a missing permission: the fix is signing in, and the
+    // copy has to say so rather than sending the user to pick projects again.
+    expect(!result.ok && result.error).toMatch(/signing in again/i);
   });
 
   it("propagates a delete failure as a readable message", async () => {
@@ -304,7 +309,7 @@ describe("spinDown", () => {
       // "Service is locked" names Railway's internal state; the user gets a reference
       // and the operator greps the log for it.
       error: expect.stringMatching(
-        /^Railway rejected the operation\. Reference [0-9a-f]{8}\.$/,
+        /^Railway refused this operation .* Reference [0-9a-f]{8}\.$/,
       ),
     });
   });
@@ -320,7 +325,9 @@ describe("error mapping", () => {
     const descriptor = error.describe();
     expect(descriptor).toEqual({
       key: "errors.api.rateLimitRetry",
-      values: { seconds: 30 },
+      // The id travels with every descriptor now: it was already being written to the
+      // log for these kinds, and a sentence that cannot name it points at nothing.
+      values: { seconds: 30, incident: error.incidentId },
     });
     // The upstream text names an internal host; it must not travel with the message.
     expect(JSON.stringify(descriptor)).not.toContain("backboard");

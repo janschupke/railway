@@ -29,33 +29,53 @@ const node = (id: string, name: string) => ({
 });
 
 describe("listProjects", () => {
-  it("flattens the viewer and their projects out of Relay connections", async () => {
-    server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({
-          data: {
-            me: {
-              id: "u1",
-              name: "Ada",
-              email: "ada@example.com",
-              projects: {
-                edges: [
-                  {
-                    node: {
-                      id: "p1",
-                      name: "Demo",
-                      environments: {
-                        edges: [{ node: { id: "e1", name: "production" } }],
-                      },
-                    },
-                  },
-                ],
-              },
-            },
+  /** The three documents the project list is assembled from, with usable defaults. */
+  const sources = ({
+    viewer = { id: "u1", name: "Ada", email: "ada@example.com" },
+    personal = [] as ReturnType<typeof node>[],
+    workspaces = [] as Array<{ id: string; name: string; projects: unknown[] }>,
+  } = {}) => [
+    api.query("Viewer", () => HttpResponse.json({ data: { me: viewer } })),
+    api.query("ProjectsPersonal", () =>
+      HttpResponse.json({
+        data: {
+          me: { id: "u1", projects: { edges: personal.map((n) => ({ node: n })) } },
+        },
+      }),
+    ),
+    api.query("ProjectsWorkspace", () =>
+      HttpResponse.json({
+        data: {
+          me: {
+            id: "u1",
+            workspaces: workspaces.map((w) => ({
+              id: w.id,
+              name: w.name,
+              projects: { edges: w.projects.map((n) => ({ node: n })) },
+            })),
           },
-        }),
-      ),
-    );
+        },
+      }),
+    ),
+  ];
+
+  /**
+   * Railway's real refusal shape: HTTP 200, `Not Authorized`, and INTERNAL_SERVER_ERROR
+   * rather than any code the spec suggests. Returned as a body so each resolver keeps
+   * MSW's contextual typing.
+   */
+  const notAuthorized = (path: string[]) => ({
+    errors: [
+      {
+        message: "Not Authorized",
+        path,
+        extensions: { code: "INTERNAL_SERVER_ERROR" },
+      },
+    ],
+  });
+
+  it("flattens the viewer and their projects out of Relay connections", async () => {
+    server.use(...sources({ personal: [node("p1", "Demo")] }));
 
     const { viewer, projects } = await listProjects(TOKEN);
 
@@ -66,13 +86,11 @@ describe("listProjects", () => {
   });
 
   it("copes with a user who has no projects", async () => {
-    server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({ data: { me: { id: "u1", projects: { edges: [] } } } }),
-      ),
-    );
+    server.use(...sources());
 
-    expect((await listProjects(TOKEN)).projects).toEqual([]);
+    const { projects, failures } = await listProjects(TOKEN);
+    expect(projects).toEqual([]);
+    expect(failures).toEqual([]);
   });
 
   it("finds projects that hang off a workspace rather than the viewer", async () => {
@@ -82,27 +100,9 @@ describe("listProjects", () => {
      * already granted everything.
      */
     server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({
-          data: {
-            me: {
-              id: "u1",
-              projects: { edges: [] },
-              workspaces: [
-                {
-                  id: "ws1",
-                  name: "Personal",
-                  team: {
-                    id: "t1",
-                    name: "Acme",
-                    projects: { edges: [{ node: node("p1", "Demo") }] },
-                  },
-                },
-              ],
-            },
-          },
-        }),
-      ),
+      ...sources({
+        workspaces: [{ id: "ws1", name: "Acme", projects: [node("p1", "Demo")] }],
+      }),
     );
 
     expect((await listProjects(TOKEN)).projects).toEqual([
@@ -117,32 +117,16 @@ describe("listProjects", () => {
 
   it("shows a project reachable through both connections exactly once", async () => {
     server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({
-          data: {
-            me: {
-              id: "u1",
-              projects: { edges: [{ node: node("p1", "Demo") }] },
-              workspaces: [
-                {
-                  id: "ws1",
-                  name: "Personal",
-                  team: {
-                    id: "t1",
-                    name: "Acme",
-                    projects: {
-                      edges: [
-                        { node: node("p1", "Demo") },
-                        { node: node("p2", "Other") },
-                      ],
-                    },
-                  },
-                },
-              ],
-            },
+      ...sources({
+        personal: [node("p1", "Demo")],
+        workspaces: [
+          {
+            id: "ws1",
+            name: "Acme",
+            projects: [node("p1", "Demo"), node("p2", "Other")],
           },
-        }),
-      ),
+        ],
+      }),
     );
 
     const { projects } = await listProjects(TOKEN);
@@ -153,54 +137,47 @@ describe("listProjects", () => {
     expect(projects[1]?.workspaceName).toBe("Acme");
   });
 
-  it("falls back to the narrow query when Railway rejects the workspace field", async () => {
+  it("keeps the projects that answered when one source is refused", async () => {
     /*
-     * A GraphQL validation error kills the whole document, so without this the list
-     * would go from empty — the bug — to broken, which is worse.
+     * THE regression. An OAuth token without a workspace scope makes Railway refuse
+     * `me.workspaces`, and refusing one field used to discard the whole response — so a
+     * personal project list that had arrived perfectly intact was thrown away and the
+     * dashboard showed "Railway rejected the operation" on every single load.
      */
     server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({
-          errors: [
-            {
-              message: 'Cannot query field "workspaces" on type "User".',
-              extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
-            },
-          ],
-        }),
-      ),
-      api.query("ProjectsPersonal", () =>
-        HttpResponse.json({
-          data: {
-            me: { id: "u1", projects: { edges: [{ node: node("p1", "Demo") }] } },
-          },
-        }),
+      ...sources({ personal: [node("p1", "Demo")] }).slice(0, 2),
+      api.query("ProjectsWorkspace", () =>
+        HttpResponse.json(notAuthorized(["me", "workspaces"])),
       ),
     );
 
-    expect((await listProjects(TOKEN)).projects).toEqual([
-      { id: "p1", name: "Demo", environments: [{ id: "e1", name: "production" }] },
-    ]);
+    const { projects, failures } = await listProjects(TOKEN);
+
+    expect(projects.map((p) => p.id)).toEqual(["p1"]);
+    // Reported rather than swallowed: the list is real but incomplete, and the sentence
+    // has to name the scope that would complete it.
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.kind).toBe("auth");
+    expect(failures[0]?.missingScope).toBe("workspace:viewer");
   });
 
-  it("does not retry a failure that a different query cannot fix", async () => {
-    let personalCalls = 0;
+  it("fails with the authorization cause when every source is refused", async () => {
     server.use(
-      api.query("Projects", () =>
-        HttpResponse.json({
-          errors: [{ message: "Not authorized", extensions: { code: "FORBIDDEN" } }],
-        }),
+      api.query("Viewer", () => HttpResponse.json(notAuthorized(["me"]))),
+      api.query("ProjectsPersonal", () =>
+        HttpResponse.json(notAuthorized(["me", "projects"])),
       ),
-      api.query("ProjectsPersonal", () => {
-        personalCalls += 1;
-        return HttpResponse.json({
-          data: { me: { id: "u1", projects: { edges: [] } } },
-        });
-      }),
+      api.query("ProjectsWorkspace", () =>
+        HttpResponse.json(notAuthorized(["me", "workspaces"])),
+      ),
     );
 
-    await expect(listProjects(TOKEN)).rejects.toThrow();
-    expect(personalCalls).toBe(0);
+    const error = (await listProjects(TOKEN).catch((e: unknown) => e)) as {
+      kind: string;
+    };
+    // Not "graphql": Railway's refusal wording is the only signal it gives, and getting
+    // this wrong is what offered a Retry instead of a re-authorize.
+    expect(error.kind).toBe("auth");
   });
 });
 

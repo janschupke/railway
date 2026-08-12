@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetEnv } from "@/env";
-import { PKCE_COOKIE, SESSION_COOKIE, STATE_COOKIE } from "@/lib/auth/session";
+import {
+  CONSENT_COOKIE,
+  PKCE_COOKIE,
+  SESSION_COOKIE,
+  STATE_COOKIE,
+} from "@/lib/auth/session";
 import { SESSION, STREAM } from "@/lib/constants";
 
 const session = {
@@ -65,8 +70,8 @@ describe("GET /api/health", () => {
 });
 
 describe("GET /api/auth/login", () => {
-  it("redirects to Railway with PKCE, state and the consent prompt", async () => {
-    const response = await login();
+  it("redirects to Railway with PKCE and state", async () => {
+    const response = await login(request("/api/auth/login"));
 
     expect(response.status).toBe(307);
     const target = new URL(response.headers.get("location")!);
@@ -77,21 +82,40 @@ describe("GET /api/auth/login", () => {
     expect(target.searchParams.get("code_challenge_method")).toBe("S256");
     expect(target.searchParams.get("code_challenge")).toBeTruthy();
     expect(target.searchParams.get("state")).toBeTruthy();
-    // Without prompt=consent, offline_access may not yield a refresh token.
+  });
+
+  it("leaves the consent decision to Railway by default", async () => {
+    // The whole point: once the grant exists Railway skips the screen. Forcing it here
+    // is what made choosing projects again the price of every single sign-in.
+    const response = await login(request("/api/auth/login"));
+
+    const target = new URL(response.headers.get("location")!);
+    expect(target.searchParams.get("prompt")).toBeNull();
+    expect(response.cookies.get(CONSENT_COOKIE)?.value).toBeFalsy();
+  });
+
+  it("forces consent when asked, and records that it did", async () => {
+    const response = await login(request("/api/auth/login?consent=1"));
+
+    const target = new URL(response.headers.get("location")!);
     expect(target.searchParams.get("prompt")).toBe("consent");
+    // The marker is what stops the callback's no-refresh-token retry from looping.
+    expect(response.cookies.get(CONSENT_COOKIE)?.value).toBe("1");
   });
 
   it("requests the scopes the app cannot work without", async () => {
-    const response = await login();
+    const response = await login(request("/api/auth/login"));
     const scope = new URL(response.headers.get("location")!).searchParams.get("scope")!;
 
     expect(scope).toContain("openid");
     expect(scope).toContain("offline_access");
     expect(scope).toContain("project:admin");
+    // Railway scopes workspaces separately; without this `me.workspaces` is refused.
+    expect(scope).toContain("workspace:viewer");
   });
 
   it("stores the verifier and state in short-lived httpOnly cookies", async () => {
-    const response = await login();
+    const response = await login(request("/api/auth/login"));
 
     const pkce = response.cookies.get(PKCE_COOKIE);
     const state = response.cookies.get(STATE_COOKIE);
@@ -101,7 +125,7 @@ describe("GET /api/auth/login", () => {
   });
 
   it("sends the code_challenge, never the verifier", async () => {
-    const response = await login();
+    const response = await login(request("/api/auth/login"));
     const target = new URL(response.headers.get("location")!);
     const verifier = response.cookies.get(PKCE_COOKIE)!.value;
 
@@ -109,7 +133,7 @@ describe("GET /api/auth/login", () => {
   });
 
   it("points the redirect_uri at this app's callback", async () => {
-    const response = await login();
+    const response = await login(request("/api/auth/login"));
     expect(
       new URL(response.headers.get("location")!).searchParams.get("redirect_uri"),
     ).toBe("http://localhost:3000/api/auth/callback");

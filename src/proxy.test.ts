@@ -118,10 +118,45 @@ describe("proxy", () => {
       throw new SessionExpiredError();
     });
 
-    const response = await proxy(await request("/", session({ expiresAt: now() - 1 })));
+    const req = await request("/", session({ expiresAt: now() - 1 }));
+    const response = await proxy(req);
 
     expect(response.headers.get("location")).toBeNull();
     expect(response.cookies.get(SESSION_COOKIE)?.value).toBe("");
+    /*
+     * Cleared on the request too. Deleting it only on the response left this render
+     * still holding a dead session, so the landing page redirected to /dashboard, which
+     * redirected straight back — a bounce that showed the user nothing at all.
+     */
+    expect(req.cookies.get(SESSION_COOKIE)).toBeUndefined();
+  });
+
+  it("keeps a session that another request refreshed while this one was losing", async () => {
+    /*
+     * The bug that manufactured re-authorizations. Refresh tokens rotate, so a request
+     * that loses the race spends a token that has already been replaced — and this
+     * branch then deleted the cookie holding the *successful* refresh, ending a session
+     * that was perfectly alive.
+     */
+    const stale = session({ expiresAt: now() - 1 });
+    const req = await request("/dashboard", stale);
+
+    refreshSession.mockImplementation(async () => {
+      // Stand in for the winning request: the jar now holds a newer session.
+      req.cookies.set(
+        SESSION_COOKIE,
+        await sealSession(session({ expiresAt: now() + 3600 }), SECRET),
+      );
+      throw new SessionExpiredError("invalid_grant");
+    });
+
+    const response = await proxy(req);
+
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.cookies.get(SESSION_COOKIE)?.value).not.toBe("");
+    expect(
+      await openSession(req.cookies.get(SESSION_COOKIE)?.value, SECRET),
+    ).not.toBeNull();
   });
 
   it("treats an unreadable cookie as no session at all", async () => {

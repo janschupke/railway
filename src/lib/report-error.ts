@@ -22,6 +22,10 @@ function detailOf(error: unknown): string {
       error.status ? `status=${error.status}` : null,
       error.operation ? `op=${error.operation}` : null,
       error.code ? `code=${error.code}` : null,
+      // The refused field, which is the difference between a dead token and a scope
+      // that was never granted. Without it the log says no more than the browser does.
+      error.path?.length ? `path=${error.path.join(".")}` : null,
+      error.missingScope ? `needs=${error.missingScope}` : null,
       error.isSchemaRejection() ? "schemaRejection" : null,
     ].filter(Boolean);
     return `${fields.join(" ")} :: ${error.message}`;

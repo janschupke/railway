@@ -20,7 +20,7 @@ export function SignOutButton() {
     <form action="/api/auth/logout" method="post" onSubmit={start}>
       <Button
         type="submit"
-        variant="ghost"
+        variant="secondary"
         size="sm"
         pending={pending}
         pendingLabel={t("signOutPending")}

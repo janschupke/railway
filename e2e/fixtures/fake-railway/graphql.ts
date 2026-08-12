@@ -11,10 +11,25 @@ import type { Store } from "./store";
 
 type Result = {
   data?: unknown;
-  errors?: Array<{ message: string; extensions?: unknown }>;
+  errors?: Array<{ message: string; path?: string[]; extensions?: unknown }>;
 };
 
 const edges = <T>(items: T[]) => ({ edges: items.map((node) => ({ node })) });
+
+/**
+ * Railway's refusal, in the shape it actually sends.
+ *
+ * HTTP 200, the words "Not Authorized", and INTERNAL_SERVER_ERROR — not one of the
+ * codes the spec suggests. The fixture reproduces that verbatim because a fixture that
+ * answers UNAUTHENTICATED would have let the misclassification this app shipped with
+ * pass every test it had.
+ */
+const notAuthorized = (path: string[]): Result => ({
+  data: null,
+  errors: [
+    { message: "Not Authorized", path, extensions: { code: "INTERNAL_SERVER_ERROR" } },
+  ],
+});
 
 export function execute(
   operationName: string,
@@ -22,61 +37,55 @@ export function execute(
   store: Store,
 ): Result {
   switch (operationName) {
-    case "Projects":
+    case "Viewer": {
+      if (store.faults.rejectViewer) return notAuthorized(["me"]);
+      return {
+        data: {
+          me: { id: "user_e2e", name: "Ada Lovelace", email: "ada@example.com" },
+        },
+      };
+    }
+
+    /*
+     * The project list is three independent documents. Each answers for itself, which
+     * is the whole point: one source being refused must cost only that source.
+     */
     case "ProjectsPersonal": {
-      const wide = operationName === "Projects";
+      if (store.faults.rejectPersonal) return notAuthorized(["me", "projects"]);
 
-      if (wide && store.faults.rejectWorkspaces) {
-        /*
-         * A validation error, not a runtime one: Railway refuses the whole document
-         * when a field is unknown. The app is expected to notice and re-send the
-         * narrow query, which is the only reason "ProjectsPersonal" is ever exercised.
-         */
-        return {
-          errors: [
-            {
-              message: 'Cannot query field "workspaces" on type "User".',
-              extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
-            },
-          ],
-        };
-      }
-
-      const projects = store.projects.map((p) => ({
-        id: p.id,
-        name: p.name,
-        environments: edges(p.environments),
-      }));
       const source = store.faults.projectsSource;
-      // The narrow document cannot see workspaces at all, so a workspace-only account
-      // is legitimately empty there — that is the fallback's honest worst case.
-      const personal = source === "personal" || source === "both" ? projects : [];
-      const inWorkspace = wide && (source === "workspace" || source === "both");
+      const projects =
+        source === "personal" || source === "both"
+          ? store.projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              environments: edges(p.environments),
+            }))
+          : [];
+
+      return { data: { me: { id: "user_e2e", projects: edges(projects) } } };
+    }
+
+    case "ProjectsWorkspace": {
+      // What a token without `workspace:viewer` gets. It used to take the whole
+      // dashboard down with it.
+      if (store.faults.rejectWorkspaces) return notAuthorized(["me", "workspaces"]);
+
+      const source = store.faults.projectsSource;
+      const projects =
+        source === "workspace" || source === "both"
+          ? store.projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              environments: edges(p.environments),
+            }))
+          : [];
 
       return {
         data: {
           me: {
             id: "user_e2e",
-            name: "Ada Lovelace",
-            email: "ada@example.com",
-            projects: edges(personal),
-            ...(wide
-              ? {
-                  workspaces: [
-                    {
-                      id: "ws_e2e",
-                      name: "Ada's Workspace",
-                      team: inWorkspace
-                        ? {
-                            id: "team_e2e",
-                            name: "Acme",
-                            projects: edges(projects),
-                          }
-                        : null,
-                    },
-                  ],
-                }
-              : {}),
+            workspaces: [{ id: "ws_e2e", name: "Acme", projects: edges(projects) }],
           },
         },
       };

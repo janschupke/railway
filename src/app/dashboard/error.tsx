@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { SignInButton } from "@/components/sign-in-button";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ErrorBlock } from "@/components/ui/error-block";
 import { Heading, Text } from "@/components/ui/text";
 
 export default function DashboardError({
@@ -31,24 +32,30 @@ export default function DashboardError({
         <Heading level={1} variant="title">
           {t("errorTitle")}
         </Heading>
-        <Text asChild variant="body" tone="muted">
-          <p>{t("errorDescription")}</p>
-        </Text>
-        <div className="flex gap-2">
-          {/*
-            reset() re-renders the boundary, which re-runs the server fetch that failed.
-            Wrapping it in a transition is what makes that wait observable.
-          */}
-          <Button
-            variant="primary"
-            onClick={() => startTransition(() => reset())}
-            pending={retrying}
-            pendingLabel={t("retryPending")}
-          >
-            {tCommon("retry")}
-          </Button>
-          <SignInButton label={t("reauthorize")} variant="secondary" />
-        </div>
+        {/*
+          The same block the in-page failure uses, so the two error surfaces stop
+          disagreeing: Retry used to be primary here and secondary there, and neither
+          sat inside the thing that had failed.
+
+          reset() re-renders the boundary, which re-runs the server fetch that failed.
+          Wrapping it in a transition is what makes that wait observable.
+        */}
+        <ErrorBlock
+          message={t("errorDescription")}
+          actions={
+            <>
+              <Button
+                variant="danger"
+                onClick={() => startTransition(() => reset())}
+                pending={retrying}
+                pendingLabel={t("retryPending")}
+              >
+                {tCommon("retry")}
+              </Button>
+              <SignInButton label={t("reauthorize")} consent variant="danger" />
+            </>
+          }
+        />
         {error.digest && (
           <Text asChild variant="mono" tone="subtle">
             <p>{t("errorRef", { digest: error.digest })}</p>

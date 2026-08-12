@@ -77,9 +77,26 @@ was wrong by a factor of three, and a decision argued from a number should use t
 one.) In exchange for those lines, session encryption, CSRF and cookie chunking are
 hand-rolled rather than inherited. Two consequences are listed under Limitations.
 
-**The scope that matters is `project:admin`.** Railway's prose scope table lists only
-`viewer` and `member` for projects; `project:admin` appears in the live discovery
-document's `scopes_supported`. `pnpm verify:schema` asserts it is still advertised.
+**Two scopes matter, not one.** Railway's prose scope table lists only `viewer` and
+`member` for projects; `project:admin` appears in the live discovery document's
+`scopes_supported`. `pnpm verify:schema` asserts it is still advertised.
+
+`workspace:viewer` is the second, and it is not optional despite reading as though it
+were. Railway scopes workspaces separately from projects, so a token holding
+`project:admin` alone has `me.workspaces` refused outright — and because the app asked
+for that field in the same document as the personal project list, the refusal used to
+discard both. Every dashboard load failed with a reference id and nothing else. The
+scope closes the gap; independent per-source documents make a future gap survivable.
+
+**Consent is Railway's decision, not the app's.** `/api/auth/login` sends no `prompt`
+parameter, so the consent screen appears on the first authorization — where no grant
+exists yet — and is skipped afterwards. It previously sent `prompt=consent` on every
+request, which is an override meaning "show it regardless": re-picking every shared
+project was the price of each sign-in. `?consent=1` forces it, and only the explicit
+"Authorize again" and "Choose projects" controls pass it. The one case a silent
+authorization can fail is a provider that mints refresh tokens only alongside a
+displayed consent screen; the callback detects a missing refresh token and retries once
+with consent forced, guarded by a cookie so it cannot loop.
 
 ### ADR-2 — Token refresh runs in the proxy layer
 
@@ -93,6 +110,16 @@ therefore runs in `src/proxy.ts`, which executes before the render and _can_ wri
 new cookie is set on the **request** as well as the response, so the render that
 triggered the refresh already sees the fresh token. Server Actions and Route Handlers
 carry a fallback path (`requireAccessToken`) since they can write cookies too.
+
+**Rotation makes concurrency the hard part.** One dashboard load puts many requests
+through the proxy holding the same cookie — the document, its RSC payloads, and every
+open log stream — and each of them used to open its own grant with the same refresh
+token. Railway invalidates that token on first use, so one won and the rest received
+`invalid_grant`, concluded the session was dead, and deleted the cookie holding the
+refresh that had just succeeded. That is what manufactured the repeated authorizations.
+Two things fix it: `refreshSession` shares one in-flight grant per token, and the
+proxy's failure branch re-reads the cookie before clearing anything, so a request that
+lost a race adopts the winner's session instead of destroying it.
 
 ### ADR-3 — SSE downstream, WebSocket upstream
 
@@ -233,6 +260,13 @@ account that plainly has projects, the cause is one of four things that look ide
 from the outside: consent granted a narrower scope than was asked for, the OAuth token
 sees a different viewer than the browser session, the projects hang off a connection the
 app does not query, or there genuinely are none.
+
+Note the shape of Railway's refusal, because it is not the one the spec suggests: an
+unauthorized field returns **HTTP 200** with `{"message":"Not Authorized","extensions":
+{"code":"INTERNAL_SERVER_ERROR"}}`. Matching only `UNAUTHENTICATED`/`FORBIDDEN`
+classified every permission problem as a generic operation failure — which is how the
+UI came to show "Railway rejected the operation. Reference …" beside a Retry that could
+not possibly work, while withholding the re-authorize that would have.
 
 `scripts/probe-projects.ts` tells them apart, using the session's **own** OAuth access
 token rather than an account token — those two credentials have different visibility,

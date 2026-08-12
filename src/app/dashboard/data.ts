@@ -20,6 +20,14 @@ export type DashboardShell = {
   /** Set when the project list failed; the header and shell still render. */
   error: string | null;
   /**
+   * Set when some project sources answered and others did not.
+   *
+   * A list that is real but incomplete must say so. Silently showing the projects that
+   * happened to load, with no sign that a whole workspace was refused, is how someone
+   * concludes their projects are gone.
+   */
+  partialError: string | null;
+  /**
    * What kind of failure, so the page can offer the action that matches it.
    *
    * A rate limit wants a retry; a rejected credential wants re-consent. Offering both
@@ -59,7 +67,11 @@ type Translator = Awaited<ReturnType<typeof getTranslations>>;
  * header shows, not whether the app works, and naming them here would push the user
  * toward a re-consent that fixes nothing.
  */
-const SCOPES_THAT_MATTER = ["project:admin", "offline_access"] as const;
+const SCOPES_THAT_MATTER = [
+  "project:admin",
+  "workspace:viewer",
+  "offline_access",
+] as const;
 
 function missingScopes(granted: string): string[] {
   const held = new Set(granted.split(/\s+/).filter(Boolean));
@@ -105,14 +117,16 @@ export async function loadDashboardShell(params: {
     project: null,
     environment: null,
     error: null,
+    partialError: null,
     errorKind: null,
     missingScopes: missingScopes(session.scope),
     droppedSelection: false,
   };
 
   let projects: RailwayProject[];
+  let failures: RailwayApiError[];
   try {
-    ({ projects } = await listProjects(session.accessToken));
+    ({ projects, failures } = await listProjects(session.accessToken));
   } catch (error) {
     return {
       ...base,
@@ -135,6 +149,11 @@ export async function loadDashboardShell(params: {
     projects,
     project,
     environment,
+    // Reported, not thrown: these projects are real and usable, and the sentence says
+    // which part of the list is missing rather than replacing the whole page.
+    partialError: failures[0]
+      ? describe(t, failures[0], "errors.projectsFailed")
+      : null,
     // Only a *replaced* selection is worth reporting. An unknown environment inside the
     // right project resolves to that project's own default, which is not a substitution.
     droppedSelection: Boolean(params.projectId) && !requested && projects.length > 0,

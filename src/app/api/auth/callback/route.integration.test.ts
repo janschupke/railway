@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CONSENT_COOKIE,
   openSession,
   PKCE_COOKIE,
   SESSION_COOKIE,
@@ -191,14 +192,36 @@ describe("GET /api/auth/callback", () => {
     );
   });
 
-  it("refuses a session that would die in an hour", async () => {
+  it("retries with consent forced when no refresh token came back", async () => {
     /*
-     * Without a refresh token the session expires mid-use. Failing now with an
-     * explanation beats failing later inside an action the user has already started.
+     * Railway mints a refresh token on the flow where consent is granted, so a silent
+     * authorization can legitimately return none. Sending the user to an error page
+     * that says "sign in again and approve offline access" was a dead end: the retry
+     * they were told to perform was byte-for-byte the request that had just failed.
      */
     authorizationCodeGrant.mockResolvedValue(tokens({ refresh_token: undefined }));
 
     const response = await GET(request("?code=abc&state=st"));
+
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/api/auth/login");
+    expect(new URL(response.headers.get("location")!).searchParams.get("consent")).toBe(
+      "1",
+    );
+    expect(response.cookies.get(SESSION_COOKIE)).toBeUndefined();
+  });
+
+  it("gives up once consent has already been shown", async () => {
+    // The retry happens once. If Railway withheld the token even with the consent
+    // screen displayed, there is nothing left to try and looping would be the bug.
+    authorizationCodeGrant.mockResolvedValue(tokens({ refresh_token: undefined }));
+
+    const response = await GET(
+      request("?code=abc&state=st", {
+        [PKCE_COOKIE]: "verifier",
+        [STATE_COOKIE]: "st",
+        [CONSENT_COOKIE]: "1",
+      }),
+    );
 
     expect(errorParam(response)).toBe("no_refresh_token");
     expect(response.cookies.get(SESSION_COOKIE)).toBeUndefined();

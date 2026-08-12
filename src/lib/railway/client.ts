@@ -8,14 +8,61 @@ import { RailwayApiError } from "./errors";
 export const railwayApiUrl = () => env().RAILWAY_API_URL;
 export const railwayWsUrl = () => env().RAILWAY_WS_URL;
 
-type GraphQLResponse<T> = {
-  data?: T;
-  errors?: Array<{
-    message: string;
-    path?: Array<string | number>;
-    extensions?: { code?: string };
-  }>;
+/**
+ * One entry of a GraphQL `errors[]` array.
+ *
+ * `path` is modelled rather than ignored because it is the only thing that says *which*
+ * field Railway refused, and that is what turns "Railway rejected the operation" into a
+ * sentence naming the permission that is missing. See scopeForPath in ./errors.
+ */
+type GraphQLErrorEntry = {
+  message: string;
+  path?: Array<string | number>;
+  extensions?: Record<string, unknown> & { code?: string };
 };
+
+type GraphQLResponse<T> = {
+  data?: T | null;
+  errors?: GraphQLErrorEntry[];
+};
+
+/**
+ * Railway's authorization refusals, which do not use the codes the spec suggests.
+ *
+ * Verified against the live API: an unauthorized field comes back as HTTP 200 with
+ * `{"message":"Not Authorized","extensions":{"code":"INTERNAL_SERVER_ERROR"}}` — never
+ * UNAUTHENTICATED or FORBIDDEN. Matching only on those two codes is what classified
+ * every permission problem as a generic operation failure, which then offered a Retry
+ * that could not possibly work and withheld the re-authorize that would have.
+ */
+const AUTH_MESSAGE =
+  /\b(not\s+authorized|unauthorized|unauthenticated|forbidden|access denied)\b|\b(invalid|expired|revoked)\s+(access\s+)?token\b/i;
+
+function isAuthEntry(entry: GraphQLErrorEntry): boolean {
+  const code = entry.extensions?.code;
+  if (code === "UNAUTHENTICATED" || code === "FORBIDDEN") return true;
+  // A validation failure can mention "field" wording that trips nothing here; the code
+  // is checked first so a genuine schema rejection is never mistaken for a permission.
+  if (code === "GRAPHQL_VALIDATION_FAILED") return false;
+  return AUTH_MESSAGE.test(entry.message);
+}
+
+/** One `errors[]` entry, classified and carried with everything needed to explain it. */
+function toApiError(
+  entry: GraphQLErrorEntry,
+  operationName: string,
+  status: number,
+): RailwayApiError {
+  const code = entry.extensions?.code;
+  const auth = isAuthEntry(entry);
+  return new RailwayApiError(entry.message || "Railway rejected the operation", {
+    kind: auth ? "auth" : "graphql",
+    status,
+    operation: operationName,
+    ...(code ? { code } : {}),
+    ...(entry.path ? { path: entry.path } : {}),
+  });
+}
 
 export type GqlOptions = {
   accessToken: string;
@@ -49,11 +96,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *  - a 401 means the user's authorization is gone, which is a re-consent prompt and
  *    not a retry.
  */
-export async function gql<T>(
+async function execute<T>(
   query: string,
   variables: Record<string, unknown>,
   options: GqlOptions,
-): Promise<T> {
+): Promise<{ body: GraphQLResponse<T>; status: number }> {
   const {
     accessToken,
     operationName,
@@ -137,32 +184,9 @@ export async function gql<T>(
       });
     }
 
-    const [firstError] = body.errors ?? [];
-    if (firstError) {
-      const code = firstError.extensions?.code;
-      // GraphQL-layer auth failures also surface as 200 + errors[].
-      const kind =
-        code === "UNAUTHENTICATED" || code === "FORBIDDEN" ? "auth" : "graphql";
-      throw new RailwayApiError(
-        firstError.message || "Railway rejected the operation",
-        {
-          kind,
-          status: response.status,
-          operation: operationName,
-          ...(code ? { code } : {}),
-        },
-      );
-    }
-
-    if (!body.data) {
-      throw new RailwayApiError("Railway returned an empty response", {
-        kind: "graphql",
-        status: response.status,
-        operation: operationName,
-      });
-    }
-
-    return body.data;
+    // The status rides along so a GraphQL-layer refusal keeps the code Railway answered
+    // with, rather than being recorded as a flat 200 it may not have been.
+    return { body, status: response.status };
   }
 
   // Unreachable: every path above either returns or throws on the final attempt.
@@ -170,4 +194,62 @@ export async function gql<T>(
     kind: "network",
     operation: operationName,
   });
+}
+
+/**
+ * A GraphQL call that must fully succeed. Any `errors[]` entry is a failure.
+ *
+ * This is the right default for mutations and for single-purpose reads: a partial
+ * mutation result is not a success, and letting one through would surface later as a
+ * TypeError on a null field rather than as the failure it is.
+ */
+export async function gql<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  options: GqlOptions,
+): Promise<T> {
+  const { body, status } = await execute<T>(query, variables, options);
+
+  const [firstError] = body.errors ?? [];
+  if (firstError) {
+    // An auth entry outranks the rest: if one field was refused for permissions, that
+    // is the actionable cause even when a later entry merely reports the knock-on null.
+    const entry = body.errors?.find(isAuthEntry) ?? firstError;
+    throw toApiError(entry, options.operationName, status);
+  }
+
+  if (!body.data) {
+    throw new RailwayApiError("Railway returned an empty response", {
+      kind: "graphql",
+      status,
+      operation: options.operationName,
+    });
+  }
+
+  return body.data;
+}
+
+/**
+ * A GraphQL call whose partial result is still worth having.
+ *
+ * GraphQL nulls the field that failed and reports it alongside whatever else resolved,
+ * so a document touching several independent things has a usable answer even when one
+ * of them is refused. Throwing on the presence of `errors[]` discarded that: a project
+ * list that arrived intact was dropped because a *different* field on the same document
+ * was not permitted, and the dashboard showed nothing at all.
+ *
+ * Transport, rate-limit and 5xx failures still throw — there is no partial result there.
+ */
+export async function gqlPartial<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  options: GqlOptions,
+): Promise<{ data: T | null; errors: RailwayApiError[] }> {
+  const { body, status } = await execute<T>(query, variables, options);
+  return {
+    data: body.data ?? null,
+    errors: (body.errors ?? []).map((entry) =>
+      toApiError(entry, options.operationName, status),
+    ),
+  };
 }

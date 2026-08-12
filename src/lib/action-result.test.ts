@@ -33,7 +33,7 @@ describe("describeActionError", () => {
       }),
     );
 
-    expect(descriptor.key).toBe("errors.api.graphqlRef");
+    expect(descriptor.key).toBe("errors.api.graphqlUnexpected");
     expect(descriptor.values?.incident).toMatch(/^[0-9a-f]{8}$/);
     expect(JSON.stringify(descriptor)).not.toContain("prj_internal");
   });
@@ -57,7 +57,7 @@ describe("describeActionError", () => {
       describeActionError(
         new RailwayApiError("429", { kind: "rate_limit", retryAfterSeconds: 12 }),
       ),
-    ).toEqual({ key: "errors.api.rateLimitRetry", values: { seconds: 12 } });
+    ).toMatchObject({ key: "errors.api.rateLimitRetry", values: { seconds: 12 } });
   });
 
   it("does not leak an unexpected error's message to the UI", () => {

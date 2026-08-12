@@ -41,10 +41,13 @@ export function ProjectPicker({
      * aria-busy says the same thing without stealing focus, and React supersedes the
      * earlier navigation if they change their mind mid-flight.
      */
-    <div className="flex flex-wrap items-center gap-3" aria-busy={pending || undefined}>
+    // items-end, because each Select now carries a visible label above its trigger and
+    // an optional reason below it — centring would stagger the triggers themselves.
+    <div className="flex flex-wrap items-end gap-3" aria-busy={pending || undefined}>
       <Select
         label={t("projectLabel")}
         value={projectId ?? undefined}
+        disabledReason={t("noProjectsAvailable")}
         options={projects.map((p) => ({
           value: p.id,
           label: p.name,
@@ -65,6 +68,9 @@ export function ProjectPicker({
         label={t("environmentLabel")}
         value={environmentId ?? undefined}
         disabled={!selected}
+        /* Two different reasons for the same greyed-out control, and the user can act on
+           one of them. Saying neither is what made this look broken rather than empty. */
+        disabledReason={selected ? t("noEnvironments") : t("selectProjectFirst")}
         options={
           selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
         }

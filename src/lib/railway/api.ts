@@ -1,18 +1,19 @@
 import "server-only";
 
 import { STREAM } from "@/lib/constants";
-import { gql } from "./client";
+import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
 import {
   BUILD_LOGS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
   PROJECTS_PERSONAL_QUERY,
-  PROJECTS_QUERY,
+  PROJECTS_WORKSPACE_QUERY,
   PROJECT_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
+  VIEWER_QUERY,
 } from "./operations";
 import {
   nodes,
@@ -28,33 +29,105 @@ import type { Container, LogLine, RailwayProject } from "./types";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
+/** A project source that answered, or the reason it did not. */
+type SourceResult = {
+  /** Names the source in the log and in the partial-failure notice. */
+  name: "personal" | "workspace";
+  viewer: ViewerNode | null;
+  error: RailwayApiError | null;
+};
+
 /**
- * Every project the signed-in user can reach.
+ * Every project the signed-in user can reach, merged from each source that answered.
  *
- * Reads both of Railway's project connections and merges them — see PROJECTS_QUERY for
- * why one is not enough. If Railway rejects the wider document outright, it falls back
- * to the narrow one so a schema change degrades to the old behaviour rather than to an
- * error screen; any other failure propagates, because an empty list the user cannot
- * explain is exactly the bug this function exists to stop causing.
+ * Railway exposes projects in more than one place and an OAuth token's view of each is
+ * not documented — a project plainly visible in Railway's own dashboard can come back
+ * from either, both, or neither. They are read as independent requests so that a source
+ * the token has no scope for costs only that source: a refused `workspaces` field used
+ * to discard an intact personal project list along with it, which is the failure that
+ * made this dashboard useless.
+ *
+ * Throws only when *every* source failed. A caller that gets projects back also gets
+ * the failures, so it can say that part of the list is missing rather than implying the
+ * list is complete.
  */
 export async function listProjects(
   accessToken: string,
   signal?: AbortSignal,
-): Promise<{ viewer: Viewer; projects: RailwayProject[] }> {
-  const read = (query: string, operationName: string) =>
-    gql<{ me: ViewerNode }>(query, {}, { accessToken, operationName, signal });
+): Promise<{
+  viewer: Viewer;
+  projects: RailwayProject[];
+  failures: RailwayApiError[];
+}> {
+  const read = async (
+    name: SourceResult["name"],
+    query: string,
+    operationName: string,
+  ): Promise<SourceResult> => {
+    try {
+      const { data, errors } = await gqlPartial<{ me: ViewerNode }>(
+        query,
+        {},
+        { accessToken, operationName, signal },
+      );
+      // `me` itself refused means nothing usable came back, however the transport went.
+      if (!data?.me) return { name, viewer: null, error: errors[0] ?? null };
+      return { name, viewer: data.me, error: errors[0] ?? null };
+    } catch (error) {
+      if (error instanceof RailwayApiError) return { name, viewer: null, error };
+      throw error;
+    }
+  };
 
-  let data: { me: ViewerNode };
-  try {
-    data = await read(PROJECTS_QUERY, "Projects");
-  } catch (error) {
-    if (!(error instanceof RailwayApiError) || !error.isSchemaRejection()) throw error;
-    data = await read(PROJECTS_PERSONAL_QUERY, "ProjectsPersonal");
+  const [viewerResult, ...sources] = await Promise.all([
+    gql<{ me: ViewerNode }>(
+      VIEWER_QUERY,
+      {},
+      { accessToken, operationName: "Viewer", signal },
+    ).catch((error: unknown) => {
+      if (error instanceof RailwayApiError) return null;
+      throw error;
+    }),
+    read("personal", PROJECTS_PERSONAL_QUERY, "ProjectsPersonal"),
+    read("workspace", PROJECTS_WORKSPACE_QUERY, "ProjectsWorkspace"),
+  ]);
+
+  const answered = sources.filter((source) => source.viewer !== null);
+  const failures = sources
+    .map((source) => source.error)
+    .filter((error): error is RailwayApiError => error !== null);
+
+  /*
+   * Nothing answered at all. The first failure is thrown rather than a summary, because
+   * it is the one carrying the classification and the refused path — which is what
+   * turns this into "approve workspace access" instead of "something went wrong".
+   */
+  if (answered.length === 0) {
+    throw (
+      failures.find((error) => error.kind === "auth") ??
+      failures[0] ??
+      new RailwayApiError("Railway returned no project sources", {
+        kind: "graphql",
+        operation: "ProjectsPersonal",
+      })
+    );
   }
 
+  // De-duplication is toProjects' job, so it is fed one merged viewer rather than being
+  // called per source and re-merged here.
+  const merged: ViewerNode = {
+    id: viewerResult?.me.id ?? answered[0]!.viewer!.id,
+    ...(viewerResult?.me.name ? { name: viewerResult.me.name } : {}),
+    ...(viewerResult?.me.email ? { email: viewerResult.me.email } : {}),
+    projects: answered.find((s) => s.name === "personal")?.viewer?.projects ?? null,
+    workspaces:
+      answered.find((s) => s.name === "workspace")?.viewer?.workspaces ?? null,
+  };
+
   return {
-    viewer: { id: data.me.id, name: data.me.name, email: data.me.email },
-    projects: toProjects(data.me),
+    viewer: { id: merged.id, name: merged.name, email: merged.email },
+    projects: toProjects(merged),
+    failures,
   };
 }
 

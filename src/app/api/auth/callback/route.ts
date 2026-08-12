@@ -5,6 +5,8 @@ import { oidcConfig } from "@/lib/auth/oidc";
 import { describeOidcFailure } from "@/lib/auth/redact";
 import { SESSION } from "@/lib/constants";
 import {
+  CONSENT_COOKIE,
+  CONSENT_PARAM,
   PKCE_COOKIE,
   STATE_COOKIE,
   cookieOptions,
@@ -13,12 +15,16 @@ import {
   type RailwaySession,
 } from "@/lib/auth/session";
 
-function fail(request: NextRequest, reason: string) {
-  const url = new URL(`/?error=${encodeURIComponent(reason)}`, request.url);
-  const response = NextResponse.redirect(url);
+function clearTransients<T extends NextResponse>(response: T): T {
   response.cookies.delete(PKCE_COOKIE);
   response.cookies.delete(STATE_COOKIE);
+  response.cookies.delete(CONSENT_COOKIE);
   return response;
+}
+
+function fail(request: NextRequest, reason: string) {
+  const url = new URL(`/?error=${encodeURIComponent(reason)}`, request.url);
+  return clearTransients(NextResponse.redirect(url));
 }
 
 /**
@@ -73,10 +79,23 @@ export async function GET(request: NextRequest) {
 
   if (!tokens.refresh_token) {
     /*
-     * Without a refresh token the session dies in one hour, mid-use. Better to say so
-     * now than to fail an action later; the landing page explains how to fix it.
+     * Without a refresh token the session dies in one hour, mid-use.
+     *
+     * Railway mints one on the flow where consent is granted, so a silent authorization
+     * that skipped the consent screen can legitimately return none. That is worth one
+     * automatic retry with consent forced — this used to dead-end on an error page
+     * telling the user to sign in again and approve offline access, which sent them
+     * through the identical request and produced the identical result.
+     *
+     * The cookie set by that forced attempt is what stops this becoming a loop: if it
+     * is already here, consent has been shown and Railway still withheld the token, so
+     * there is nothing left to try.
      */
-    return fail(request, "no_refresh_token");
+    if (request.cookies.get(CONSENT_COOKIE)?.value === "1") {
+      return fail(request, "no_refresh_token");
+    }
+    const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, request.url);
+    return clearTransients(NextResponse.redirect(retry));
   }
 
   const session: RailwaySession = {
@@ -98,7 +117,5 @@ export async function GET(request: NextRequest) {
     await sealSession(session, SESSION_SECRET),
     { ...cookieOptions(APP_URL), maxAge: SESSION.MAX_AGE_SECONDS },
   );
-  response.cookies.delete(PKCE_COOKIE);
-  response.cookies.delete(STATE_COOKIE);
-  return response;
+  return clearTransients(response);
 }

@@ -51,8 +51,13 @@ export const SESSION = {
   /** Refresh this far ahead of expiry. Railway access tokens live one hour. */
   REFRESH_SKEW_SECONDS: 300,
   MAX_AGE_SECONDS: 60 * 60 * 24 * 30,
-  /** PKCE verifier and state only need to survive the round-trip to Railway. */
-  TRANSIENT_MAX_AGE_SECONDS: 60 * 10,
+  /**
+   * PKCE verifier and state only need to survive the round-trip to Railway — but that
+   * round trip includes picking projects on the consent screen, which routinely takes
+   * longer than ten minutes. Expiring underneath the user cost them the whole attempt:
+   * `missing_pkce_state`, back to the landing page, and a fresh consent round.
+   */
+  TRANSIENT_MAX_AGE_SECONDS: 60 * 30,
 } as const;
 
 /** User input bounds. */
