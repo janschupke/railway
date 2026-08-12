@@ -2,10 +2,12 @@ import "server-only";
 
 import { STREAM } from "@/lib/constants";
 import { gql } from "./client";
+import { RailwayApiError } from "./errors";
 import {
   BUILD_LOGS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
+  PROJECTS_PERSONAL_QUERY,
   PROJECTS_QUERY,
   PROJECT_QUERY,
   SERVICE_CREATE_MUTATION,
@@ -16,30 +18,43 @@ import {
   nodes,
   toContainers,
   toProject,
+  toProjects,
   type Edges,
   type ProjectNode,
   type ServiceNode,
+  type ViewerNode,
 } from "./mappers";
 import type { Container, LogLine, RailwayProject } from "./types";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
+/**
+ * Every project the signed-in user can reach.
+ *
+ * Reads both of Railway's project connections and merges them — see PROJECTS_QUERY for
+ * why one is not enough. If Railway rejects the wider document outright, it falls back
+ * to the narrow one so a schema change degrades to the old behaviour rather than to an
+ * error screen; any other failure propagates, because an empty list the user cannot
+ * explain is exactly the bug this function exists to stop causing.
+ */
 export async function listProjects(
   accessToken: string,
   signal?: AbortSignal,
 ): Promise<{ viewer: Viewer; projects: RailwayProject[] }> {
-  const data = await gql<{
-    me: {
-      id: string;
-      name?: string;
-      email?: string;
-      projects: Edges<ProjectNode>;
-    };
-  }>(PROJECTS_QUERY, {}, { accessToken, operationName: "Projects", signal });
+  const read = (query: string, operationName: string) =>
+    gql<{ me: ViewerNode }>(query, {}, { accessToken, operationName, signal });
+
+  let data: { me: ViewerNode };
+  try {
+    data = await read(PROJECTS_QUERY, "Projects");
+  } catch (error) {
+    if (!(error instanceof RailwayApiError) || !error.isSchemaRejection()) throw error;
+    data = await read(PROJECTS_PERSONAL_QUERY, "ProjectsPersonal");
+  }
 
   return {
     viewer: { id: data.me.id, name: data.me.name, email: data.me.email },
-    projects: nodes(data.me.projects).map(toProject),
+    projects: toProjects(data.me),
   };
 }
 

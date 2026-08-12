@@ -34,6 +34,19 @@ const FAILING_PROGRESSION = ["QUEUED", "BUILDING", "FAILED"] as const;
 /** Fast enough that a spec does not wait, slow enough that transitions are observable. */
 export const TICK_MS = 400;
 
+/**
+ * Which connection the fixture hangs projects off.
+ *
+ * The fixture used to answer `me.projects` unconditionally, which is exactly why it
+ * never caught a real account whose projects arrive somewhere else: the only shape it
+ * knew was the shape that worked. These are the shapes that have to keep working.
+ */
+export type ProjectsSource =
+  | "personal" // me.projects only
+  | "workspace" // me.workspaces[].team.projects only
+  | "both" // in both connections — the de-duplication case
+  | "none"; // authorized, but nothing to show
+
 export type Faults = {
   /** Next N GraphQL calls answer 429. */
   rateLimit: number;
@@ -45,6 +58,10 @@ export type Faults = {
   accessTokenTtl: number;
   /** Newly created deployments fail their build. */
   deploymentsFail: boolean;
+  /** Where the Projects query finds projects, if anywhere. */
+  projectsSource: ProjectsSource;
+  /** `me.workspaces` is rejected as an unknown field, exercising the narrow fallback. */
+  rejectWorkspaces: boolean;
   /**
    * Hold every GraphQL response for this many ms.
    *
@@ -53,6 +70,17 @@ export type Faults = {
    * race, so a spec that means to check the spinner slows the API down first.
    */
   slowMs: number;
+};
+
+const DEFAULT_FAULTS: Faults = {
+  rateLimit: 0,
+  unauthorized: 0,
+  refreshFails: false,
+  accessTokenTtl: 3600,
+  deploymentsFail: false,
+  projectsSource: "personal",
+  rejectWorkspaces: false,
+  slowMs: 0,
 };
 
 export class Store {
@@ -75,14 +103,7 @@ export class Store {
   services = new Map<string, Service>();
   deployments = new Map<string, Deployment>();
 
-  faults: Faults = {
-    rateLimit: 0,
-    unauthorized: 0,
-    refreshFails: false,
-    accessTokenTtl: 3600,
-    deploymentsFail: false,
-    slowMs: 0,
-  };
+  faults: Faults = { ...DEFAULT_FAULTS };
 
   #seq = 0;
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -173,14 +194,7 @@ export class Store {
   reset(): void {
     this.services.clear();
     this.deployments.clear();
-    this.faults = {
-      rateLimit: 0,
-      unauthorized: 0,
-      refreshFails: false,
-      accessTokenTtl: 3600,
-      deploymentsFail: false,
-      slowMs: 0,
-    };
+    this.faults = { ...DEFAULT_FAULTS };
     this.addService({
       name: "postgres",
       projectId: "proj_demo",

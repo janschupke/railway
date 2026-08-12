@@ -19,9 +19,9 @@ const buttonVariants = cva(
         ghost: "text-text-muted hover:bg-subtle hover:text-text",
       },
       size: {
-        sm: "h-8 px-2.5 text-xs [&_svg]:size-3.5",
-        md: "h-9 px-3 text-sm [&_svg]:size-4",
-        lg: "h-10 px-4 text-sm [&_svg]:size-4",
+        sm: "h-8 px-2.5 text-caption [&_svg]:size-3.5",
+        md: "h-9 px-3 text-body [&_svg]:size-4",
+        lg: "h-10 px-4 text-body [&_svg]:size-4",
       },
     },
     defaultVariants: { variant: "secondary", size: "md" },
@@ -68,17 +68,28 @@ export function Button({
    *
    * The element stays focusable on purpose — moving focus to <body> mid-action is worse
    * than a focused control that declines to act.
+   *
+   * The handler is attached only when it has work to do. A plain always-enabled link —
+   * an external "Open Railway", say — needs no JavaScript at all, and passing a function
+   * it would never call makes the whole button unusable from a Server Component, since
+   * event handlers cannot cross that boundary. An *inert* slotted link still needs the
+   * guard, so one of those does have to be rendered from a Client Component.
    */
+  const guarded = inert || Boolean(onClick);
   const activation = asChild
     ? {
         "aria-disabled": inert || undefined,
-        onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
-          if (inert) {
-            event.preventDefault();
-            return;
-          }
-          onClick?.(event);
-        },
+        ...(guarded
+          ? {
+              onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                if (inert) {
+                  event.preventDefault();
+                  return;
+                }
+                onClick?.(event);
+              },
+            }
+          : {}),
       }
     : { type, disabled: inert, onClick };
 

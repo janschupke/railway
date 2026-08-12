@@ -7,7 +7,35 @@
  * run it before trusting any of this (see README, "Schema verification").
  */
 
+const PROJECT_FIELDS = /* GraphQL */ `
+  fragment ProjectFields on Project {
+    id
+    name
+    environments {
+      edges {
+        node {
+          id
+          name
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Every project this credential can reach, from every source Railway exposes.
+ *
+ * `me.projects` alone is not enough to trust. Railway organises projects under
+ * workspaces, and an OAuth token's view of `me.projects` is not documented — a project
+ * the user can plainly see in Railway's own dashboard can come back in neither, one, or
+ * both connections. Reading all of them and de-duplicating by id is the only shape that
+ * cannot silently show an empty dashboard to someone who has projects.
+ *
+ * `pnpm probe:projects` prints what each source actually returns for a real session;
+ * run that before editing this, rather than reasoning about which one "should" work.
+ */
 export const PROJECTS_QUERY = /* GraphQL */ `
+  ${PROJECT_FIELDS}
   query Projects {
     me {
       id
@@ -16,16 +44,49 @@ export const PROJECTS_QUERY = /* GraphQL */ `
       projects {
         edges {
           node {
-            id
-            name
-            environments {
-              edges {
-                node {
-                  id
-                  name
-                }
+            ...ProjectFields
+          }
+        }
+      }
+      workspaces {
+        id
+        name
+        team {
+          id
+          name
+          projects {
+            edges {
+              node {
+                ...ProjectFields
               }
             }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * The pre-workspaces query, kept as a fallback.
+ *
+ * A GraphQL validation error is all-or-nothing: if Railway does not know `workspaces`,
+ * the document above fails as a whole and the dashboard would go from "empty" — the bug
+ * — to "broken", which is worse. `listProjects` retries with this one in that single
+ * case, so a schema change on Railway's side degrades to today's behaviour instead of
+ * an error screen.
+ */
+export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
+  ${PROJECT_FIELDS}
+  query ProjectsPersonal {
+    me {
+      id
+      name
+      email
+      projects {
+        edges {
+          node {
+            ...ProjectFields
           }
         }
       }

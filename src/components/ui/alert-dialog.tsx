@@ -42,7 +42,10 @@ export function AlertDialogTitle({
 }: React.ComponentProps<typeof Primitive.Title>) {
   return (
     <Primitive.Title
-      className={cn("font-display text-text text-base font-semibold", className)}
+      className={cn(
+        "font-display text-text text-title font-semibold tracking-tight",
+        className,
+      )}
       {...props}
     />
   );
@@ -54,7 +57,7 @@ export function AlertDialogDescription({
 }: React.ComponentProps<typeof Primitive.Description>) {
   return (
     <Primitive.Description
-      className={cn("text-text-muted mt-1.5 text-sm", className)}
+      className={cn("text-text-muted text-body mt-1.5", className)}
       {...props}
     />
   );

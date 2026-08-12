@@ -3,7 +3,7 @@ import "server-only";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { getProjectContainers, listProjects } from "@/lib/railway/api";
-import { RailwayApiError } from "@/lib/railway/errors";
+import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
 import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
@@ -18,6 +18,29 @@ export type DashboardShell = {
   environment: RailwayEnvironment | null;
   /** Set when the project list failed; the header and shell still render. */
   error: string | null;
+  /**
+   * What kind of failure, so the page can offer the action that matches it.
+   *
+   * A rate limit wants a retry; a rejected credential wants re-consent. Offering both
+   * every time trains the user to click the one that never helps.
+   */
+  errorKind: RailwayErrorKind | null;
+  /**
+   * Scopes the app asked for at consent and did not get.
+   *
+   * The empty dashboard has two very different causes — nothing to show, or no
+   * permission to see it — and they need opposite advice. Only a missing scope makes
+   * re-authorizing the useful action; without this the UI can only guess, and guessing
+   * is what sent users round the consent screen with nothing changing.
+   */
+  missingScopes: string[];
+  /**
+   * True when the URL named a project that is no longer in the list.
+   *
+   * Falling silently back to the first project shows someone else's containers under a
+   * link they believe points somewhere specific.
+   */
+  droppedSelection: boolean;
 };
 
 export type ContainerListData = {
@@ -27,6 +50,20 @@ export type ContainerListData = {
 };
 
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
+
+/**
+ * Scopes requested at consent that Railway did not grant.
+ *
+ * `openid`/`email`/`profile` are omitted deliberately: losing them changes what the
+ * header shows, not whether the app works, and naming them here would push the user
+ * toward a re-consent that fixes nothing.
+ */
+const SCOPES_THAT_MATTER = ["project:admin", "offline_access"] as const;
+
+function missingScopes(granted: string): string[] {
+  const held = new Set(granted.split(/\s+/).filter(Boolean));
+  return SCOPES_THAT_MATTER.filter((scope) => !held.has(scope));
+}
 
 /**
  * A Railway failure explains itself where it can; anything else falls back to the
@@ -69,23 +106,40 @@ export async function loadDashboardShell(params: {
     project: null,
     environment: null,
     error: null,
+    errorKind: null,
+    missingScopes: missingScopes(session.scope),
+    droppedSelection: false,
   };
 
   let projects: RailwayProject[];
   try {
     ({ projects } = await listProjects(session.accessToken));
   } catch (error) {
-    return { ...base, error: describe(t, error, "errors.projectsFailed") };
+    return {
+      ...base,
+      error: describe(t, error, "errors.projectsFailed"),
+      errorKind: error instanceof RailwayApiError ? error.kind : null,
+    };
   }
 
-  const project =
-    projects.find((p) => p.id === params.projectId) ?? projects[0] ?? null;
+  const requested = params.projectId
+    ? (projects.find((p) => p.id === params.projectId) ?? null)
+    : null;
+  const project = requested ?? projects[0] ?? null;
   const environment =
     project?.environments.find((e) => e.id === params.environmentId) ??
     project?.environments[0] ??
     null;
 
-  return { ...base, projects, project, environment };
+  return {
+    ...base,
+    projects,
+    project,
+    environment,
+    // Only a *replaced* selection is worth reporting. An unknown environment inside the
+    // right project resolves to that project's own default, which is not a substitution.
+    droppedSelection: Boolean(params.projectId) && !requested && projects.length > 0,
+  };
 }
 
 /**

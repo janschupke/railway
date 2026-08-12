@@ -6,6 +6,7 @@ import { UI } from "@/lib/constants";
 import type { LogLine } from "@/lib/railway/types";
 import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
+import { Text } from "./ui/text";
 
 /**
  * Log output with autoscroll that yields to the reader.
@@ -57,11 +58,14 @@ export function LogPane({
         }}
       >
         {lines.length === 0 ? (
-          <p className="text-text-muted font-mono text-xs">
-            {connected ? (emptyLabel ?? t("waitingForOutput")) : t("connecting")}
-          </p>
+          <Text asChild variant="mono" tone="muted">
+            <p>{connected ? (emptyLabel ?? t("waitingForOutput")) : t("connecting")}</p>
+          </Text>
         ) : (
-          <div className="font-mono text-xs leading-relaxed">
+          // The mono variant carries its own leading, so these rows, the empty state above
+          // and log-pane-skeleton.tsx can no longer disagree about it — which they did,
+          // the two placeholders standing in at a tighter line height than the real thing.
+          <div className="text-mono font-mono">
             {lines.map((line, index) => (
               <div
                 key={`${line.timestamp}-${index}`}

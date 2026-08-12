@@ -225,6 +225,28 @@ rather than destroy only.
 
 CI runs the discovery half on every push.
 
+### When the dashboard says there are no projects
+
+`verify:schema` only introspects _root_ fields, so it cannot see what hangs off `me` —
+and the project list is read from `me`. When the dashboard reports an empty list for an
+account that plainly has projects, the cause is one of four things that look identical
+from the outside: consent granted a narrower scope than was asked for, the OAuth token
+sees a different viewer than the browser session, the projects hang off a connection the
+app does not query, or there genuinely are none.
+
+`scripts/probe-projects.ts` tells them apart, using the session's **own** OAuth access
+token rather than an account token — those two credentials have different visibility,
+and it is the OAuth one that is in question:
+
+```bash
+RC_SESSION="<rc_session cookie value>" pnpm probe:projects
+```
+
+Copy the cookie from DevTools → Application → Cookies. It prints the granted scopes
+against the requested ones, the raw payload from each candidate project source, and a
+type-level introspection of `User` and `Query`. Read the payloads before changing
+`PROJECTS_QUERY` — that is what the script is for.
+
 ---
 
 ## Running it
@@ -266,6 +288,36 @@ pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 CI runs these on every push and pull request to `master`, as five parallel jobs behind a
 single `All checks` gate for branch protection to require. Enabling that protection is a
 GitHub repo setting, not a file — it is the one manual step.
+
+### Typography
+
+The type scale is seven roles, not a set of sizes: `display`, `title`, `heading`, `body`,
+`label`, `caption`, `badge`, `mono`. Sizes and line-heights live in `tokens.css` and are
+mapped into Tailwind as `text-<role>` utilities; the `Text` and `Heading` primitives in
+`src/components/ui/text.tsx` are the only place a weight is chosen.
+
+Naming them by role rather than size is the point. `text-sm font-medium` says nothing
+about whether the next component should match it, and the app had accumulated four
+different spellings of "heading" across five files, two page-level `h1`s ten pixels and a
+weight apart, and a log pane whose rows carried a line-height its own skeleton did not.
+
+Four files have to agree for a step to work, and three of the failures are silent:
+
+| File           | What it holds                        | If it is missing                               |
+| -------------- | ------------------------------------ | ---------------------------------------------- |
+| `tokens.css`   | `--type-<role>-size` / `-height`     | the mapping resolves to nothing                |
+| `globals.css`  | the `--text-<role>` `@theme` mapping | Tailwind generates no rule; the class is inert |
+| `ui/text.tsx`  | the variant and its weight           | the role is unreachable                        |
+| `lib/utils.ts` | `TYPE_SCALE` for tailwind-merge      | the class is read as a _colour_ and dropped    |
+
+That last one is the nastiest: out of the box tailwind-merge only knows Tailwind's own
+`text-xs … text-9xl`, so an unrecognised `text-caption` is classified as a text colour
+and silently removed wherever it shares a `cn()` call with one. `src/app/type-scale.test.ts`
+asserts all four agree, and `src/lib/utils.test.ts` pins the merge behaviour directly.
+
+Like the colour layer, this is enforced rather than documented: `no-restricted-syntax` in
+`eslint.config.mjs` rejects a raw `text-sm`, `font-medium`, `tracking-*` or `leading-*` in
+any component outside `src/components/ui/**`.
 
 ---
 

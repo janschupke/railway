@@ -114,6 +114,32 @@ describe("Button", () => {
     await user.click(screen.getByRole("link"));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it("attaches no handler to a plain enabled link", () => {
+    /*
+     * Not a micro-optimisation: an event handler cannot cross the Server Component
+     * boundary, so a Button that always carries one cannot be used for a static link
+     * rendered on the server. Rendering the dashboard's "Open Railway" link used to
+     * crash the page into its error boundary for exactly this reason.
+     *
+     * React attaches its listeners at the root, so the handler is not observable as a
+     * DOM attribute — asserting the props the primitive builds is what catches it.
+     */
+    const props = Button({ asChild: true, children: <a href="/x">Go</a> })
+      .props as Record<string, unknown>;
+
+    expect(props.onClick).toBeUndefined();
+  });
+
+  it("keeps the guard on an inert link, where it is the whole point", () => {
+    const props = Button({
+      asChild: true,
+      pending: true,
+      children: <a href="/x">Go</a>,
+    }).props as Record<string, unknown>;
+
+    expect(props.onClick).toBeTypeOf("function");
+  });
 });
 
 describe("Banner", () => {

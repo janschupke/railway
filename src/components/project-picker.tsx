@@ -45,7 +45,13 @@ export function ProjectPicker({
       <Select
         label={t("projectLabel")}
         value={projectId ?? undefined}
-        options={projects.map((p) => ({ value: p.id, label: p.name }))}
+        options={projects.map((p) => ({
+          value: p.id,
+          label: p.name,
+          // Only projects reached through a workspace carry one, so an account whose
+          // projects are all personal gets an ungrouped list exactly as before.
+          ...(p.workspaceName ? { group: p.workspaceName } : {}),
+        }))}
         onValueChange={(id) => {
           const next = new URLSearchParams(params);
           next.set(PARAM.project, id);

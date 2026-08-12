@@ -12,6 +12,8 @@ export class RailwayApiError extends Error {
   readonly status?: number;
   readonly operation?: string;
   readonly retryAfterSeconds?: number;
+  /** `errors[].extensions.code` verbatim, when Railway sent one. */
+  readonly code?: string;
 
   constructor(
     message: string,
@@ -20,6 +22,7 @@ export class RailwayApiError extends Error {
       status?: number;
       operation?: string;
       retryAfterSeconds?: number;
+      code?: string;
       cause?: unknown;
     },
   ) {
@@ -29,7 +32,23 @@ export class RailwayApiError extends Error {
     this.status = options.status;
     this.operation = options.operation;
     this.retryAfterSeconds = options.retryAfterSeconds;
+    this.code = options.code;
     this.cause = options.cause;
+  }
+
+  /**
+   * True when Railway refused the *document* rather than the request: an unknown field
+   * or a failed validation. Distinct from a runtime GraphQL error, because it means the
+   * schema is not what this code was written against, and the answer is to send a
+   * different query rather than to retry or to re-authorize.
+   */
+  isSchemaRejection(): boolean {
+    if (this.kind !== "graphql") return false;
+    if (this.code === "GRAPHQL_VALIDATION_FAILED") return true;
+    // Railway does not always set a code, and the wording is the only other signal.
+    return /cannot query field|unknown (field|argument|type)|did you mean/i.test(
+      this.message,
+    );
   }
 
   /**

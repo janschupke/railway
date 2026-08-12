@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { SignInButton } from "@/components/sign-in-button";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Heading, Text } from "@/components/ui/text";
 
 export default function DashboardError({
   error,
@@ -25,8 +26,14 @@ export default function DashboardError({
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 items-center p-6">
       <Card className="w-full space-y-3 p-6">
-        <h1 className="font-display text-text font-medium">{t("errorTitle")}</h1>
-        <p className="text-text-muted text-sm">{t("errorDescription")}</p>
+        {/* A page's only heading, at the same rank and role as the landing page's.
+            It used to render at body size in a lighter weight than any other h1. */}
+        <Heading level={1} variant="title">
+          {t("errorTitle")}
+        </Heading>
+        <Text asChild variant="body" tone="muted">
+          <p>{t("errorDescription")}</p>
+        </Text>
         <div className="flex gap-2">
           {/*
             reset() re-renders the boundary, which re-runs the server fetch that failed.
@@ -43,9 +50,9 @@ export default function DashboardError({
           <SignInButton label={t("reauthorize")} variant="secondary" />
         </div>
         {error.digest && (
-          <p className="text-text-subtle font-mono text-xs">
-            {t("errorRef", { digest: error.digest })}
-          </p>
+          <Text asChild variant="mono" tone="subtle">
+            <p>{t("errorRef", { digest: error.digest })}</p>
+          </Text>
         )}
       </Card>
     </main>

@@ -58,6 +58,24 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `dashboard-empty/${theme}`);
     });
 
+    test(`dashboard with no projects has no violations (${theme})`, async ({
+      page,
+    }) => {
+      /*
+       * A surface no scan ever reached until it had a fixture that could produce it —
+       * which is the same gap that let it ship telling users to re-authorize when
+       * their authorization was fine. Three controls and an external link, on a card,
+       * in both themes.
+       */
+      await injectFaults(page, { projectsSource: "none" });
+      await page.goto("/");
+      await page.getByRole("link", { name: /sign in with railway/i }).click();
+      await page.waitForURL("**/dashboard**");
+      await setTheme(page, theme);
+      await expect(onlyVisible(page.getByText("No projects to show"))).toBeVisible();
+      await expectNoA11yViolations(page, `dashboard-no-projects/${theme}`);
+    });
+
     test(`dashboard mid-load has no violations (${theme})`, async ({ page }) => {
       /*
        * The only automated check that --rc-skeleton survives a real browser and the

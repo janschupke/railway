@@ -38,7 +38,7 @@ export function ToggleGroup({
           key={option.value}
           value={option.value}
           className={cn(
-            "focus-ring rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+            "focus-ring text-caption rounded-full border px-3 py-1 font-medium transition-colors",
             "border-border text-text-muted hover:bg-subtle",
             "data-[state=on]:border-accent data-[state=on]:bg-accent-bg data-[state=on]:text-accent",
           )}

@@ -61,6 +61,41 @@
   --orange-600: #ea580c;
   --orange-300: #fdba74;
 
+  /*
+   * ---- Type ----
+   *
+   * Roles, not sizes. The app's typographic vocabulary is seven recipes wide, and naming
+   * them by size is what let four different "heading" spellings accumulate across five
+   * files — `text-sm font-medium` says nothing about whether the next component should
+   * match it.
+   *
+   * Size and line-height are tokenised together because they came apart when they were
+   * not: the log pane's populated rows carried a leading its own skeleton and empty
+   * state did not. Weight is not tokenised — it is one of three stock values, and the
+   * Text primitive is the single place that decides which role gets which.
+   */
+  --type-display-size: 1.5rem; /* 24px — a landing page's one h1 */
+  --type-display-height: 2rem;
+
+  --type-title-size: 1rem; /* 16px — a page or dialog heading */
+  --type-title-height: 1.5rem;
+
+  --type-heading-size: 0.875rem; /* 14px — a section heading inside a page */
+  --type-heading-height: 1.25rem;
+
+  --type-body-size: 0.875rem; /* 14px — prose and control text */
+  --type-body-height: 1.25rem;
+
+  --type-label-size: 0.875rem; /* 14px — names a control or a row */
+  --type-label-height: 1.25rem;
+
+  --type-caption-size: 0.75rem; /* 12px — supporting detail, never the only copy */
+  --type-caption-height: 1rem;
+
+  /* Mono runs optically small at a shared nominal size, and log output needs the air. */
+  --type-mono-size: 0.75rem;
+  --type-mono-height: 1.125rem;
+
   /* ---- Shape, depth, motion ---- */
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;

@@ -1,8 +1,34 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+/**
+ * The type scale's size utilities, as tailwind-merge needs to be told about them.
+ *
+ * Must match the `--text-*` keys mapped in globals.css. Out of the box tailwind-merge
+ * only knows Tailwind's own `text-xs … text-9xl`, so it classifies `text-caption` as a
+ * *colour* — every `text-*` it does not recognise falls into that group — and then
+ * drops it as conflicting with the `text-text-muted` sitting beside it in the same
+ * `cn()` call. The class simply vanishes from the output and the element renders at
+ * whatever it inherited, with nothing in the markup to show why.
+ *
+ * src/lib/utils.test.ts pins this, because the failure is silent in every other way.
+ */
+const TYPE_SCALE = [
+  "display",
+  "title",
+  "heading",
+  "body",
+  "label",
+  "caption",
+  "mono",
+] as const;
+
+const merge = extendTailwindMerge({
+  extend: { classGroups: { "font-size": [{ text: [...TYPE_SCALE] }] } },
+});
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return merge(clsx(inputs));
 }
 
 /**

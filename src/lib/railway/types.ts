@@ -64,6 +64,12 @@ export type RailwayProject = {
   id: string;
   name: string;
   environments: RailwayEnvironment[];
+  /**
+   * Set only for a project reached through a workspace rather than the viewer's own
+   * project list. The picker groups by it, so two workspaces with a "web" project each
+   * stay tellable apart; absent for personal projects, which then render ungrouped.
+   */
+  workspaceName?: string;
 };
 
 export type Container = {

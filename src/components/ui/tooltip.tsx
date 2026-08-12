@@ -40,7 +40,7 @@ export function Tooltip({
           sideOffset={6}
           className={cn(
             "border-border bg-raised text-text z-50 rounded-md border px-2 py-1",
-            "text-xs shadow-md",
+            "text-caption shadow-md",
           )}
         >
           {content}

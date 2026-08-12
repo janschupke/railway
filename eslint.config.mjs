@@ -33,12 +33,15 @@ const eslintConfig = defineConfig([
 
   /*
    * Appearance belongs to the primitives in src/components/ui. Feature components
-   * compose them and must not reach for a raw palette colour, a hex literal, or an
-   * arbitrary value pointing at a CSS variable — each of those bypasses the semantic
-   * token layer and, with it, the light theme and the contrast test.
+   * compose them and must not reach for a raw palette colour, a hex literal, an
+   * arbitrary value pointing at a CSS variable, or a raw type step — each of those
+   * bypasses the semantic token layer and, with it, the light theme, the contrast test
+   * and the type scale.
    *
    * This is a ratchet: nothing violates it today. It exists so the next component
-   * cannot quietly reintroduce the drift.
+   * cannot quietly reintroduce the drift. It has already been reintroduced once —
+   * before the Text primitive existed there were four spellings of "heading" across
+   * five files, and the two page-level h1s were ten pixels and a weight apart.
    */
   {
     files: ["src/**/*.tsx"],
@@ -46,6 +49,16 @@ const eslintConfig = defineConfig([
     rules: {
       "no-restricted-syntax": [
         "error",
+        {
+          /*
+           * Tailwind's own type steps. The scale roles (text-body, text-caption…) are
+           * deliberately not matched: those come from the tokens and are what a caller
+           * should reach for on the rare element a primitive cannot wrap.
+           */
+          selector: `JSXAttribute[name.name="className"] Literal[value=/(^|\\s)(text-(xs|sm|base|lg|xl|[2-9]xl)|font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)|tracking-(tighter|tight|normal|wide|wider|widest)|leading-\\S+)(\\s|$)/]`,
+          message:
+            "Raw type step in a feature component. Use <Text variant=…> or <Heading> from src/components/ui/text.tsx; the scale lives in src/app/tokens.css.",
+        },
         {
           selector: `JSXAttribute[name.name="className"] Literal[value=/(^|[^a-z-])(bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|placeholder|caret|accent|shadow)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|grey|zinc|neutral|stone|white|black)(\\/|-[0-9]|\\b)/]`,
           message:

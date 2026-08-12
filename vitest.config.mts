@@ -28,7 +28,19 @@ export default defineConfig({
           name: "component",
           environment: "jsdom",
           include: ["src/**/*.test.tsx"],
-          setupFiles: ["src/test/setup.ts", "src/test/setup-dom.ts"],
+          /*
+           * setup-intl is here too, so a Server Component that reads copy through
+           * `getTranslations` can be rendered by awaiting it. Without it the async
+           * components — the header, the footer, the container section — were only
+           * ever exercised end-to-end. It is additive: setup-dom mocks `next-intl`
+           * for client components, setup-intl mocks `next-intl/server`, and the two
+           * cover different modules.
+           */
+          setupFiles: [
+            "src/test/setup.ts",
+            "src/test/setup-dom.ts",
+            "src/test/setup-intl.ts",
+          ],
         },
       },
       {

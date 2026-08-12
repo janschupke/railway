@@ -19,6 +19,7 @@ import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 import { PendingStatus } from "./ui/misc";
 import { ToggleGroup } from "./ui/toggle-group";
+import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
 
 /**
@@ -95,9 +96,9 @@ export function SpinUpForm({
 
         {/* The heading is visual grouping; role+labelledby makes it programmatic too. */}
         <div className="space-y-2" role="group" aria-labelledby={imageGroupId}>
-          <p id={imageGroupId} className="text-text text-sm font-medium">
-            {t("imageGroup")}
-          </p>
+          <Text asChild variant="label">
+            <p id={imageGroupId}>{t("imageGroup")}</p>
+          </Text>
           <ToggleGroup
             label={t("presetImages")}
             value={image}
@@ -156,7 +157,9 @@ export function SpinUpForm({
             {t("submit")}
           </Button>
           {disabled && (
-            <span className="text-text-subtle text-xs">{t("selectProjectFirst")}</span>
+            <Text variant="caption" tone="subtle">
+              {t("selectProjectFirst")}
+            </Text>
           )}
           {/* The button's own label change is not announced; this is. */}
           <PendingStatus

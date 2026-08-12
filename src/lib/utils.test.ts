@@ -10,6 +10,24 @@ describe("cn", () => {
     // The reason twMerge is here at all: a caller's className must beat the default.
     expect(cn("px-2 text-sm", "px-4")).toBe("text-sm px-4");
   });
+
+  it("keeps a type-scale size alongside a text colour", () => {
+    /*
+     * The scale's sizes are not Tailwind's own, so an unconfigured tailwind-merge reads
+     * `text-caption` as a colour and drops it as conflicting with the colour beside it.
+     * The class disappears from the output and the element silently renders at whatever
+     * it inherited — invisible in review, and invisible to any test that only asserts
+     * the class was passed in.
+     */
+    expect(cn("text-caption", "text-text-muted")).toBe("text-caption text-text-muted");
+    expect(cn("text-mono text-text-subtle")).toBe("text-mono text-text-subtle");
+  });
+
+  it("still treats two type-scale sizes as conflicting", () => {
+    // A caller overriding the size must win, exactly as with Tailwind's own steps.
+    expect(cn("text-body", "text-caption")).toBe("text-caption");
+    expect(cn("text-sm", "text-display")).toBe("text-display");
+  });
 });
 
 describe("relativeTime", () => {

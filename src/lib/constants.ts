@@ -54,3 +54,14 @@ export const UI = {
   /** Distance from the bottom within which the log pane stays auto-scrolled. */
   AUTOSCROLL_THRESHOLD_PX: 24,
 } as const;
+
+/**
+ * Outbound links. Not the API endpoints — those are configurable per environment in
+ * env.ts so the E2E fixture can stand in; these are the human-facing pages, which
+ * always point at the real Railway and at this app's own source.
+ */
+export const LINKS = {
+  RAILWAY_DASHBOARD: "https://railway.com/dashboard",
+  RAILWAY_HOME: "https://railway.com",
+  REPOSITORY: "https://github.com/janschupke/railway",
+} as const;

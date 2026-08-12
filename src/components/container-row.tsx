@@ -14,6 +14,7 @@ import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
+import { Text } from "./ui/text";
 
 /*
  * The log pane only mounts once a row is expanded, and it drags Radix ScrollArea in
@@ -101,12 +102,14 @@ export function ContainerRow({
             )}
           />
           <span className="min-w-0">
-            <span className="text-text block truncate font-medium">
+            {/* The name used to carry no size class at all, so it inherited 16px and
+                sat four steps above the 12px source line directly under it. */}
+            <Text variant="label" className="block truncate">
               {container.displayName}
-            </span>
-            <span className="text-text-subtle block truncate font-mono text-xs">
+            </Text>
+            <Text variant="mono" tone="subtle" className="block truncate">
               {container.image ?? container.repo ?? t("noSource")}
-            </span>
+            </Text>
           </span>
         </button>
 
@@ -115,14 +118,20 @@ export function ContainerRow({
           rawStatus={stream.rawStatus ?? container.rawStatus}
         />
 
-        <time
-          className="text-text-subtle w-20 shrink-0 text-right text-xs"
-          // Relative time is computed from the client clock; the server's value differs.
-          suppressHydrationWarning
+        <Text
+          asChild
+          variant="caption"
+          tone="subtle"
+          className="w-20 shrink-0 text-right"
         >
-          {relativeTime(container.updatedAt ?? container.createdAt, locale) ??
-            tCommon("noValue")}
-        </time>
+          <time
+            // Relative time is computed from the client clock; the server's differs.
+            suppressHydrationWarning
+          >
+            {relativeTime(container.updatedAt ?? container.createdAt, locale) ??
+              tCommon("noValue")}
+          </time>
+        </Text>
 
         {container.managed ? (
           <DestroyContainerDialog

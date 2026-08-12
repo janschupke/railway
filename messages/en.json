@@ -19,6 +19,11 @@
     "themeSystem": "System",
     "noValue": "—"
   },
+  "footer": {
+    "source": "Source on GitHub",
+    "builtOn": "Built on Railway",
+    "apiNote": "Not affiliated with Railway. Container data comes from your own Railway account."
+  },
   "landing": {
     "intro": "Spin containers up and down in your own Railway projects. Sign in with Railway and pick which projects this app may touch.",
     "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy containers it created itself."
@@ -29,9 +34,15 @@
     "containersListLabel": "Containers",
     "createdHere": "{managed, number} of {total, plural, =0 {no containers} one {# container} other {# containers}} created here",
     "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
-    "noProjectsTitle": "No projects shared with this app",
-    "noProjectsDescription": "Railway's consent screen controls which projects are visible here. Sign in again and select at least one project.",
-    "chooseProjects": "Choose projects",
+    "noProjectsTitle": "No projects to show",
+    "noProjectsDescription": "Railway returned an empty project list for this account. Your authorization is intact, so re-authorizing usually changes nothing.",
+    "noProjectsScopeTitle": "This app was not granted project access",
+    "noProjectsScopeDescription": "Railway withheld {scopes} at consent, so it reports no projects no matter how many you have. Authorizing again and approving project access will fix it.",
+    "noProjectsRetry": "Check again",
+    "noProjectsRetryPending": "Checking…",
+    "openRailway": "Open Railway",
+    "chooseProjects": "Authorize again",
+    "droppedSelection": "The project in this link is no longer available, so the first one is shown instead.",
     "emptyTitle": "Nothing running in this environment",
     "emptyDescription": "Spin one up above and its build logs will stream here.",
     "projectLabel": "Project",

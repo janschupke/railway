@@ -47,6 +47,32 @@
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+
+  /*
+   * The type scale, as `text-<role>` utilities. Tailwind pairs each size with the
+   * `--text-*--line-height` beside it, so `text-body` carries its leading and a caller
+   * cannot take one without the other — which is how the mono rows drifted apart from
+   * the skeleton standing in for them.
+   *
+   * Weight is deliberately absent: `--font-weight-display` would generate the same
+   * `font-display` utility as the font *family* above and silently shadow it. The Text
+   * primitive applies weight from stock utilities instead, and it is the only thing
+   * that should — see the ratchet in eslint.config.mjs.
+   */
+  --text-display: var(--type-display-size);
+  --text-display--line-height: var(--type-display-height);
+  --text-title: var(--type-title-size);
+  --text-title--line-height: var(--type-title-height);
+  --text-heading: var(--type-heading-size);
+  --text-heading--line-height: var(--type-heading-height);
+  --text-body: var(--type-body-size);
+  --text-body--line-height: var(--type-body-height);
+  --text-label: var(--type-label-size);
+  --text-label--line-height: var(--type-label-height);
+  --text-caption: var(--type-caption-size);
+  --text-caption--line-height: var(--type-caption-height);
+  --text-mono: var(--type-mono-size);
+  --text-mono--line-height: var(--type-mono-height);
 }
 
 html {

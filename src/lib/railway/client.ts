@@ -145,7 +145,12 @@ export async function gql<T>(
         code === "UNAUTHENTICATED" || code === "FORBIDDEN" ? "auth" : "graphql";
       throw new RailwayApiError(
         firstError.message || "Railway rejected the operation",
-        { kind, status: response.status, operation: operationName },
+        {
+          kind,
+          status: response.status,
+          operation: operationName,
+          ...(code ? { code } : {}),
+        },
       );
     }
 

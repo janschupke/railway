@@ -33,7 +33,7 @@ export function Field({ label, hint, error, children }: FieldProps) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Label.Root htmlFor={id} className="text-text text-sm font-medium">
+      <Label.Root htmlFor={id} className="text-text text-label font-medium">
         {label}
       </Label.Root>
 
@@ -48,7 +48,7 @@ export function Field({ label, hint, error, children }: FieldProps) {
           id={messageId}
           // Errors are announced when they appear; hints are static text.
           role={error ? "alert" : undefined}
-          className={cn("text-xs", error ? "text-danger" : "text-text-subtle")}
+          className={cn("text-caption", error ? "text-danger" : "text-text-subtle")}
         >
           {message}
         </p>

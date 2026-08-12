@@ -3,6 +3,7 @@ import { ContainerRow } from "@/components/container-row";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/misc";
+import { Heading, Text } from "@/components/ui/text";
 import { managedPrefix } from "@/lib/railway/managed";
 import { loadContainers } from "./data";
 
@@ -33,9 +34,7 @@ export async function ContainerSection({
     return (
       <section className="space-y-2">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-display text-text text-sm font-medium">
-            {t("containersHeading")}
-          </h2>
+          <Heading level={2}>{t("containersHeading")}</Heading>
         </div>
         <Card>
           <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
@@ -50,12 +49,10 @@ export async function ContainerSection({
   return (
     <section className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <h2 className="font-display text-text text-sm font-medium">
-          {t("containersHeading")}
-        </h2>
-        <p className="text-text-subtle text-xs">
-          {t("createdHere", { managed: managedCount, total: containers.length })}
-        </p>
+        <Heading level={2}>{t("containersHeading")}</Heading>
+        <Text asChild variant="caption" tone="subtle">
+          <p>{t("createdHere", { managed: managedCount, total: containers.length })}</p>
+        </Text>
       </div>
 
       {error && <Banner tone="error">{error}</Banner>}
@@ -79,14 +76,18 @@ export async function ContainerSection({
         )}
       </Card>
 
-      <p className="text-text-subtle text-xs">
-        {/* Rich text, not concatenation: the <code> span has to be able to move
-            within the sentence when the sentence is translated. */}
-        {t.rich("prefixNote", {
-          prefix: managedPrefix(),
-          code: (chunks) => <code className="font-mono">{chunks}</code>,
-        })}
-      </p>
+      <Text asChild variant="caption" tone="subtle">
+        <p>
+          {/* Rich text, not concatenation: the <code> span has to be able to move
+              within the sentence when the sentence is translated. */}
+          {t.rich("prefixNote", {
+            prefix: managedPrefix(),
+            /* Only the family changes here: mono at its own token size next to sans copy
+               would step down twice, since mono already reads smaller per em. */
+            code: (chunks) => <code className="font-mono">{chunks}</code>,
+          })}
+        </p>
+      </Text>
     </section>
   );
 }

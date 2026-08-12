@@ -23,22 +23,64 @@ export function execute(
 ): Result {
   switch (operationName) {
     case "Projects":
+    case "ProjectsPersonal": {
+      const wide = operationName === "Projects";
+
+      if (wide && store.faults.rejectWorkspaces) {
+        /*
+         * A validation error, not a runtime one: Railway refuses the whole document
+         * when a field is unknown. The app is expected to notice and re-send the
+         * narrow query, which is the only reason "ProjectsPersonal" is ever exercised.
+         */
+        return {
+          errors: [
+            {
+              message: 'Cannot query field "workspaces" on type "User".',
+              extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+            },
+          ],
+        };
+      }
+
+      const projects = store.projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        environments: edges(p.environments),
+      }));
+      const source = store.faults.projectsSource;
+      // The narrow document cannot see workspaces at all, so a workspace-only account
+      // is legitimately empty there — that is the fallback's honest worst case.
+      const personal = source === "personal" || source === "both" ? projects : [];
+      const inWorkspace = wide && (source === "workspace" || source === "both");
+
       return {
         data: {
           me: {
             id: "user_e2e",
             name: "Ada Lovelace",
             email: "ada@example.com",
-            projects: edges(
-              store.projects.map((p) => ({
-                id: p.id,
-                name: p.name,
-                environments: edges(p.environments),
-              })),
-            ),
+            projects: edges(personal),
+            ...(wide
+              ? {
+                  workspaces: [
+                    {
+                      id: "ws_e2e",
+                      name: "Ada's Workspace",
+                      team: inWorkspace
+                        ? {
+                            id: "team_e2e",
+                            name: "Acme",
+                            projects: edges(projects),
+                          }
+                        : null,
+                    },
+                  ],
+                }
+              : {}),
           },
         },
       };
+    }
 
     case "Project": {
       const project = store.projects.find((p) => p.id === variables.id);

@@ -21,6 +21,13 @@ afterAll(() => server.close());
 
 const TOKEN = "token";
 
+/** A project node as Railway nests it, so the connection shape is written once. */
+const node = (id: string, name: string) => ({
+  id,
+  name,
+  environments: { edges: [{ node: { id: "e1", name: "production" } }] },
+});
+
 describe("listProjects", () => {
   it("flattens the viewer and their projects out of Relay connections", async () => {
     server.use(
@@ -66,6 +73,134 @@ describe("listProjects", () => {
     );
 
     expect((await listProjects(TOKEN)).projects).toEqual([]);
+  });
+
+  it("finds projects that hang off a workspace rather than the viewer", async () => {
+    /*
+     * The bug this exists to stop: `me.projects` came back empty, the dashboard said
+     * "no projects shared", and the only offered action was a consent screen that had
+     * already granted everything.
+     */
+    server.use(
+      api.query("Projects", () =>
+        HttpResponse.json({
+          data: {
+            me: {
+              id: "u1",
+              projects: { edges: [] },
+              workspaces: [
+                {
+                  id: "ws1",
+                  name: "Personal",
+                  team: {
+                    id: "t1",
+                    name: "Acme",
+                    projects: { edges: [{ node: node("p1", "Demo") }] },
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+
+    expect((await listProjects(TOKEN)).projects).toEqual([
+      {
+        id: "p1",
+        name: "Demo",
+        environments: [{ id: "e1", name: "production" }],
+        workspaceName: "Acme",
+      },
+    ]);
+  });
+
+  it("shows a project reachable through both connections exactly once", async () => {
+    server.use(
+      api.query("Projects", () =>
+        HttpResponse.json({
+          data: {
+            me: {
+              id: "u1",
+              projects: { edges: [{ node: node("p1", "Demo") }] },
+              workspaces: [
+                {
+                  id: "ws1",
+                  name: "Personal",
+                  team: {
+                    id: "t1",
+                    name: "Acme",
+                    projects: {
+                      edges: [
+                        { node: node("p1", "Demo") },
+                        { node: node("p2", "Other") },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+
+    const { projects } = await listProjects(TOKEN);
+
+    expect(projects.map((p) => p.id)).toEqual(["p1", "p2"]);
+    // The personal entry wins, so a project the user owns is not labelled with a team.
+    expect(projects[0]?.workspaceName).toBeUndefined();
+    expect(projects[1]?.workspaceName).toBe("Acme");
+  });
+
+  it("falls back to the narrow query when Railway rejects the workspace field", async () => {
+    /*
+     * A GraphQL validation error kills the whole document, so without this the list
+     * would go from empty — the bug — to broken, which is worse.
+     */
+    server.use(
+      api.query("Projects", () =>
+        HttpResponse.json({
+          errors: [
+            {
+              message: 'Cannot query field "workspaces" on type "User".',
+              extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+            },
+          ],
+        }),
+      ),
+      api.query("ProjectsPersonal", () =>
+        HttpResponse.json({
+          data: {
+            me: { id: "u1", projects: { edges: [{ node: node("p1", "Demo") }] } },
+          },
+        }),
+      ),
+    );
+
+    expect((await listProjects(TOKEN)).projects).toEqual([
+      { id: "p1", name: "Demo", environments: [{ id: "e1", name: "production" }] },
+    ]);
+  });
+
+  it("does not retry a failure that a different query cannot fix", async () => {
+    let personalCalls = 0;
+    server.use(
+      api.query("Projects", () =>
+        HttpResponse.json({
+          errors: [{ message: "Not authorized", extensions: { code: "FORBIDDEN" } }],
+        }),
+      ),
+      api.query("ProjectsPersonal", () => {
+        personalCalls += 1;
+        return HttpResponse.json({
+          data: { me: { id: "u1", projects: { edges: [] } } },
+        });
+      }),
+    );
+
+    await expect(listProjects(TOKEN)).rejects.toThrow();
+    expect(personalCalls).toBe(0);
   });
 });
 

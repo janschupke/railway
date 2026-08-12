@@ -78,11 +78,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
-                <Toast.Title className="text-text text-sm font-medium">
+                <Toast.Title className="text-text text-label font-medium">
                   {record.title}
                 </Toast.Title>
                 {record.description && (
-                  <Toast.Description className="text-text-muted mt-0.5 text-xs">
+                  <Toast.Description className="text-text-muted text-caption mt-0.5">
                     {record.description}
                   </Toast.Description>
                 )}

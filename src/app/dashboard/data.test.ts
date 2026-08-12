@@ -82,6 +82,48 @@ describe("loadDashboardShell", () => {
     expect(shell?.environment?.id).toBe("e1");
   });
 
+  it("reports a substituted project rather than swapping it silently", async () => {
+    // Showing another project's containers under a link that names a specific one is
+    // the kind of quiet wrong answer a user cannot detect.
+    const shell = await loadDashboardShell({ projectId: "gone" });
+    expect(shell?.droppedSelection).toBe(true);
+  });
+
+  it("does not call an unknown environment a substitution", async () => {
+    // The project asked for is the one shown; its default environment is not a swap.
+    const shell = await loadDashboardShell({ projectId: "p1", environmentId: "gone" });
+
+    expect(shell?.droppedSelection).toBe(false);
+    expect(shell?.environment?.id).toBe("e1");
+  });
+
+  it("does not report a substitution when there was nothing to substitute", async () => {
+    listProjects.mockResolvedValue({ viewer: {}, projects: [] });
+
+    const shell = await loadDashboardShell({ projectId: "gone" });
+
+    expect(shell?.droppedSelection).toBe(false);
+  });
+
+  it("names the scopes Railway withheld, so the page can say why the list is empty", async () => {
+    // An empty list caused by a denied scope needs the opposite advice from an empty
+    // list that is simply empty — this is what lets the page tell them apart.
+    getSession.mockResolvedValue({ ...session, scope: "openid email" });
+
+    const shell = await loadDashboardShell({});
+
+    expect(shell?.missingScopes).toEqual(["project:admin", "offline_access"]);
+  });
+
+  it("reports no missing scopes when consent granted everything that matters", async () => {
+    getSession.mockResolvedValue({
+      ...session,
+      scope: "openid email profile offline_access project:admin",
+    });
+
+    expect((await loadDashboardShell({}))?.missingScopes).toEqual([]);
+  });
+
   it("degrades to an explanation when the project list fails", async () => {
     // A Railway outage should render the shell with a reason, not an error boundary.
     listProjects.mockRejectedValue(
@@ -92,6 +134,14 @@ describe("loadDashboardShell", () => {
 
     expect(shell?.error).toContain("rate limit");
     expect(shell?.projects).toEqual([]);
+    // The kind is what lets the page offer a retry here and re-consent on an auth
+    // failure, instead of showing both every time.
+    expect(shell?.errorKind).toBe("rate_limit");
+  });
+
+  it("leaves the failure kind unset for a non-Railway error", async () => {
+    listProjects.mockRejectedValue(new Error("socket hang up"));
+    expect((await loadDashboardShell({}))?.errorKind).toBeNull();
   });
 
   it("uses a generic message for a non-Railway failure", async () => {

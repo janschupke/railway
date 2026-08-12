@@ -5,7 +5,27 @@ import { Check, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
-type SelectOption = { value: string; label: string };
+type SelectOption = {
+  value: string;
+  label: string;
+  /**
+   * Optional heading to file this option under. Options with no group render loose at
+   * the top, so a list where nothing is grouped looks exactly as it did before.
+   */
+  group?: string;
+};
+
+/** Preserves first-seen order, so grouping never reshuffles the caller's list. */
+function byGroup(options: SelectOption[]): Array<[string | null, SelectOption[]]> {
+  const groups = new Map<string | null, SelectOption[]>();
+  for (const option of options) {
+    const key = option.group ?? null;
+    const existing = groups.get(key);
+    if (existing) existing.push(option);
+    else groups.set(key, [option]);
+  }
+  return [...groups.entries()];
+}
 
 /**
  * Styled single-select on Radix.
@@ -39,7 +59,7 @@ export function Select({
         aria-label={label}
         className={cn(
           "focus-ring border-border bg-surface text-text inline-flex h-9 items-center gap-2",
-          "rounded-md border px-2.5 text-sm",
+          "text-body rounded-md border px-2.5",
           "hover:bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
         )}
       >
@@ -59,22 +79,37 @@ export function Select({
           )}
         >
           <Primitive.Viewport className="p-1">
-            {options.map((option) => (
-              <Primitive.Item
-                key={option.value}
-                value={option.value}
-                className={cn(
-                  "text-text flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5",
-                  "text-sm outline-none select-none",
-                  "data-[highlighted]:bg-subtle data-[state=checked]:text-accent",
-                )}
-              >
-                <Primitive.ItemText>{option.label}</Primitive.ItemText>
-                <Primitive.ItemIndicator>
-                  <Check aria-hidden className="size-3.5" />
-                </Primitive.ItemIndicator>
-              </Primitive.Item>
-            ))}
+            {byGroup(options).map(([group, groupOptions]) => {
+              const items = groupOptions.map((option) => (
+                <Primitive.Item
+                  key={option.value}
+                  value={option.value}
+                  className={cn(
+                    "text-text flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5",
+                    "text-body outline-none select-none",
+                    "data-[highlighted]:bg-subtle data-[state=checked]:text-accent",
+                  )}
+                >
+                  <Primitive.ItemText>{option.label}</Primitive.ItemText>
+                  <Primitive.ItemIndicator>
+                    <Check aria-hidden className="size-3.5" />
+                  </Primitive.ItemIndicator>
+                </Primitive.Item>
+              ));
+
+              // Ungrouped options are not wrapped: an unlabelled Group would still
+              // announce itself to a screen reader as a group with no name.
+              if (group === null) return items;
+
+              return (
+                <Primitive.Group key={group}>
+                  <Primitive.Label className="text-text-subtle text-caption px-2 py-1">
+                    {group}
+                  </Primitive.Label>
+                  {items}
+                </Primitive.Group>
+              );
+            })}
           </Primitive.Viewport>
         </Primitive.Content>
       </Primitive.Portal>

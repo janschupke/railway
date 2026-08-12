@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { Text } from "./ui/text";
 
 /**
  * Stands in for LogPane while its chunk loads.
@@ -24,7 +25,9 @@ export function LogPaneSkeleton() {
         aria-label={t("logsLabel")}
         className="bg-subtle h-64 rounded-md p-3"
       >
-        <p className="text-text-muted font-mono text-xs">{t("connecting")}</p>
+        <Text asChild variant="mono" tone="muted">
+          <p>{t("connecting")}</p>
+        </Text>
       </div>
     </div>
   );

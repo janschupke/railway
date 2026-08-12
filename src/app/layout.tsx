@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
+import { Footer } from "@/components/footer";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -43,7 +44,17 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           only subtree that raises toasts, and mounting Radix Toast globally cost the
           landing page and the 404 ~12 kB gzip they could never use.
         */}
-        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider>
+          {children}
+          {/*
+            Outside {children} so every route gets it — including the 404, which has no
+            file of its own. <body> is already a min-height flex column and every page's
+            <main> carries flex-1, so this sits at the bottom of a short page without
+            any layout change. It stays a Server Component: anything client-side here
+            would ship on every route at once.
+          */}
+          <Footer />
+        </NextIntlClientProvider>
       </body>
     </html>
   );

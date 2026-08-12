@@ -6,6 +6,7 @@ import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { Heading, Text } from "@/components/ui/text";
 
 /*
  * The OAuth failure codes this app writes into `?error=`, plus the ones Railway passes
@@ -49,20 +50,24 @@ export default async function LandingPage({
         <span className="bg-accent-bg text-accent inline-flex size-10 items-center justify-center rounded-lg">
           <Container aria-hidden className="size-5" />
         </span>
-        <h1 className="font-display text-text text-2xl font-semibold tracking-tight">
+        <Heading level={1} variant="display">
           {t("app.name")}
-        </h1>
-        <p className="text-text-muted text-sm">{t("landing.intro")}</p>
+        </Heading>
+        <Text asChild variant="body" tone="muted">
+          <p>{t("landing.intro")}</p>
+        </Text>
       </div>
 
       {message && <Banner tone="error">{message}</Banner>}
 
       <Card className="space-y-4 p-5">
         <SignInButton variant="primary" size="lg" className="w-full" />
-        <p className="text-text-subtle flex items-start gap-2 text-xs">
-          <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
-          <span>{t("landing.consentNote")}</span>
-        </p>
+        <Text asChild variant="caption" tone="subtle">
+          <p className="flex items-start gap-2">
+            <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
+            <span>{t("landing.consentNote")}</span>
+          </p>
+        </Text>
       </Card>
     </main>
   );

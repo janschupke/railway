@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { Text } from "./ui/text";
 import { isTransitioning, type ContainerState } from "@/lib/railway/types";
 
 /**
@@ -25,11 +26,16 @@ export function StatusBadge({
   const label = t(`states.${state}`);
 
   return (
-    <span
+    /*
+     * `tone="inherit"` because the colour is the badge's whole job: data-state-color
+     * sets both the foreground and the background from one token pair, and a tone from
+     * the type scale would overwrite the half of that the state owns.
+     */
+    <Text
+      variant="badge"
+      tone="inherit"
       data-state-color={state}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-      )}
+      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5"
     >
       <span
         aria-hidden
@@ -45,6 +51,6 @@ export function StatusBadge({
           {t("containers.rawStatus", { status: rawStatus })}
         </span>
       )}
-    </span>
+    </Text>
   );
 }

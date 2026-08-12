@@ -16,10 +16,6 @@
   "ignoreDependencies": [
     // Loaded by name from postcss.config / the Prettier config, not imported.
     "tailwindcss",
-    // Referenced only inside a Playwright `webServer` command string
-    // ("pnpm exec tsx e2e/fixtures/fake-railway/server.ts"), which no static
-    // analysis can see. Removing it breaks the E2E fixture.
-    "tsx",
   ],
 
   "ignore": ["src/test/**"],

@@ -1,6 +1,7 @@
 import { Container } from "lucide-react";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
+import { Heading, Text } from "./ui/text";
 
 /*
  * Placeholder compositions for the dashboard.
@@ -28,9 +29,7 @@ export function DashboardHeaderSkeleton({ appName }: { appName: string }) {
       <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
         <span className="flex items-center gap-2">
           <Container aria-hidden className="text-accent size-4" />
-          <span className="font-display text-text font-semibold tracking-tight">
-            {appName}
-          </span>
+          <Text variant="title">{appName}</Text>
         </span>
 
         <div className="flex items-center gap-3">
@@ -121,7 +120,7 @@ export function ContainerSectionSkeleton({
      */
     <section className="space-y-2" aria-busy="true" data-loading="containers">
       <div className="flex items-baseline justify-between">
-        <h2 className="font-display text-text text-sm font-medium">{heading}</h2>
+        <Heading level={2}>{heading}</Heading>
         <Skeleton className="h-4 w-40" />
       </div>
 

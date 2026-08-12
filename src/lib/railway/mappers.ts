@@ -30,12 +30,56 @@ export type ServiceNode = {
   }>;
 };
 
+/** `me`, with both project sources optional — the fallback query selects only one. */
+export type ViewerNode = {
+  id: string;
+  name?: string;
+  email?: string;
+  projects?: Edges<ProjectNode>;
+  workspaces?: Array<{
+    id: string;
+    name?: string | null;
+    /** Null for a personal workspace, which has no team behind it. */
+    team?: { id: string; name?: string | null; projects: Edges<ProjectNode> } | null;
+  }> | null;
+};
+
 export function toProject(node: ProjectNode): RailwayProject {
   return {
     id: node.id,
     name: node.name,
     environments: nodes(node.environments).map((e) => ({ id: e.id, name: e.name })),
   };
+}
+
+/**
+ * Every project on the viewer, de-duplicated by id.
+ *
+ * A project reachable both personally and through a workspace appears in both
+ * connections; showing it twice in the picker would be a worse bug than the empty list
+ * this exists to fix. Personal entries win, so a project the user owns is never labelled
+ * with someone else's workspace.
+ */
+export function toProjects(viewer: ViewerNode): RailwayProject[] {
+  const byId = new Map<string, RailwayProject>();
+
+  for (const node of nodes(viewer.projects)) {
+    if (!byId.has(node.id)) byId.set(node.id, toProject(node));
+  }
+
+  for (const workspace of viewer.workspaces ?? []) {
+    // The workspace's own name is the fallback: `team` is null for a personal workspace.
+    const label = workspace.team?.name ?? workspace.name ?? null;
+    for (const node of nodes(workspace.team?.projects)) {
+      if (byId.has(node.id)) continue;
+      byId.set(node.id, {
+        ...toProject(node),
+        ...(label ? { workspaceName: label } : {}),
+      });
+    }
+  }
+
+  return [...byId.values()];
 }
 
 /**

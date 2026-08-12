@@ -1,5 +1,6 @@
 import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Text } from "./text";
 
 /**
  * Busy indicator.
@@ -41,7 +42,10 @@ export function PendingStatus({
       aria-live="polite"
       aria-atomic="true"
       data-pending-status={label ? "" : undefined}
-      className={cn("text-text-subtle flex items-center gap-1.5 text-xs", className)}
+      className={cn(
+        "text-text-subtle text-caption flex items-center gap-1.5",
+        className,
+      )}
     >
       {label ? (
         <>
@@ -64,8 +68,12 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-      <p className="text-text text-sm font-medium">{title}</p>
-      <p className="text-text-muted max-w-sm text-sm">{description}</p>
+      <Text asChild variant="label">
+        <p>{title}</p>
+      </Text>
+      <Text asChild variant="body" tone="muted">
+        <p className="max-w-sm">{description}</p>
+      </Text>
       {action && <div className="mt-2">{action}</div>}
     </div>
   );
