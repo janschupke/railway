@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      # Placeholder credentials: the build must not require real ones, and the
+      # env schema failing here is a legitimate CI failure.
+      - run: pnpm build
+        env:
+          RAILWAY_CLIENT_ID: ci
+          RAILWAY_CLIENT_SECRET: ci
+          SESSION_SECRET: ci-session-secret-at-least-32-characters
+          APP_URL: http://localhost:3000
+
+      # Checks the pinned OIDC metadata against Railway's live discovery document.
+      # Schema introspection is skipped without RAILWAY_TOKEN, which CI does not hold.
+      - run: pnpm verify:schema
