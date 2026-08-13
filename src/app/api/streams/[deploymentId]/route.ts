@@ -5,7 +5,7 @@ import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { streamCloser } from "@/lib/stream-route";
+import { streamCloser, streamDurationMs } from "@/lib/stream-route";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
@@ -152,10 +152,13 @@ async function handle(
     // onClose rather than a finally in the producer: the transport runs it on every
     // teardown path, including the one where the producer never returns at all.
     {
+      // The token above is captured once and never renewed for the life of this response,
+      // so the response may not outlive it. See streamDurationMs.
+      maxDurationMs: streamDurationMs(session),
       clientSignal: request.signal,
       // `reason` is what makes this worth having: a stream that ended because the tab
-      // closed and one that hit the fifteen-minute ceiling are the same line otherwise,
-      // and only the second is a problem.
+      // closed and one that hit the duration ceiling are the same line otherwise, and
+      // only the second is a problem.
       onClose: streamCloser("stream.closed", release, ({ reason, durationMs }) => ({
         deployment_id: deploymentId,
         phase,

@@ -362,4 +362,61 @@ describe("GET /api/streams/[deploymentId]", () => {
       expect.objectContaining({ phase: "deploy" }),
     );
   });
+
+  /*
+   * Scoped to this block rather than the file. Every case above reads a real stream to
+   * completion, and fake timers there would mean maintaining a manual clock for the
+   * keepalive interval in tests that have nothing to say about it.
+   */
+  describe("with fake timers", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      // On a whole second, so the second that `expiresAt` truncates away is not the
+      // difference between the assertion below passing and failing.
+      vi.setSystemTime(Date.UTC(2026, 0, 1, 12, 0, 0));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("closes when its access token expires, not at the full ceiling", async () => {
+      /*
+       * The token is captured once, at open, and requireSession renews only inside
+       * SESSION.REFRESH_SKEW_SECONDS — a third of STREAM.MAX_DURATION_MS. A stream that
+       * opened just outside the skew therefore held an upstream socket and a 2.5s poll
+       * for ten more minutes on a credential Railway had stopped accepting, and the log
+       * pane it was feeding went quiet without saying why.
+       */
+      const lifetimeSeconds = SESSION.REFRESH_SKEW_SECONDS + 100;
+      requireSession.mockResolvedValue({
+        ...session,
+        expiresAt: Math.floor(Date.now() / 1000) + lifetimeSeconds,
+      });
+      // A build that never finishes: the ceiling is the only thing that can end this.
+      monitorDeployment.mockImplementation(
+        () =>
+          ({
+            [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+          }) as AsyncIterable<never>,
+      );
+
+      const response = await stream(request("/api/streams/dep_1"), params("dep_1"));
+      let ended = false;
+      const body = readEvents(response).then(() => {
+        ended = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(lifetimeSeconds * 1000 - 1000);
+      expect(ended).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await body;
+
+      expect(ended).toBe(true);
+      // `deadline`, and a duration short of MAX_DURATION_MS: the token bound it, and the
+      // close line is where an operator can see which of the two did.
+      expect(
+        logRecords().find((record) => record.msg === "stream.closed"),
+      ).toMatchObject({ reason: "deadline", duration_ms: lifetimeSeconds * 1000 });
+      expect(lifetimeSeconds * 1000).toBeLessThan(STREAM.MAX_DURATION_MS);
+    });
+  });
 });

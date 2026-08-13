@@ -277,6 +277,16 @@ export async function* monitorDeployment(
       unsettledPolls = 0;
     } catch (error) {
       if (error instanceof RailwayApiError && error.kind === "auth") {
+        /*
+         * Fatal, and deliberately not retried — the same reasoning the watch route states
+         * at its own auth branch. This cannot be an expiry: the route clamps the stream's
+         * lifetime to what is left of the access token (streamDurationMs), so a token
+         * running out closes the connection and the browser's redial re-authenticates.
+         * What reaches here is a grant that was revoked or never covered this deployment,
+         * and polling either of those for the rest of the ceiling burns quota to arrive at
+         * the same refusal. describe() picks which of the three it was; the stream ends
+         * saying so rather than going quiet.
+         */
         queue.push({
           type: "error",
           message: reportError("railway.deploymentPoll", error, "errors.generic"),

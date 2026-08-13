@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/env";
-import { WATCH } from "@/lib/constants";
+import { STREAM, WATCH } from "@/lib/constants";
 import type { Container } from "@/lib/railway/types";
 
 const session = {
@@ -141,6 +141,37 @@ describe("GET /api/watch/[projectId]", () => {
     const callsAtFailure = getProjectContainers.mock.calls.length;
     await vi.advanceTimersByTimeAsync(POLL_MS * 4);
     expect(getProjectContainers).toHaveBeenCalledTimes(callsAtFailure);
+  });
+
+  it("stops with the token it captured rather than at the transport ceiling", async () => {
+    /*
+     * The access token is read once, at open, and nothing renews it for the life of the
+     * response — the proxy refreshes on navigations, and a held stream is not one. On the
+     * transport's own fifteen-minute ceiling this loop therefore kept polling Railway for
+     * up to ten minutes past the point the credential died, because requireSession
+     * guarantees only the five-minute refresh skew behind it.
+     */
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const lifetimeMs = 400_000;
+    requireSession.mockResolvedValue({
+      ...session,
+      expiresAt: Math.floor(Date.now() / 1000) + lifetimeMs / 1000,
+    });
+    getProjectContainers.mockResolvedValue({ containers: [] });
+
+    // No reader, for the reason the backoff case below states: the producer runs on
+    // construction, and a reader that cancelled would end the stream on its own terms.
+    await watch(request("/api/watch/p1?environment=e1"), params("p1"));
+
+    await vi.advanceTimersByTimeAsync(lifetimeMs);
+    const atExpiry = getProjectContainers.mock.calls.length;
+    expect(atExpiry).toBeGreaterThan(1);
+
+    // On to where the ceiling alone would have ended it. Nothing more was spent, and the
+    // browser's redial is what re-authenticates.
+    await vi.advanceTimersByTimeAsync(STREAM.MAX_DURATION_MS - lifetimeMs);
+    expect(getProjectContainers).toHaveBeenCalledTimes(atExpiry);
+    random.mockRestore();
   });
 
   it("backs off a transient failure instead of hammering Railway", async () => {

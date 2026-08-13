@@ -7,7 +7,7 @@ import { fingerprint } from "@/lib/railway/watch-fingerprint";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { streamCloser } from "@/lib/stream-route";
+import { streamCloser, streamDurationMs } from "@/lib/stream-route";
 import { sleep } from "@/lib/utils";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { WATCH } from "@/lib/constants";
@@ -114,10 +114,11 @@ async function handle(
             /*
              * The access token was captured when this stream opened, and the proxy
              * refreshes on navigations — which a held response is not. An *expiry* is
-             * handled by sseResponse's fifteen-minute ceiling instead: the connection
-             * closes, the browser reconnects, and requireSession mints a fresh token.
-             * Reaching here means the authorization was revoked, and silently retrying a
-             * revoked grant just burns quota.
+             * handled by the duration ceiling below instead, which streamDurationMs clamps
+             * to whatever is left of that token: the connection closes, the browser
+             * reconnects, and requireSession mints a fresh one. Reaching here means the
+             * authorization was revoked or never covered this project, and silently
+             * retrying either just burns quota.
              */
             emit.send("error", { message: t("errors.sessionExpired") });
             return;
@@ -142,6 +143,9 @@ async function handle(
       }
     },
     {
+      // Bounded by the token this loop polls with, not only by the transport's ceiling —
+      // the branch above depends on it. See streamDurationMs.
+      maxDurationMs: streamDurationMs(session),
       clientSignal: request.signal,
       onClose: streamCloser("watch.closed", release, ({ reason, durationMs }) => ({
         project_id: projectId,

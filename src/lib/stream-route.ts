@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { RailwaySession } from "@/lib/auth/session";
+import { STREAM } from "@/lib/constants";
 import { requestContext, runWithRequestContext } from "@/lib/log/context";
 import { log, type LogEvent, type LogFields } from "@/lib/logger";
 
@@ -16,9 +18,42 @@ type SseCloseInfo = { reason: string; durationMs: number };
  * the event names differ because bounded, stable `msg` values are a rule. A helper
  * covering that would take a callback per branch and be longer than what it replaced.
  *
- * What is genuinely identical is teardown, and teardown is the part with a defect
- * history — a slot that is not released strands a log pane until the process restarts.
+ * What is genuinely identical is the pair below, and both are parts with a defect history:
+ * teardown, where a slot that is not released strands a log pane until the process
+ * restarts, and the duration ceiling, where a stream outliving its credential streams
+ * nothing at all for as long as it holds the connection.
  */
+
+/**
+ * How long this stream may run: the transport's ceiling, or what is left of the access
+ * token, whichever comes first.
+ *
+ * Both routes capture `session.accessToken` once, at open, and nothing refreshes it after
+ * that — the proxy renews on navigations, and a held response is not one. So the stream's
+ * own lifetime is the only thing standing between a token expiring and a connection that
+ * keeps polling Railway with a credential it has already rejected. STREAM.MAX_DURATION_MS
+ * alone does not do that job: `requireSession` renews only inside
+ * SESSION.REFRESH_SKEW_SECONDS, which is a third of the ceiling, so a stream opened with
+ * five minutes and one second of token life ran ten more on a dead one.
+ *
+ * Closing early is not a loss. It is the same teardown the ceiling already performs, and
+ * EventSource answers it by redialling — which arrives as a fresh request, through
+ * `requireSession`, holding a fresh token. The alternative reads to the user as a build
+ * whose log pane stops.
+ *
+ * Clamped rather than asserted against the skew, because an assertion couples two
+ * constants in unrelated blocks and holds only until someone edits either one. This holds
+ * whatever they become.
+ *
+ * `expiresAt` is epoch SECONDS — see RailwaySession. No floor at zero: on this path the
+ * result cannot be non-positive, since requireSession refreshes below the skew or throws,
+ * making SESSION.REFRESH_SKEW_SECONDS the smallest value it can return. A negative delay
+ * would in any case reach setTimeout as an immediate one, which is a redial rather than a
+ * hang.
+ */
+export function streamDurationMs(session: Pick<RailwaySession, "expiresAt">): number {
+  return Math.min(STREAM.MAX_DURATION_MS, session.expiresAt * 1000 - Date.now());
+}
 
 /**
  * Runs a stream's close bookkeeping: release the slot, then record it in the scope the
