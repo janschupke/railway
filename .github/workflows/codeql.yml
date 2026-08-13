@@ -1,0 +1,47 @@
+name: CodeQL
+
+# Its own workflow, not a job in ci.yml, for one reason: it needs
+# `security-events: write` to upload results, and ci.yml declares `contents: read` at
+# workflow level so every job there inherits a read-only floor. Adding this to that file
+# would mean either widening the floor for jobs that do not need it, or a per-job
+# override that is easy to read as the default. A separate file keeps the wider grant
+# visible in the place it applies.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  # A weekly run is what catches a newly-published query against code nobody has touched.
+  schedule:
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No build step and no autobuild: this is a TypeScript codebase, so CodeQL reads
+      # the source directly. `pnpm build` here would cost three minutes and tell it
+      # nothing it cannot already see.
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Adds the query pack aimed at exactly this app's shape — a server handling
+          # tokens and talking to an upstream API.
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@v3

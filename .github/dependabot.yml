@@ -1,0 +1,26 @@
+version: 2
+
+# `pnpm audit --prod` in ci.yml is the gate; this is what keeps it from being the only
+# thing that ever notices. An advisory against an unchanged dependency tree is invisible
+# to a push-triggered check — nobody pushed.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR per group rather than per package: this app has 14 runtime dependencies and
+    # a review queue of 14 identical patch bumps is a queue nobody reads.
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+    open-pull-requests-limit: 5
+
+  # The reason SHA-pinning the actions is maintainable rather than debt: without
+  # something bumping them, a pinned digest is a version that silently stops receiving
+  # fixes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

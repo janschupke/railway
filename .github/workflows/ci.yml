@@ -5,6 +5,14 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Weekly, for the dependency audit.
+  #
+  # `pnpm audit --prod` is a headline security gate, and on push/pull_request alone it can
+  # only ever fire when someone happens to push. A high advisory published against a
+  # dependency tree nobody has touched is exactly the case it exists for, and exactly the
+  # case those triggers miss.
+  schedule:
+    - cron: "0 5 * * 1"
 
 # A new push supersedes the run in flight for the same ref.
 concurrency:
@@ -99,11 +107,31 @@ jobs:
       - name: Per-route bundle budget
         run: pnpm size
 
-  e2e:
-    name: End-to-end and accessibility
+      # A few kB of manifest, not the 100+ MB .next tree. Without it a budget failure
+      # cannot be diffed after the fact — the run tells you a route grew and the evidence
+      # is discarded with the runner.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: route-bundle-stats
+          path: .next/diagnostics/route-bundle-stats.json
+          retention-days: 7
+
+  browser:
+    name: End-to-end, accessibility and Lighthouse
     runs-on: ubuntu-latest
-    # workers:1 by design, so this is the longest job and the ceiling is generous.
-    timeout-minutes: 25
+    # One job, because both halves need the same install, the same production build, the
+    # same chromium and the same fake Railway. Splitting them paid for all four twice —
+    # roughly three minutes of duplicated setup per run — to gain no isolation worth
+    # having, since a broken build fails both anyway.
+    #
+    # Rejected: keeping them apart and sharing `.next` as an artifact. That is 100+ MB up
+    # and down, which costs more than the rebuild it saves and couples the two jobs'
+    # failure modes through a cache instead of through a build.
+    #
+    # workers:1 by design, and the Lighthouse run drives a real browser at /dashboard,
+    # whose SSE stream never closes — so the ceiling covers both and is generous.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -113,7 +141,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Both Playwright projects run on the Chromium engine, so only chromium is downloaded.
+      # Both Playwright projects run on the Chromium engine, and lh-auth.ts drives the
+      # real OAuth flow with Playwright too, so one browser serves the whole job.
       #
       # The install stays unconditional. It is idempotent — it skips a browser already in
       # the cache directory — and it has to run regardless for the system libraries, which
@@ -144,34 +173,6 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
-
-  lighthouse:
-    name: Lighthouse (performance, a11y, budgets)
-    runs-on: ubuntu-latest
-    # The job most able to hang rather than fail: it drives a real browser at /dashboard,
-    # whose SSE stream never closes, behind a readiness loop that waits up to two minutes.
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      # lh-auth.ts drives the real OAuth flow with Playwright to reach the dashboard.
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
-
-      - run: pnpm build
 
       # Backgrounded because both servers must stay up for the whole Lighthouse run;
       # the script exits only on failure, and prints "ready" once both answer.
@@ -224,7 +225,7 @@ jobs:
   required:
     name: All checks
     runs-on: ubuntu-latest
-    needs: [quality, build, e2e, lighthouse, schema]
+    needs: [quality, build, browser, schema]
     if: always()
     timeout-minutes: 5
     steps:
