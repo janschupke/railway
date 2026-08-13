@@ -61,6 +61,17 @@ describe("AppHeader", () => {
     }
   });
 
+  it("puts the brand and the controls on one row", async () => {
+    // The bar regressed to a vertical stack when it moved onto the shared column
+    // primitive without passing its layout variant, and every other test here still
+    // passed: the brand, the toggle and the sign-out button were all present, stacked.
+    render(await AppHeader({ user: { name: "Ada Lovelace" } }));
+    const bar = screen.getByRole("banner").firstElementChild;
+
+    expect(bar).toHaveClass("flex", "items-center", "justify-between");
+    expect(bar).not.toHaveClass("space-y-6");
+  });
+
   it("sizes the identity and the sign-out label to the same step", async () => {
     // The reported complaint: these two sit side by side and disagreed, because
     // neither had chosen a size — they had each reached for a different Tailwind step.

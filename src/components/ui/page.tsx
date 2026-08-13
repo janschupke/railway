@@ -82,7 +82,16 @@ export function PageMain({
   );
 }
 
-/** The inner column of the header and footer bars, which line up with PageMain. */
+/**
+ * The inner column of the header and footer bars, which line up with PageMain.
+ *
+ * `column`'s own defaults are page-shaped — a stacked column with page padding — because
+ * five of the seven callers are routes. A bar is neither, so both differing variants are
+ * defaulted here rather than left to the caller. Passing only `pad` is what broke the
+ * header and the footer: both rendered with no `layout`, took `stack`, and became
+ * `space-y-6` blocks with the brand above the controls and no `justify-between` at all.
+ * Anything added to `column` that a bar needs differently belongs in this list.
+ */
 export function BarInner({
   className,
   width,
@@ -92,7 +101,10 @@ export function BarInner({
 }: React.ComponentProps<"div"> & VariantProps<typeof column>) {
   return (
     <div
-      className={cn(column({ width, layout, pad: pad ?? "bar" }), className)}
+      className={cn(
+        column({ width, layout: layout ?? "bar", pad: pad ?? "bar" }),
+        className,
+      )}
       {...props}
     />
   );

@@ -36,6 +36,19 @@ describe("Footer", () => {
     }
   });
 
+  it("puts the note and the links on one row", async () => {
+    /*
+     * This regressed to a vertical stack when the bar moved onto the shared column
+     * primitive without passing its layout variant. Every assertion in this file passed
+     * throughout — the links were all present and correct, one under the other.
+     */
+    render(await Footer());
+    const bar = screen.getByRole("contentinfo").firstElementChild;
+
+    expect(bar).toHaveClass("flex", "items-center", "justify-between");
+    expect(bar).not.toHaveClass("space-y-6");
+  });
+
   it("says the app is not Railway", async () => {
     // The app is styled after Railway and talks to Railway's API from the user's own
     // account; leaving that unstated is the sort of thing a reasonable person misreads.
