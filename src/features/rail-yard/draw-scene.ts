@@ -198,7 +198,8 @@ function shedBackBoxes(structure: Extract<SceneStructure, { kind: "shed" }>) {
     {
       at: [0, half - SHED.wallThickness, 0] as const,
       size: [structure.length, SHED.wallThickness, structure.height] as const,
-      fill: "structure" as const,
+      // The inside of the building, which is what the doorways frame. See the token.
+      fill: "structureShade" as const,
     },
   ];
 }

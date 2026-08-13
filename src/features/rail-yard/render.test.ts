@@ -28,7 +28,7 @@ import {
   viewDepth,
   type ViewTransform,
 } from "./view";
-import { boxDepth, drawFrame, shedSortedBoxes } from "./render";
+import { assemblyDepth, drawFrame, shedFrontBoxes, shedRoofBox } from "./render";
 
 /**
  * A palette of distinguishable placeholders.
@@ -275,6 +275,36 @@ describe("drawFrame", () => {
     return recorder;
   };
 
+  it("paints a vehicle's parts in the order its spec stacks them", () => {
+    /*
+     * The regression for "wagons and engines render a grey square". Sorting *inside* a
+     * vehicle is wrong: a wagon's frame runs its whole length while the front bogie sits
+     * under the east end of it, so the bogie's centre is nearer the camera and it was painted
+     * on top of the frame — a grey rectangle over the deck at the leading end.
+     *
+     * Read off the recording rather than off the code. `drawBox` washes every roof with
+     * `faceLit` exactly once, so the fill set immediately before each of those is that box's
+     * own colour, in draw order — and a wagon's spec is five `metal` parts under one
+     * `structureTrim` deck.
+     */
+    const fills = frame(yard(600))
+      .ops.filter((entry) => entry.op === "set:fillStyle")
+      .map((entry) => entry.args[0] as string);
+
+    const painted: string[] = [];
+    for (let index = 1; index < fills.length; index++) {
+      if (fills[index] === PALETTE.faceLit) painted.push(fills[index - 1]!);
+    }
+
+    const wagon = WAGON.boxes.map((box) => PALETTE[box.fill as keyof typeof PALETTE]);
+    const found = painted.some((_, start) =>
+      wagon.every((colour, offset) => painted[start + offset] === colour),
+    );
+    expect(found, `wagon spec order not found in ${painted.length} painted boxes`).toBe(
+      true,
+    );
+  });
+
   it("corrugates the freight on the belt, not only the freight on wagons", () => {
     /*
      * The panels are what make a container read as a container rather than as a coloured
@@ -411,9 +441,8 @@ describe("drawFrame", () => {
      * Checked in world units rather than on screen, because that is where the mistake is:
      * the eaves oversail the wall by `SHED.eaves` and by nothing else.
      */
-    const boxes = shedSortedBoxes(SHED_STRUCTURE);
-    const roof = boxes.find((box) => box.order === "over")!;
-    const walls = boxes.filter((box) => box !== roof);
+    const walls = shedFrontBoxes(SHED_STRUCTURE);
+    const roof = shedRoofBox(SHED_STRUCTURE);
 
     expect(walls.every((box) => box.at[1] === 0)).toBe(true);
     expect(Math.max(...walls.map((box) => box.at[2] + box.size[2]))).toBe(
@@ -435,12 +464,11 @@ describe("drawFrame", () => {
      * is what makes a roof win against everything it spans.
      */
     const pose = at(SHED_STRUCTURE.at, shedFrontY());
-    const boxes = shedSortedBoxes(SHED_STRUCTURE);
-    const roof = boxes.find((box) => box.order === "over")!;
-    const lintel = boxes.find((box) => box.order === undefined)!;
 
     // Nearer the camera is a smaller depth, and nearer is painted later.
-    expect(boxDepth(pose, roof)).toBeLessThan(boxDepth(pose, lintel));
+    expect(assemblyDepth(pose, [shedRoofBox(SHED_STRUCTURE)], 0, "over")).toBeLessThan(
+      assemblyDepth(pose, shedFrontBoxes(SHED_STRUCTURE)),
+    );
   });
 
   it("frames a locomotive standing inside it, doorway and all", () => {
@@ -505,7 +533,7 @@ describe("drawFrame", () => {
   });
 });
 
-describe("boxDepth", () => {
+describe("assemblyDepth", () => {
   /*
    * The painter's sort key, and the whole of five reported defects. Every one of them was a
    * pair of solids that overlap on screen being ordered by a rule that could not tell them
@@ -542,21 +570,28 @@ describe("boxDepth", () => {
       fill: "metal",
     } as const;
 
-    expect(boxDepth(pose, spreader)).toBeLessThan(boxDepth(pose, carried));
+    expect(assemblyDepth(pose, [spreader])).toBeLessThan(
+      assemblyDepth(pose, [carried]),
+    );
   });
 
-  it("takes a wagon's containers with the wagon rather than by their own height", () => {
-    // Sanity on the ordinary case: two boxes on one flat still sort bottom up.
+  it("takes a whole vehicle at once, parts and all", () => {
+    /*
+     * The unit is the assembly, not the box, and this is why. A wagon's frame runs its whole
+     * length while its front bogie sits under the east end of it, so the bogie's own centre
+     * is nearer the camera than the frame's — sorted apart, the bogie was painted on top of
+     * the frame as a grey square. Together they are one solid at one distance.
+     */
     const pose = at(1280, TRACK.ROAD_PITCH * 2);
-    const [deck] = WAGON.boxes.slice(-1);
-    const container = {
-      at: CONTAINER.at,
-      size: CONTAINER.size,
-      fill: "cargo",
-    } as const;
-    expect(boxDepth(pose, container, WAGON.length)).toBeLessThan(
-      boxDepth(pose, deck!, WAGON.length),
+    const frame = WAGON.boxes.find((box) => box.size[0] === WAGON.length)!;
+    const bogie = WAGON.boxes[1]!;
+    expect(assemblyDepth(pose, [bogie], WAGON.length)).toBeLessThan(
+      assemblyDepth(pose, [frame], WAGON.length),
     );
+    // The whole wagon is one key, and it lies between the parts that made it up.
+    const whole = assemblyDepth(pose, WAGON.boxes, WAGON.length);
+    expect(whole).toBeLessThan(assemblyDepth(pose, [WAGON.boxes[0]!], WAGON.length));
+    expect(whole).toBeGreaterThan(assemblyDepth(pose, [bogie], WAGON.length));
   });
 
   it("a canopy wins against the whole of what it spans", () => {
@@ -571,7 +606,6 @@ describe("boxDepth", () => {
       at: [-GANTRY.beamWidth / 2, -span - GANTRY.legDepth / 2, GANTRY.height],
       size: [GANTRY.beamWidth, span + GANTRY.legDepth, GANTRY.beamHeight],
       fill: "structureTrim",
-      order: "over",
     } as const;
     const leg = {
       at: [-GANTRY.legWidth / 2, -GANTRY.legDepth / 2, 0],
@@ -580,12 +614,13 @@ describe("boxDepth", () => {
     } as const;
 
     const beamPose = at(PORTAL_X, GANTRY_STRUCTURE.far);
-    expect(boxDepth(beamPose, beam)).toBeLessThan(
-      boxDepth(at(PORTAL_X, GANTRY_STRUCTURE.near), leg),
+    const legPose = at(PORTAL_X, GANTRY_STRUCTURE.near);
+    expect(assemblyDepth(beamPose, [beam], 0, "over")).toBeLessThan(
+      assemblyDepth(legPose, [leg]),
     );
     // And without the flag it loses, which is the defect this replaced.
-    expect(boxDepth(beamPose, { ...beam, order: undefined })).toBeGreaterThan(
-      boxDepth(at(PORTAL_X, GANTRY_STRUCTURE.near), leg),
+    expect(assemblyDepth(beamPose, [beam])).toBeGreaterThan(
+      assemblyDepth(legPose, [leg]),
     );
   });
 
@@ -601,7 +636,6 @@ describe("boxDepth", () => {
       at: [-CONVEYOR.PITCH / 2, -CONVEYOR.WIDTH / 2, 0],
       size: [670 + CONVEYOR.PITCH, CONVEYOR.WIDTH, CONVEYOR.DECK_Z],
       fill: "structureTrim",
-      order: "under",
     } as const;
     const freight = {
       at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, CONVEYOR.DECK_Z],
@@ -609,9 +643,9 @@ describe("boxDepth", () => {
       fill: "cargo",
     } as const;
 
-    expect(boxDepth(head, deck)).toBeGreaterThan(boxDepth(head, freight));
-    expect(boxDepth(head, { ...deck, order: undefined })).toBeLessThan(
-      boxDepth(head, freight),
+    expect(assemblyDepth(head, [deck], 0, "under")).toBeGreaterThan(
+      assemblyDepth(head, [freight]),
     );
+    expect(assemblyDepth(head, [deck])).toBeLessThan(assemblyDepth(head, [freight]));
   });
 });

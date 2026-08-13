@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { logRecords, rawLogLines } from "@/test/log-capture";
 import { RailwayApiError } from "@/lib/railway/errors";
 import { runWithRequestContext, setSubjectId } from "@/lib/log/context";
@@ -150,5 +150,29 @@ describe("log", () => {
     // LOG_LEVEL is "debug" in tests, so trace must be the one that is dropped.
     log.debug("railway.request");
     expect(logRecords()).toHaveLength(1);
+  });
+
+  it("writes nothing on the edge runtime, which has no stdout at all", async () => {
+    /*
+     * Next compiles `instrumentation.ts` for both runtimes, so this module reaches the edge
+     * one whether or not anything there ever calls it — and a static `process.stdout` in an
+     * edge bundle is a build warning on every run, correctly. `NEXT_RUNTIME` is a build-time
+     * constant there, so the branch folds and the API is gone from the bundle rather than
+     * merely unreached.
+     *
+     * Re-imported rather than asserted through the live instance, because the destination is
+     * chosen once when the module loads — which is the whole point of it folding.
+     */
+    const restore = process.env.NEXT_RUNTIME;
+    process.env.NEXT_RUNTIME = "edge";
+    vi.resetModules();
+    try {
+      const edge = await import("./logger");
+      edge.log.error("railway.request", { issues: "EDGE-CANARY" });
+      expect(rawLogLines().join("")).not.toContain("EDGE-CANARY");
+    } finally {
+      process.env.NEXT_RUNTIME = restore;
+      vi.resetModules();
+    }
   });
 });

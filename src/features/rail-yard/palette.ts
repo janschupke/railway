@@ -21,6 +21,18 @@ export const RAIL_YARD_TOKENS = {
   rail: "--rc-yard-rail",
   structure: "--rc-yard-structure",
   structureTrim: "--rc-yard-structure-trim",
+  /**
+   * The inside of a building, seen through its doorways.
+   *
+   * A shed's back wall was painted in `structure` like its front, so the piers between the
+   * doorways and the wall behind them were one flat mass and the doorway stopped reading as
+   * an opening — which is what "the front pillars are the wrong height" was. They were the
+   * right height and you could not see where they ended.
+   *
+   * Darker than `structure` in both themes, which is the direction contrast.test.ts asserts:
+   * an interior with no light in it is the one shading cue that does not need a light source.
+   */
+  structureShade: "--rc-yard-structure-shade",
   depot: "--rc-yard-depot",
   smoke: "--rc-yard-smoke",
   signalGo: "--rc-yard-signal-go",

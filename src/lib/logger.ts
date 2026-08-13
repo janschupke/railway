@@ -48,8 +48,18 @@ const level =
  * assertable over the real code path. It costs nothing here: on Railway stdout is a pipe,
  * and pipe writes are already buffered and non-blocking (only TTYs and regular files are
  * synchronous on POSIX), and nothing in this design logs per request or per log line.
+ *
+ * The edge runtime has no `process.stdout` at all, and this module reaches it through
+ * `instrumentation.ts`, which Next compiles for both. So the branch is real rather than
+ * defensive: `NEXT_RUNTIME` is a build-time constant there, the ternary folds, and the edge
+ * bundle no longer contains a `node:` API it cannot call. Every request that has anywhere to
+ * log to is served by the node runtime, and dropping a line nobody could have read is the
+ * only honest thing the other branch can do.
  */
-const sink = { write: (chunk: string) => void process.stdout.write(chunk) };
+const sink =
+  process.env.NEXT_RUNTIME === "edge"
+    ? { write: () => {} }
+    : { write: (chunk: string) => void process.stdout.write(chunk) };
 
 /**
  * A backstop, not the control.

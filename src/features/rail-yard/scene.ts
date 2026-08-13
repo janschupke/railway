@@ -418,10 +418,10 @@ export const RAIL_YARD_SCENE: RailScene = {
       at: 380,
       length: 220,
       depth: 74,
-      // Tall enough that the lintel over a 64-unit doorway is still a lintel. See
+      // Tall enough that the lintel over a 68-unit doorway is still a lintel. See
       // SHED.doorHeight for why the doorway is measured against the screen rather than
       // against the locomotive.
-      height: 82,
+      height: 86,
       bays: 2,
     },
     /*
@@ -437,7 +437,14 @@ export const RAIL_YARD_SCENE: RailScene = {
       // The near leg stands clear of the eastbound express's ballast rather than on the
       // edge of it — that road carries the fastest thing in the scene now.
       near: P * 2 - 22,
-      far: P * 4 + 26,
+      /*
+       * And the far leg stands well clear behind the belt rather than in it. At P*4 + 26 its
+       * foot came down among the containers queued along the belt and the leg read as running
+       * into the conveyor — the leg is sixty units behind them, but depth is worth only
+       * `VIEW.TILT` of screen height and a container is worth all of its own. Two road pitches
+       * back is what buys the foot enough clear ground on screen to stand on.
+       */
+      far: P * 6,
       travel: [950, 1490],
     },
     /*

@@ -23,7 +23,8 @@
     "knip": "knip",
     "lh:auth": "node --no-warnings --experimental-strip-types scripts/lh-auth.ts",
     "serve:e2e": "node --no-warnings --experimental-strip-types scripts/serve-e2e.ts",
-    "lighthouse": "pnpm lh:auth && lhci autorun"
+    "lh:collect": "lhci autorun",
+    "lighthouse": "node --no-warnings --experimental-strip-types scripts/lighthouse.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

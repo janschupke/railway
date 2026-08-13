@@ -252,6 +252,7 @@
   --rc-yard-tie: var(--plum-700);
   --rc-yard-rail: var(--gray-400);
   --rc-yard-structure: var(--plum-600);
+  --rc-yard-structure-shade: var(--plum-800);
   --rc-yard-structure-trim: var(--gray-600);
   --rc-yard-depot: var(--violet-700);
   --rc-yard-smoke: rgb(165 165 181 / 0.2);
@@ -354,6 +355,7 @@
     --rc-yard-tie: var(--gray-400);
     --rc-yard-rail: var(--gray-600);
     --rc-yard-structure: #ffffff;
+    --rc-yard-structure-shade: var(--gray-300);
     --rc-yard-structure-trim: var(--gray-500);
     --rc-yard-depot: var(--violet-600);
     --rc-yard-smoke: rgb(92 92 107 / 0.16);
@@ -443,6 +445,7 @@
   --rc-yard-tie: var(--gray-400);
   --rc-yard-rail: var(--gray-600);
   --rc-yard-structure: #ffffff;
+  --rc-yard-structure-shade: var(--gray-300);
   --rc-yard-structure-trim: var(--gray-500);
   --rc-yard-depot: var(--violet-600);
   --rc-yard-smoke: rgb(92 92 107 / 0.16);
@@ -526,6 +529,7 @@
   --rc-yard-tie: var(--plum-700);
   --rc-yard-rail: var(--gray-400);
   --rc-yard-structure: var(--plum-600);
+  --rc-yard-structure-shade: var(--plum-800);
   --rc-yard-structure-trim: var(--gray-600);
   --rc-yard-depot: var(--violet-700);
   --rc-yard-smoke: rgb(165 165 181 / 0.2);

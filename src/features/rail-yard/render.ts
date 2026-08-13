@@ -58,11 +58,20 @@ export type Layer = {
 };
 
 /**
- * A group of boxes sharing one pose: a vehicle, a building, a piece of machinery.
+ * One rigid assembly, and the unit the painter sorts: a vehicle, a wall, a gantry leg.
  *
- * A convenience for building the frame rather than a unit of sorting — the sort takes the
- * boxes apart again. A vehicle carries a `nose` offset because its spec is written forward
- * from the rear coupling while the simulation tracks the leading one.
+ * The boxes inside it are drawn in the order they are listed, and that order is the spec's
+ * — bottom up, which is how the vehicle specs in config.ts are written. Sorting *inside* an
+ * assembly was tried and is wrong: a wagon's frame runs the whole length while its front
+ * bogie sits under the east end of it, so the bogie's centre is nearer the camera than the
+ * frame's and it was painted on top as a grey square. Two boxes of one object that overlap
+ * on screen are stacked, not sorted, and the author already knew the stacking order.
+ *
+ * So anything that genuinely has to interleave with other objects is its own assembly. That
+ * is why a gantry is five of them rather than one: a train passes between its legs.
+ *
+ * A vehicle carries a `nose` offset because its spec is written forward from the rear
+ * coupling while the simulation tracks the leading one.
  */
 type Drawable = {
   readonly pose: Pose;
@@ -74,20 +83,23 @@ type Drawable = {
   /** Set for a loaded container: the box to draw corrugation on. */
   readonly ribbed: Box | null;
   readonly ribs: number;
+  /**
+   * How to resolve an assembly too long to be ordered by a point.
+   *
+   * Its centre decides, for anything roughly as deep as it is wide — which is everything in
+   * the yard but three. A gantry beam spans both legs, a shed roof spans both walls, and a
+   * belt deck spans the whole line of freight standing on it: their centres sit behind
+   * things they are in front of, and in front of things they are behind.
+   *
+   * So they say which way they resolve. `over` keys on the nearest corner and wins against
+   * everything it spans — a canopy. `under` keys on the furthest and loses to all of it — a
+   * floor. Both are properties of the object rather than tuning: nothing at the belt is
+   * behind the belt, and nothing under a roof is above it.
+   */
+  readonly order?: "over" | "under";
 };
 
-/** One box, posed, with the distance from the camera the painter orders it by. */
-type Solid = {
-  readonly key: number;
-  readonly pose: Pose;
-  readonly box: Box;
-  readonly nose: number;
-  readonly cargo: Cargo | null;
-  /** Corrugation, for a container. Zero for every other solid in the yard. */
-  readonly ribs: number;
-};
-
-/** A contact shadow, sorted alongside the solids so two of them stack as their bodies do. */
+/** A contact shadow, sorted alongside the bodies so two of them stack as their vehicles do. */
 type Contact = {
   readonly key: number;
   readonly pose: Pose;
@@ -112,7 +124,12 @@ const vehicle = (
   ribs,
 });
 
-const standing = (x: number, y: number, boxes: readonly Box[]): Drawable => ({
+const standing = (
+  x: number,
+  y: number,
+  boxes: readonly Box[],
+  order?: Drawable["order"],
+): Drawable => ({
   pose: { x, y, angle: 0 },
   boxes,
   nose: 0,
@@ -120,34 +137,51 @@ const standing = (x: number, y: number, boxes: readonly Box[]): Drawable => ({
   shadow: null,
   ribbed: null,
   ribs: 0,
+  order,
 });
 
 /**
- * How far a box is from the camera.
+ * How far an assembly is from the camera.
  *
- * Its centre, for anything roughly as deep as it is wide — which is every solid in the yard
- * but the three that declare an `order`. Those take an extreme corner instead: see the field
- * on `Box` for why a beam, a roof and a belt deck cannot be ordered by a point.
+ * Measured over the box its boxes all fit inside, so a vehicle sorts as the vehicle it is
+ * rather than as whichever of its parts happens to lie nearest.
  *
  * Exported because a sort tested through a rendered frame is tested by accident: the
  * recording says what was painted, not which of two things the painter thought was nearer.
  */
-export function boxDepth(pose: Pose, box: Box, nose: number = 0): number {
-  const [length, width, height] = box.size;
-  const west = box.at[0] - nose;
-  const bottom = box.at[2];
+export function assemblyDepth(
+  pose: Pose,
+  boxes: readonly Box[],
+  nose: number = 0,
+  order?: Drawable["order"],
+): number {
+  let west = Infinity;
+  let east = -Infinity;
+  let right = Infinity;
+  let left = -Infinity;
+  let floor = Infinity;
+  let ceiling = -Infinity;
+  for (const box of boxes) {
+    west = Math.min(west, box.at[0]);
+    east = Math.max(east, box.at[0] + box.size[0]);
+    right = Math.min(right, box.at[1]);
+    left = Math.max(left, box.at[1] + box.size[1]);
+    floor = Math.min(floor, box.at[2]);
+    ceiling = Math.max(ceiling, box.at[2] + box.size[2]);
+  }
+  if (west > east) return viewDepth(pose.x, pose.y);
 
-  if (box.order === undefined) {
-    const [x, y] = localToWorld(pose, west + length / 2, box.at[1] + width / 2);
-    return viewDepth(x, y, bottom + height / 2);
+  if (order === undefined) {
+    const [x, y] = localToWorld(pose, (west + east) / 2 - nose, (right + left) / 2);
+    return viewDepth(x, y, (floor + ceiling) / 2);
   }
 
-  const over = box.order === "over";
+  const over = order === "over";
   let key = over ? Infinity : -Infinity;
-  for (const forward of [west, west + length]) {
-    for (const left of [box.at[1], box.at[1] + width]) {
-      const [x, y] = localToWorld(pose, forward, left);
-      for (const z of [bottom, bottom + height]) {
+  for (const forward of [west - nose, east - nose]) {
+    for (const across of [right, left]) {
+      const [x, y] = localToWorld(pose, forward, across);
+      for (const z of [floor, ceiling]) {
         const corner = viewDepth(x, y, z);
         key = over ? Math.min(key, corner) : Math.max(key, corner);
       }
@@ -253,24 +287,18 @@ function placeTrain(
 }
 
 /**
- * The parts of a shed that enter the depth sort: its front wall, and its roof.
+ * A shed's front wall: a lintel over a row of piers.
  *
- * The front wall is a lintel and a row of piers. Piers rather than a hole punched through a
- * solid wall: cutting one would need `globalCompositeOperation`, which is a second rendering
- * mode to reason about and a new op for the recording fake to learn. `bays + 1` uprights
- * between `bays` doorways is the same picture, in the same box walker, at five fills.
+ * Piers rather than a hole punched through a solid wall: cutting one would need
+ * `globalCompositeOperation`, which is a second rendering mode to reason about and a new op
+ * for the recording fake to learn. `bays + 1` uprights between `bays` doorways is the same
+ * picture, in the same box walker, at five fills.
  *
- * All of it is measured from the **front plane**, which is where the drawable's pose already
- * puts it. The wall was measured from the shed's centre as well, so the offset went on twice
- * and it stood a whole depth in front of the building.
- *
- * The roof is here rather than in the static layer, and that is the rest of "the roof isn't
- * touching the walls". Baked, it was painted before the front wall — so the wall, which
- * stands `SHED.eaves` *behind* the roof's fascia, was drawn over it, and the wall's own lit
- * top face landed in the gap as a pale band between the two. It is `over` because a roof is
- * over everything it spans, including the walls holding it up.
+ * Measured from the **front plane**, which is where the drawable's pose already puts it. They
+ * were measured from the shed's centre as well, so the offset went on twice and the wall
+ * stood a whole depth in front of the building.
  */
-export function shedSortedBoxes(
+export function shedFrontBoxes(
   structure: Extract<SceneStructure, { kind: "shed" }>,
 ): Box[] {
   const boxes: Box[] = [
@@ -278,16 +306,6 @@ export function shedSortedBoxes(
       at: [0, 0, SHED.doorHeight],
       size: [structure.length, SHED.wallThickness, structure.height - SHED.doorHeight],
       fill: "structure",
-    },
-    {
-      at: [-SHED.eaves, -SHED.eaves, structure.height],
-      size: [
-        structure.length + SHED.eaves * 2,
-        structure.depth + SHED.eaves * 2,
-        SHED.roofThickness,
-      ],
-      fill: "structureTrim",
-      order: "over",
     },
   ];
 
@@ -301,6 +319,27 @@ export function shedSortedBoxes(
     });
   }
   return boxes;
+}
+
+/**
+ * A shed's roof, as its own assembly.
+ *
+ * Its own, and out of the static layer, which is the rest of "the roof isn't touching the
+ * walls". Baked, it was painted before the front wall — so the wall, which stands
+ * `SHED.eaves` *behind* the roof's fascia, was drawn over it and left its own lit top face
+ * showing through as a pale band between the two. `over` because a roof is over everything it
+ * spans, including the walls holding it up.
+ */
+export function shedRoofBox(structure: Extract<SceneStructure, { kind: "shed" }>): Box {
+  return {
+    at: [-SHED.eaves, -SHED.eaves, structure.height],
+    size: [
+      structure.length + SHED.eaves * 2,
+      structure.depth + SHED.eaves * 2,
+      SHED.roofThickness,
+    ],
+    fill: "structureTrim",
+  };
 }
 
 /**
@@ -327,25 +366,13 @@ function gantryDrawables(
     fill: "structureTrim",
   });
 
+  /*
+   * Five assemblies, not one. Every part of the portal has to be able to interleave with
+   * traffic on its own: a train on the eastbound express runs in front of the near leg while
+   * one on a loading road runs behind it, and the trolley crosses between them.
+   */
   const out: Drawable[] = [
-    // The far leg and the beam sort with the back of the yard; the near leg with the front.
-    standing(crane.portalX, structure.far, [
-      leg(0),
-      {
-        at: [-GANTRY.beamWidth / 2, -span - GANTRY.legDepth / 2, GANTRY.height],
-        size: [GANTRY.beamWidth, span + GANTRY.legDepth, GANTRY.beamHeight],
-        // Steel, not masonry: `structure` is the sheds' white in the light theme and a
-        // beam in it read as a slab laid across the yard rather than as a girder over it.
-        fill: "structureTrim",
-        /*
-         * A girder over both legs, so it is drawn after both. Keyed on its centre it sat
-         * behind the near leg, whose lit top face at the beam's own height then covered two
-         * thirds of the beam's near end — the portal read as three pieces of steel that did
-         * not meet.
-         */
-        order: "over",
-      },
-    ]),
+    standing(crane.portalX, structure.far, [leg(0)]),
     standing(crane.portalX, crane.trolleyY, [
       {
         at: [
@@ -356,15 +383,37 @@ function gantryDrawables(
         size: [GANTRY.trolleyLength, GANTRY.trolleyDepth, GANTRY.trolleyHeight],
         fill: "depot",
       },
+    ]),
+    standing(crane.portalX, crane.trolleyY, [
       {
         // `hoistZ` is the underside of the box in the jaws, so the spreader sits one
-        // container above it — never below the thing it is carrying.
+        // container above it — never below the thing it is carrying. Its own assembly for
+        // the same reason: at one place on the ground, height is all that separates them.
         at: [-GANTRY.spreaderLength / 2, -GANTRY.spreaderDepth / 2, spreaderZ(crane)],
         size: [GANTRY.spreaderLength, GANTRY.spreaderDepth, GANTRY.spreaderHeight],
         fill: "metal",
       },
     ]),
     standing(crane.portalX, structure.near, [leg(0)]),
+    standing(
+      crane.portalX,
+      structure.far,
+      [
+        {
+          at: [-GANTRY.beamWidth / 2, -span - GANTRY.legDepth / 2, GANTRY.height],
+          size: [GANTRY.beamWidth, span + GANTRY.legDepth, GANTRY.beamHeight],
+          // Steel, not masonry: `structure` is the sheds' white in the light theme and a
+          // beam in it read as a slab laid across the yard rather than as a girder over it.
+          fill: "structureTrim",
+        },
+      ],
+      /*
+       * A girder over both legs, so it is drawn after both. Keyed on its centre it sat behind
+       * the near leg, whose lit top face at the beam's own height then covered two thirds of
+       * the beam's near end — the portal read as three pieces of steel that did not meet.
+       */
+      "over",
+    ),
   ];
 
   if (crane.holding !== null) {
@@ -393,20 +442,24 @@ function conveyorDrawables(
 ): Drawable[] {
   const [headX, y] = structure.at;
   // Half a pitch of deck either side of the end slots, so a box always stands on belt.
-  const deck = standing(headX, y, [
-    {
-      at: [-CONVEYOR.PITCH / 2, -CONVEYOR.WIDTH / 2, 0],
-      size: [structure.length + CONVEYOR.PITCH, CONVEYOR.WIDTH, CONVEYOR.DECK_Z],
-      fill: "structureTrim",
-      /*
-       * A floor, so it goes under everything standing on it. Keyed on its centre — which is
-       * most of a belt's length east of the head — it was drawn after the container the
-       * crane was lowering onto the head slot, and the deck's own top face covered it. The
-       * box reappeared the instant it was released and became belt freight drawn later.
-       */
-      order: "under",
-    },
-  ]);
+  const deck = standing(
+    headX,
+    y,
+    [
+      {
+        at: [-CONVEYOR.PITCH / 2, -CONVEYOR.WIDTH / 2, 0],
+        size: [structure.length + CONVEYOR.PITCH, CONVEYOR.WIDTH, CONVEYOR.DECK_Z],
+        fill: "structureTrim",
+      },
+    ],
+    /*
+     * A floor, so it goes under everything standing on it. Keyed on its centre — which is
+     * most of a belt's length east of the head — it was drawn after the container the crane
+     * was lowering onto the head slot, and the deck's own top face covered it. The box
+     * reappeared the instant it was released and became belt freight drawn later.
+     */
+    "under",
+  );
 
   return [
     deck,
@@ -495,13 +548,9 @@ export function drawFrame(
     if (structure.kind === "shed") {
       const road = world.graph.roads.get(structure.road);
       if (!road) continue;
-      drawables.push(
-        standing(
-          structure.at,
-          road.y - structure.depth / 2,
-          shedSortedBoxes(structure),
-        ),
-      );
+      const front = road.y - structure.depth / 2;
+      drawables.push(standing(structure.at, front, shedFrontBoxes(structure)));
+      drawables.push(standing(structure.at, front, [shedRoofBox(structure)], "over"));
       continue;
     }
     if (structure.kind === "gantry")
@@ -521,7 +570,7 @@ export function drawFrame(
     }
   }
 
-  const solids: Solid[] = [];
+  const onCamera: Array<{ key: number; drawable: Drawable }> = [];
   const contacts: Contact[] = [];
 
   for (const drawable of drawables) {
@@ -529,6 +578,10 @@ export function drawFrame(
     if (screen <= -VIEW.CULL_MARGIN_PX || screen >= view.width + VIEW.CULL_MARGIN_PX) {
       continue;
     }
+    onCamera.push({
+      key: assemblyDepth(drawable.pose, drawable.boxes, drawable.nose, drawable.order),
+      drawable,
+    });
     if (drawable.shadow) {
       // Keyed where the shadow actually lies, which is half a vehicle behind the pose: the
       // pose tracks the leading coupling, and a rake on a curve is a dozen units of depth
@@ -540,20 +593,10 @@ export function drawFrame(
         size: drawable.shadow,
       });
     }
-    for (const box of drawable.boxes) {
-      solids.push({
-        key: boxDepth(drawable.pose, box, drawable.nose),
-        pose: drawable.pose,
-        box,
-        nose: drawable.nose,
-        cargo: drawable.cargo,
-        ribs: box === drawable.ribbed ? drawable.ribs : 0,
-      });
-    }
   }
 
   // Furthest from the camera first, which is what a painter's algorithm is.
-  solids.sort((a, b) => b.key - a.key);
+  onCamera.sort((a, b) => b.key - a.key);
   contacts.sort((a, b) => b.key - a.key);
 
   /*
@@ -566,10 +609,13 @@ export function drawFrame(
     drawShadow(ctx, view, contact.pose, contact.size[0], contact.size[1], palette);
   }
 
-  for (const solid of solids) {
-    drawBox(ctx, view, solid.pose, solid.box, palette, solid.nose, solid.cargo);
-    if (solid.ribs > 0) {
-      drawRibs(ctx, view, solid.pose, solid.box, palette, solid.nose, solid.ribs);
+  for (const { drawable } of onCamera) {
+    // Boxes in the order the assembly lists them, which is bottom up. See `Drawable`.
+    for (const box of drawable.boxes) {
+      drawBox(ctx, view, drawable.pose, box, palette, drawable.nose, drawable.cargo);
+      if (box === drawable.ribbed && drawable.ribs > 0) {
+        drawRibs(ctx, view, drawable.pose, box, palette, drawable.nose, drawable.ribs);
+      }
     }
   }
 

@@ -363,23 +363,6 @@ export type Box = {
   readonly at: readonly [x: number, y: number, z: number];
   readonly size: readonly [length: number, width: number, height: number];
   readonly fill: PaletteKey | "cargo";
-  /**
-   * How to order a box that is too long to be ordered by a point.
-   *
-   * The painter's sort keys every box on the distance of its own centre, which is right for
-   * anything roughly as deep as it is wide — every solid in the yard but three. A gantry beam
-   * spans both legs, a shed roof spans both walls, and a belt deck spans the whole line of
-   * freight standing on it: their centres sit behind things they are in front of, and in
-   * front of things they are behind.
-   *
-   * So they say which way they resolve. `over` keys on the box's **nearest** corner and wins
-   * against everything it spans — a canopy. `under` keys on its **furthest** and loses to all
-   * of it — a floor. Both are properties of the object rather than tuning: nothing at the
-   * belt is behind the belt, and nothing under a roof is above it.
-   *
-   * Omitted, and the centre decides. That is the case for every other box in the scene.
-   */
-  readonly order?: "over" | "under";
 };
 
 export type VehicleSpec = {
@@ -483,8 +466,12 @@ export const SHED = {
    * It was 40, so the lintel came down twenty units into the locomotive standing inside and
    * cut the cab off — "front pillars too low", and the same defect again as "engines render
    * behind the wall". render.test.ts checks the clearance rather than the number.
+   *
+   * The height on its own was never the whole of it, though: the back wall was painted in the
+   * same colour as the piers, so the doorway had no edge and the piers looked like whatever
+   * length of them stood below it. See `structureShade` in palette.ts.
    */
-  doorHeight: 64,
+  doorHeight: 68,
   /** Width of a pier between two doorways, world units. */
   pierWidth: 12,
   roofThickness: 5,
