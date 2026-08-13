@@ -59,3 +59,27 @@ export function relativeTime(
   if (hours < 24) return format.format(-hours, "hour");
   return format.format(-Math.round(hours / 24), "day");
 }
+
+/**
+ * A delay that gives up when its signal aborts.
+ *
+ * There were two of these: an abortable one inside the watch route and a
+ * non-abortable one-liner in the Railway client, which left a retry backoff pinning a
+ * timer after the caller had already gone. `signal` is optional so the client uses the
+ * same function rather than keeping its own second definition, and an
+ * already-aborted signal resolves immediately instead of waiting out the full delay.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}

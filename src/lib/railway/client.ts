@@ -3,6 +3,7 @@ import "server-only";
 import { env } from "@/env";
 import { NETWORK } from "@/lib/constants";
 import { log } from "@/lib/logger";
+import { sleep } from "@/lib/utils";
 import { RailwayApiError } from "./errors";
 
 /** Configurable so the E2E fixture can stand in for Railway. Defaults to production. */
@@ -83,8 +84,6 @@ function parseRetryAfter(headers: Headers): number | undefined {
   const seconds = Number(raw);
   return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Retries were entirely silent, which meant Railway rate-limiting this app was invisible

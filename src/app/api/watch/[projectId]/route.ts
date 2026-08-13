@@ -7,7 +7,8 @@ import { fingerprint } from "@/lib/railway/watch-fingerprint";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { requestContext, runWithRequestContext } from "@/lib/log/context";
+import { closeStream } from "@/lib/stream-route";
+import { sleep } from "@/lib/utils";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { WATCH } from "@/lib/constants";
 import { env } from "@/env";
@@ -42,19 +43,6 @@ export async function GET(
     handle(request, context),
   );
 }
-
-const sleep = (ms: number, signal: AbortSignal) =>
-  new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 
 async function handle(
   request: NextRequest,
@@ -94,8 +82,6 @@ async function handle(
 
   const accessToken = session.accessToken;
   log.info("watch.opened", { project_id: projectId, environment_id: environmentId });
-  const scope = requestContext();
-
   return sseResponse(
     async (emit, signal) => {
       let previous: string | null = null;
@@ -157,17 +143,12 @@ async function handle(
     },
     {
       clientSignal: request.signal,
-      onClose: ({ reason, durationMs }) => {
-        release();
-        const record = () =>
-          log.info("watch.closed", {
-            project_id: projectId,
-            reason,
-            duration_ms: durationMs,
-          });
-        if (scope) runWithRequestContext(scope, record);
-        else record();
-      },
+      onClose: ({ reason, durationMs }) =>
+        closeStream("watch.closed", release, {
+          project_id: projectId,
+          reason,
+          duration_ms: durationMs,
+        }),
     },
   );
 }

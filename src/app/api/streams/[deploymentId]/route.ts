@@ -5,7 +5,7 @@ import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { requestContext, runWithRequestContext } from "@/lib/log/context";
+import { closeStream } from "@/lib/stream-route";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
@@ -116,17 +116,6 @@ async function handle(
 
   log.info("stream.opened", { deployment_id: deploymentId, phase });
 
-  /*
-   * Captured so the close line can be logged back inside it.
-   *
-   * Teardown does not always run in this scope: a client hangup reaches `emit.close`
-   * through an AbortSignal listener and a runtime cancellation through
-   * `ReadableStream.cancel`, and neither is an async resource created here — so
-   * `stream.closed` came out with no request_id and could not be joined to the
-   * `stream.opened` above it, which is the one join anyone actually wants from a stream.
-   */
-  const scope = requestContext();
-
   return sseResponse(
     async (emit, signal) => {
       for await (const event of monitorDeployment({
@@ -164,21 +153,16 @@ async function handle(
     // teardown path, including the one where the producer never returns at all.
     {
       clientSignal: request.signal,
-      onClose: ({ reason, durationMs }) => {
-        release();
-        // `reason` is what makes this worth having: a stream that ended because the tab
-        // closed and one that hit the fifteen-minute ceiling are the same line otherwise,
-        // and only the second is a problem.
-        const record = () =>
-          log.info("stream.closed", {
-            deployment_id: deploymentId,
-            phase,
-            reason,
-            duration_ms: durationMs,
-          });
-        if (scope) runWithRequestContext(scope, record);
-        else record();
-      },
+      // `reason` is what makes this worth having: a stream that ended because the tab
+      // closed and one that hit the fifteen-minute ceiling are the same line otherwise,
+      // and only the second is a problem.
+      onClose: ({ reason, durationMs }) =>
+        closeStream("stream.closed", release, {
+          deployment_id: deploymentId,
+          phase,
+          reason,
+          duration_ms: durationMs,
+        }),
     },
   );
 }

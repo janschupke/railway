@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cn, relativeTime } from "./utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cn, relativeTime, sleep } from "./utils";
 
 describe("cn", () => {
   it("joins conditional classes", () => {
@@ -74,5 +74,46 @@ describe("relativeTime", () => {
   it("clamps a future timestamp to zero instead of counting backwards", () => {
     // Server and client clocks disagree; "in 4 seconds" on a created-at reads as a bug.
     expect(at("2026-08-12T10:00:05Z", "2026-08-12T10:00:00Z")).toBe("now");
+  });
+});
+
+describe("sleep", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves after the delay", async () => {
+    let done = false;
+    void sleep(1_000).then(() => (done = true));
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(done).toBe(true);
+  });
+
+  it("gives up early when the signal aborts, and clears its timer", async () => {
+    // The non-abortable version left a poll loop's last sleep pinning a timer after the
+    // client had gone; the handle surviving IS the leak, so it is what is asserted.
+    const controller = new AbortController();
+    let done = false;
+    void sleep(60_000, controller.signal).then(() => (done = true));
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(done).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("resolves immediately for a signal that has already aborted", async () => {
+    // addEventListener never fires for one of these — the same trap the SSE transport
+    // hit — so without the up-front check this would wait out the whole delay.
+    let done = false;
+    void sleep(60_000, AbortSignal.abort()).then(() => (done = true));
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(done).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
