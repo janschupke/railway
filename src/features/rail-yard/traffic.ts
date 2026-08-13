@@ -57,7 +57,29 @@ type Body = {
   readonly path: Path;
   readonly distance: number;
   readonly length: number;
+  /** How fast it is going, which is what decides how far ahead it has to look. */
+  readonly speed: number;
 };
+
+/**
+ * How far ahead a body claims the junctions on its route.
+ *
+ * Not a constant, and that is the repair. `YARD.JUNCTION_LOOKAHEAD` alone is a floor that
+ * suits a train doing yard speed, and a train doing four times that cannot stop inside it —
+ * it reaches a contested node without ever having claimed it, so neither train yields and
+ * both take it. The hidden roads are where that showed: at four hundred units a second a
+ * locomotive needs a thousand to stop, and it was claiming a hundred and thirty.
+ *
+ * Braking distance plus the fouling margin is the honest number, because that is exactly
+ * the distance inside which the answer "give way" would arrive too late to act on: the
+ * train has to be able to stop, and it has to stop *short of the fouling point* rather than
+ * short of the node.
+ */
+const claimReach = (speed: number): number =>
+  Math.max(
+    YARD.JUNCTION_LOOKAHEAD,
+    (speed * speed) / (2 * YARD.BRAKE) + YARD.FOULING_MARGIN,
+  );
 
 /**
  * Where every train's body lies, as edges and nodes.
@@ -108,7 +130,7 @@ export function occupancyOf(graph: RailGraph, bodies: readonly Body[]): Occupanc
      * before it could possibly stop. Claiming ahead rather than only where the body is is
      * what turns a converging junction from a race into an interlock.
      */
-    const reach = body.distance + YARD.JUNCTION_LOOKAHEAD;
+    const reach = body.distance + claimReach(body.speed);
     for (let index = 0; index < path.edges.length; index++) {
       const start = edgeStart(path, index);
       if (start > reach) break;
@@ -189,12 +211,17 @@ export function limitFor(
      * A junction ahead. Checked from the edge *after* the nose's, because the node under a
      * train's own nose is one it is already standing on — contesting that was how the old
      * model managed to block every train in the yard against itself on the first frame.
+     *
+     * And it stops at the **fouling point** rather than a headway short of the node. A
+     * crossover runs alongside the road it joins for the last third of its length, so a
+     * train that gave way forty units back was still standing on the ground the train it
+     * gave way to was about to cross — which is a train drawn through another train.
      */
     if (index > noseIndex) {
       const node = graph.edges.get(id)?.from;
       const claims = node === undefined ? undefined : occupancy.atNode.get(node);
       if (claims && mustYield(claims, train.id, start - train.distance)) {
-        take(start - YARD.HEADWAY, "junction");
+        take(start - YARD.FOULING_MARGIN, "junction");
         break;
       }
     }

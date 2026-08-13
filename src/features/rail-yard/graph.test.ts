@@ -11,9 +11,9 @@ const TOY: RailScene = {
   focusX: 300,
   horizon: 400,
   roads: [
-    { id: "near", y: 0, span: [0, 900], rail: "main" },
-    { id: "mid", y: 50, span: [0, 900], rail: "siding" },
-    { id: "far", y: 100, span: [0, 900], rail: "siding" },
+    { id: "near", y: 0, span: [0, 900], rail: "main", sense: "east" },
+    { id: "mid", y: 50, span: [0, 900], rail: "siding", sense: "east" },
+    { id: "far", y: 100, span: [0, 900], rail: "siding", sense: "east" },
   ],
   nodes: [
     { id: "a", road: "far", x: 0, kind: "stop" },
@@ -29,6 +29,7 @@ const TOY: RailScene = {
     { id: "de", from: "d", to: "e", kind: "crossover", speed: 0.5 },
   ],
   structures: [],
+  expresses: [],
   duties: [
     {
       id: "toy",

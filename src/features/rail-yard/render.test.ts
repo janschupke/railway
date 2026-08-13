@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { createFakeContext, type FakeContext } from "@/test/fake-canvas-2d";
-import { LOCOMOTIVE, TRACK, VIEW } from "./config";
+import { LOCOMOTIVE, SHED, TRACK, VIEW } from "./config";
 import { composeStaticLayer } from "./draw-scene";
 import { drawBox, visibleFaces, type Face } from "./draw-box";
 import { buildGraph } from "./graph";
 import { RAIL_YARD_TOKENS, FREIGHT_TOKENS, type YardPalette } from "./palette";
 import { createRng } from "./rng";
-import { RAIL_YARD_SCENE } from "./scene";
+import { RAIL_YARD_SCENE, type SceneStructure } from "./scene";
 import { createWorld, step, type WorldState } from "./simulation";
 import { fitView, toScreenY, type ViewTransform } from "./view";
 import { YARD } from "./config";
-import { drawFrame } from "./render";
+import { drawFrame, shedFrontBoxes } from "./render";
 
 /**
  * A palette of distinguishable placeholders.
@@ -209,7 +209,7 @@ describe("composeStaticLayer", () => {
      * placed by arc length now, so a road gets one every `tieSpacing` for its whole length.
      */
     const road = RAIL_YARD_SCENE.roads.find(
-      (candidate) => candidate.id === "main-out",
+      (candidate) => candidate.id === "express-west",
     )!;
     const span = road.span[1] - road.span[0];
 
@@ -340,6 +340,35 @@ describe("drawFrame", () => {
     for (let index = 1; index < ys.length; index++) {
       expect(ys[index]!, `shadow ${index}`).toBeGreaterThanOrEqual(ys[index - 1]! - 6);
     }
+  });
+
+  it("stands a shed's front wall under its own roof", () => {
+    /*
+     * The direct regression test for "roofs aren't attached to walls".
+     *
+     * The front wall's boxes are measured from the front plane, which is where the
+     * drawable's pose already puts them — and they were also measured from the shed's
+     * centre, so the offset went on twice and the wall stood a whole depth in front of the
+     * building it belongs to. What you saw was a roof with a strip of open ground under it.
+     *
+     * Checked in world units rather than on screen, because that is where the mistake is:
+     * the eaves oversail the wall by `SHED.eaves` and by nothing else.
+     */
+    const shed = RAIL_YARD_SCENE.structures.find(
+      (structure): structure is Extract<SceneStructure, { kind: "shed" }> =>
+        structure.kind === "shed",
+    )!;
+    const road = RAIL_YARD_SCENE.roads.find((one) => one.id === shed.road)!;
+
+    const wallFront = road.y - shed.depth / 2;
+    const roofFront = road.y - shed.depth / 2 - SHED.eaves;
+    expect(wallFront - roofFront).toBe(SHED.eaves);
+
+    // And the wall really is drawn there: a lintel top at the roof's underside, so the two
+    // meet rather than one hanging over a gap.
+    const boxes = shedFrontBoxes(shed);
+    expect(boxes.every((box) => box.at[1] === 0)).toBe(true);
+    expect(Math.max(...boxes.map((box) => box.at[2] + box.size[2]))).toBe(shed.height);
   });
 
   it("keeps the locomotive legible at the smallest scale it will ever be drawn", () => {

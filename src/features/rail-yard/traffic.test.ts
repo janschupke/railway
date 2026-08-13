@@ -15,8 +15,8 @@ const TOY: RailScene = {
   focusX: 300,
   horizon: 300,
   roads: [
-    { id: "near", y: 0, span: [0, 2000], rail: "main" },
-    { id: "far", y: 60, span: [0, 2000], rail: "siding" },
+    { id: "near", y: 0, span: [0, 2000], rail: "main", sense: "east" },
+    { id: "far", y: 60, span: [0, 2000], rail: "siding", sense: "east" },
   ],
   nodes: [
     { id: "a", road: "far", x: 0, kind: "stop" },
@@ -34,6 +34,7 @@ const TOY: RailScene = {
     { id: "qc", from: "q", to: "c", kind: "run", speed: 1 },
   ],
   structures: [],
+  expresses: [],
   duties: [
     {
       id: "toy",
@@ -51,11 +52,12 @@ const graph: RailGraph = buildGraph(TOY);
 const overTheTop = findPath(graph, "a", "d")!;
 const alongTheFront = findPath(graph, "p", "d")!;
 
-const body = (id: string, path = overTheTop, distance = 0, length = 60) => ({
+const body = (id: string, path = overTheTop, distance = 0, length = 60, speed = 0) => ({
   id,
   path,
   distance,
   length,
+  speed,
 });
 
 describe("occupancyOf", () => {
@@ -95,6 +97,26 @@ describe("occupancyOf", () => {
     expect(occupancyOf(graph, [arriving]).atNode.get("d")?.[0]?.train).toBe("one");
   });
 
+  it("claims further ahead the faster it is going", () => {
+    /*
+     * The fixed lookahead is a floor, not the rule. A train doing four times yard speed
+     * cannot stop inside a hundred and thirty units, so it would reach a contested node
+     * having never claimed it — neither train yields and both take it. That is exactly what
+     * happened on the hidden roads, where a locomotive runs at four hundred units a second
+     * and needs a thousand to stop.
+     */
+    const gap = YARD.JUNCTION_LOOKAHEAD * 3;
+    const far = overTheTop.marks[0]! - gap;
+    expect(occupancyOf(graph, [body("slow", overTheTop, far)]).atNode.get("b")).toBe(
+      undefined,
+    );
+    // Fast enough that it could not stop inside that gap, derived rather than guessed so
+    // that retuning the brake cannot quietly turn this into an assertion about nothing.
+    const tooFast = Math.sqrt(2 * YARD.BRAKE * gap);
+    const fast = body("fast", overTheTop, far, 60, tooFast);
+    expect(occupancyOf(graph, [fast]).atNode.get("b")?.[0]?.train).toBe("fast");
+  });
+
   it("lets a node go once the tail has cleared it", () => {
     const gone = body("one", overTheTop, overTheTop.marks[0]! + 400, 60);
     expect(occupancyOf(graph, [gone]).atNode.get("b")).toBeUndefined();
@@ -125,14 +147,35 @@ describe("limitFor", () => {
      * The resolution half of the repair. A claim used to cover a whole edge, so two trains
      * could not be nearer than one edge apart — a follower stopped a road-length back and
      * the two never looked aware of each other.
+     *
+     * The leader is clear of the junction between them on purpose: with its tail across a
+     * node the follower is held at the fouling point instead, which is the stricter rule
+     * and a different claim from this one.
+     */
+    const leader = body("leader", overTheTop, 1_200, 120);
+    const follower = body("follower", overTheTop, 400, 60);
+    const occupancy = occupancyOf(graph, [leader, follower]);
+
+    const authority = limitFor(graph, occupancy, follower, Infinity);
+    expect(authority.reason).toBe("headway");
+    expect(authority.limit).toBeCloseTo(1_200 - 120 - YARD.HEADWAY);
+  });
+
+  it("holds a follower at the fouling point when a leader straddles a junction", () => {
+    /*
+     * A crossover runs alongside the road it joins for the last third of its length, so a
+     * train that stopped a headway short of the node was still standing on the ground the
+     * other train was crossing — two locomotives drawn through each other at the east
+     * throat. Giving way means stopping short of the fouling point, which is what a real
+     * signal protects.
      */
     const leader = body("leader", overTheTop, 900, 120);
     const follower = body("follower", overTheTop, 400, 60);
     const occupancy = occupancyOf(graph, [leader, follower]);
 
     const authority = limitFor(graph, occupancy, follower, Infinity);
-    expect(authority.reason).toBe("headway");
-    expect(authority.limit).toBeCloseTo(900 - 120 - YARD.HEADWAY);
+    expect(authority.reason).toBe("junction");
+    expect(authority.limit).toBeCloseTo(overTheTop.marks[1]! - YARD.FOULING_MARGIN);
   });
 
   it("ignores a train that is already behind it", () => {

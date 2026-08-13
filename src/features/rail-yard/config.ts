@@ -39,44 +39,93 @@ export const YARD = {
    */
   SEED: 0x5ea1_f00d,
   /**
-   * Three trains.
+   * Five yard trains, plus one express per express road.
    *
-   * Two leaves the yard looking abandoned while one is away; four queues at the loading
-   * roads more often than it moves. Three is also the point past which the per-frame
-   * vehicle count stops being free on a phone.
+   * Three left the scene empty a sixth of the time: a train spends most of its cycle off
+   * camera, on the hidden return or down the west throat, and three of them can all be
+   * somewhere else at once. Five is what makes the frame never empty rather than usually
+   * occupied, and the belt speeding the crane up is what stopped the extra two simply
+   * queueing. Two and it looks abandoned; past five the per-frame vehicle count stops
+   * being free on a phone.
    */
-  TRAIN_COUNT: 3,
+  TRAIN_COUNT: 5,
   /** Wagons per train. Fixed for the life of the world — the crane is what changes. */
   RAKE_SIZE: [3, 5],
   /** World units per second at an edge speed of 1. A locomotive is 62 units long. */
   BASE_SPEED: 74,
-  /** Units per second squared. Deliberately gentle: freight does not leap away. */
-  ACCEL: 30,
-  BRAKE: 52,
+  /**
+   * Units per second squared.
+   *
+   * Freight still does not leap away, but the old 30 was the dominant term in how long the
+   * frame stayed empty rather than a look: an express reaching line speed took eight
+   * seconds and nine hundred units, all of it out of sight, so the gap it was dispatched
+   * to fill had grown by the time it arrived. Braking is stronger than accelerating, as it
+   * is on anything with wheels.
+   */
+  ACCEL: 50,
+  BRAKE: 75,
   /** Gap between couplings, so a rake reads as separate wagons rather than a bar. */
   WAGON_GAP: 5,
   /**
    * How far the simulation is run before anyone sees it.
    *
-   * Step zero is three locomotives asleep in sheds, which is a picture of nothing — both
+   * Step zero is five locomotives asleep in a shed, which is a picture of nothing — both
    * for a visitor arriving on the page and for the single frozen frame a reduced-motion
-   * visitor gets in place of the animation. This lands on a frame with one train hauling
-   * off the east end, one running out of the shed and one climbing to the main — which is
-   * what simulation.test.ts asserts, so retuning it cannot quietly produce a still yard.
+   * visitor gets in place of the animation.
    *
-   * Staged by running the real simulation rather than hand-placing trains into a state it
-   * would never produce, which is also what stops the opening frame drifting out of
-   * agreement with the rules.
+   * This lands on two yard trains working east under the gantry with the westbound express
+   * crossing the frame behind them, which is the opening frame simulation.test.ts asserts. It
+   * was found by probing rather than chosen: the warm-up runs the real simulation, so the
+   * frame is one the rules actually produce, and retuning them cannot quietly leave the
+   * page opening on a still yard.
    */
-  WARMUP_MS: 65_000,
+  WARMUP_MS: 100_000,
   /** Added per train to the opening dwell, so the yard does not start with a convoy. */
   STAGGER_MS: 7_000,
-  /** Dwell in the shed before a train is dispatched again. */
-  IDLE_MS: [3_000, 12_000],
-  /** Dwell on the hidden return road. Long enough that the exit reads as somewhere else. */
-  AWAY_MS: [6_000, 16_000],
+  /**
+   * Dwell in the shed, and on the hidden return road.
+   *
+   * Both came down, and the second one hard. Dwelling in a shed is a train standing where
+   * a visitor can see it; dwelling on the return is a train standing where nobody can, and
+   * a yard that has half its stock waiting somewhere invisible is the yard that looked
+   * empty. The expresses cover what is left; these make there be less of it.
+   */
+  IDLE_MS: [1_500, 5_000],
+  AWAY_MS: [400, 2_500],
   /** Retry when the road ahead is occupied. Short — it is a look, not a wait. */
   BLOCKED_RETRY_MS: 900,
+  /**
+   * How long an express stands on its hidden road between runs.
+   *
+   * A timer of its own rather than a place in the yard's queue. The expresses exist to
+   * cover the gaps the shunting leaves — a working that had to wait its turn for the crane
+   * could not do that, and one on a fixed interval would read as a metronome.
+   */
+  EXPRESS_GAP_MS: [3_000, 12_000],
+  /**
+   * The most of that wait left once the frame has one moving train in it or none.
+   *
+   * A ceiling applied every step rather than a multiplier applied at the draw, because a
+   * gap chosen during a busy minute outlives the minute — it was twenty-one seconds once,
+   * and the yard fell quiet eight seconds in.
+   */
+  EXPRESS_URGENT_MS: 800,
+  /** Offset between the two expresses' first runs, so they do not open in convoy. */
+  EXPRESS_STAGGER_MS: 6_000,
+  /**
+   * The longest every train in the frame may be standing at once.
+   *
+   * The property that actually matters is stronger and has no constant: **the frame is
+   * never empty**, which simulation.test.ts asserts over ten simulated minutes with no
+   * allowance at all. This is the weaker second bound — how long the yard may be at a
+   * standstill *with* trains in it, which is a queue at the crane rather than a dead scene,
+   * and where the crane and the belt are both still working.
+   *
+   * Both are asserted as properties rather than as the constants behind them. Pinning the
+   * dwells and the speeds instead would let a retune quietly produce the empty yard they
+   * were chosen to prevent, which is exactly how it got one.
+   */
+  MAX_STILL_MS: 12_000,
   /**
    * Following distance, world units, measured coupling to coupling.
    *
@@ -86,13 +135,32 @@ export const YARD = {
    */
   HEADWAY: 40,
   /**
-   * How far ahead a train claims the junctions on its route.
+   * How far short of a contested junction a train has to stop, world units.
+   *
+   * The **fouling point**, which is the thing a real signal protects — not the frog. A
+   * crossover is a curve with horizontal tangents at both ends, so for the last third of it
+   * the diverging road runs *alongside* the road it is joining, a few units off it. Two
+   * trains a headway apart at that point are two trains occupying the same piece of ground:
+   * stopping the yielding one forty units short of the node left it drawn through the train
+   * it had given way to.
+   *
+   * Derived from the geometry rather than guessed. Depth across a crossover follows
+   * `3t^2 - 2t^3`, so the separation `e` of the way from the end is about `3 e^2` of a road
+   * pitch — a wagon's width of clearance needs a little over four tenths of the run, and the
+   * run is `CROSSOVER_RUN`.
+   */
+  FOULING_MARGIN: 180,
+  /**
+   * The floor on how far ahead a train claims the junctions on its route.
    *
    * Watching where the other trains *are* is not enough at a converging junction: two of
    * them a unit short of the same node both see it empty on the same step and both take it.
    * Claiming a node before reaching it turns that race into an interlock, and the tie is
    * broken by whichever train is nearer — a pure function of the same snapshot both trains
    * read, so they cannot disagree about who goes first.
+   *
+   * A floor rather than the whole rule: see `claimReach` in traffic.ts, which adds the
+   * distance the train would need to stop.
    */
   JUNCTION_LOOKAHEAD: 130,
   /** One puff per this much *travel*, so a stationary locomotive stops smoking. */
@@ -116,49 +184,72 @@ export const YARD = {
  * eye sees are derived rather than authored.
  */
 export const CRANE = {
-  PORTAL_SPEED: 165,
-  TROLLEY_SPEED: 130,
-  HOIST_SPEED: 74,
+  /*
+   * Quicker than it was, because it is the yard's bottleneck and the bottleneck was
+   * visible: one crane serving a rake at five seconds a container left the trains behind it
+   * standing on the loading road for half a minute. The belt is what makes this affordable
+   * — the freight is always at the head slot, so the cycle is travel and nothing else.
+   */
+  PORTAL_SPEED: 210,
+  TROLLEY_SPEED: 160,
+  HOIST_SPEED: 100,
   /** Time for the spreader to lock on or let go. Short, but not instant. */
-  LATCH_MS: 320,
+  LATCH_MS: 250,
   /**
    * Height a box is carried at, measured to its **underside** — the same convention
    * `CraneState.hoistZ` uses everywhere else.
    *
-   * Bounded from both ends. It has to clear the top of a full stack, because the portal
-   * travels over the stack on its way to it: three boxes at 17 is 51. And the spreader
-   * hangs a container's height above it, so it must stay under the trolley the rope comes
-   * off at 78 — 54 puts the spreader at 70 and the top of it at 73.
+   * Bounded from both ends. It has to clear the tallest thing the portal travels over,
+   * which is a loaded wagon at 26. And the spreader hangs a container's height above it, so
+   * the whole assembly must stay under the trolley the rope comes off at 78.
+   *
+   * It used to be 70, because the portal also had to clear a three-high pile of containers
+   * on its way to the pile. Putting the freight on a belt at ground level is what let it
+   * come down: the yard's buffer no longer has a height for the machine over it to be
+   * bounded by.
    */
-  TRAVEL_Z: 54,
-  STACK_STEP_Z: 17,
+  TRAVEL_Z: 36,
+} as const;
+
+/**
+ * The belt the yard's freight arrives on and leaves by. See conveyor.ts for the behaviour.
+ *
+ * Where it stands is scene data — one head, one tail, one depth, authored in scene.ts like
+ * every other structure. What is here is only how it behaves.
+ */
+export const CONVEYOR = {
   /**
-   * The stack is two columns of three, not one pile of six.
-   *
-   * Height is the expensive dimension: the portal travels *over* the stack on its way to
-   * it, so every box added to a single pile pushes the carrying height up and the whole
-   * gantry with it. At six high the crane would stand three times a locomotive's height
-   * over the yard and pull the camera's scale down with it. Sideways is free.
-   *
-   * Six matters because three did not hold: measured over ten simulated minutes the stack
-   * sat empty 46% of the time and full 48%, swinging between the two as trains loaded and
-   * unloaded. Half the time there was no pile to look at.
+   * Centre to centre along the belt. A container is 38 long, so this leaves 8 between two
+   * of them: enough to read as separate boxes on a moving belt rather than as one bar.
    */
-  STACK_ROWS: 3,
-  STACK_COLUMNS: 2,
-  /** Centre to centre across the columns, world units. */
-  STACK_PITCH_X: 52,
+  PITCH: 46,
   /**
-   * Boxes the stack holds before the crane stops adding to it, and how many it opens with.
+   * The belt's own top surface, which is the underside of a box standing on it.
    *
-   * The yard has a world outside it, and these two numbers are where that shows: a stack at
-   * capacity means the next box off a train is trucked away, and an empty one means the
-   * next box onto a train has just come in off the road. Without them a run of arrivals
-   * would either bury the yard or drain it, and the crane would stall waiting for freight
-   * nobody can see arriving.
+   * Tall enough to read. At four it was a two-pixel line the containers hid entirely, and a
+   * belt nobody can see is a row of boxes standing on the ground — which is the pile it
+   * replaced.
    */
-  STACK_CAPACITY: 6,
-  STACK_FLOOR: 3,
+  DECK_Z: 8,
+  /** Across the belt. Wider than a container so the box sits on it rather than over it. */
+  WIDTH: 25,
+  /**
+   * World units per second.
+   *
+   * Deliberately quicker than the crane's cycle: the head slot has to be refilled before
+   * the crane comes back for it, which is the whole of "the belt always has containers".
+   * A full pitch takes 0.74 s against the two seconds the crane spends crossing the yard.
+   */
+  SPEED: 62,
+  /** How near a slot counts as settled in it, world units. */
+  SETTLE: 0.5,
+  /**
+   * Boxes on the belt when the world is made.
+   *
+   * The warm-up runs the real simulation, so this only has to be enough that the first
+   * train to load does not stand waiting for the belt to fill from the tail.
+   */
+  FLOOR: 5,
 } as const;
 
 /** Fitting the world to the canvas. See view.ts for how these compose. */

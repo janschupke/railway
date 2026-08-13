@@ -1,29 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CRANE, SIM, YARD } from "./config";
 import { CRANE_CYCLE } from "./crane";
+import { capacityOf, headClear, headLoaded } from "./conveyor";
 import { poseAlong } from "./graph";
 import { FREIGHT_TOKENS } from "./palette";
 import { createRng } from "./rng";
+import { RAIL_YARD_SCENE } from "./scene";
 import {
+  EXPRESS_RING,
+  YARD_RING,
   createWorld,
   snapshot,
   step,
   stepsFor,
   trainLength,
   type TrainPhase,
+  type TrainState,
   type WorldState,
 } from "./simulation";
+import { fitView, toScreenX } from "./view";
 
-const ALL_PHASES: readonly TrainPhase[] = [
-  "idle",
-  "outbound",
-  "loading",
-  "hauling",
-  "away",
-  "inbound",
-  "unloading",
-  "homebound",
-];
+/** The ring a train goes round, which is now a property of the train rather than the file. */
+const ringFor = (train: TrainState): readonly TrainPhase[] =>
+  train.kind === "express" ? EXPRESS_RING : YARD_RING;
 
 /** A world and its stream, so a caller can keep stepping the one the warm-up left. */
 function yard(seed: number = YARD.SEED) {
@@ -89,12 +88,16 @@ describe("determinism", () => {
 });
 
 describe("the train lifecycle", () => {
-  it("takes every train right round the cycle, in order", () => {
+  it("takes every train right round its own cycle, in order", () => {
     /*
-     * Liveness, and the deadlock test. Every train has to reach all eight phases inside a
-     * quarter of an hour of simulated time, and the transitions have to follow the ring —
-     * a train that skipped from loading to homebound would satisfy a set-membership check
-     * and be badly broken.
+     * Liveness, and the deadlock test. Every train has to reach every phase of its ring
+     * inside a quarter of an hour of simulated time, and the transitions have to follow it
+     * — a train that skipped from loading to homebound would satisfy a set-membership
+     * check and be badly broken.
+     *
+     * Two rings, because there are two kinds of train. A yard train works its eight-phase
+     * day; an express waits, runs and comes back round. Checking each against the right one
+     * is what stops "the express never moves" reading as a pass.
      */
     const { world, rng } = yard();
     const seen = new Map(
@@ -109,15 +112,18 @@ describe("the train lifecycle", () => {
         seen.get(train.id)!.add(train.phase);
         const was = previous.get(train.id)!;
         if (was === train.phase) continue;
-        const expected = ALL_PHASES[(ALL_PHASES.indexOf(was) + 1) % ALL_PHASES.length];
+        const ring = ringFor(train);
+        const expected = ring[(ring.indexOf(was) + 1) % ring.length];
         if (train.phase !== expected) bad.push(`${train.id}: ${was} -> ${train.phase}`);
       }
       previous = new Map(world.trains.map((train) => [train.id, train.phase]));
     }
 
     expect(bad).toEqual([]);
-    for (const [id, phases] of seen) {
-      expect([...phases].sort(), id).toEqual([...ALL_PHASES].sort());
+    for (const train of world.trains) {
+      expect([...seen.get(train.id)!].sort(), train.id).toEqual(
+        [...ringFor(train)].sort(),
+      );
     }
   });
 
@@ -301,17 +307,26 @@ describe("the crane", () => {
     const dropAt = CRANE_CYCLE.findLastIndex((leg) => leg.move === "latch");
     const bad: string[] = [];
     let previous = world.crane.legIndex;
+    let served = world.crane.servingTrainId;
 
     for (let index = 0; index < 20_000; index++) {
       step(world, SIM.STEP_MS, rng);
       const { crane } = world;
-      if (crane.legIndex !== previous && crane.servingTrainId !== null) {
+      /*
+       * The handover is the exception, and it is a real one: a train finishing releases the
+       * crane and the dispatcher hands it the next one in the same step, so the cycle
+       * restarts and its first leg — run the portal to the belt — completes immediately,
+       * because parking the idle crane at the belt is where it already is.
+       */
+      const handover = crane.servingTrainId !== served;
+      if (crane.legIndex !== previous && crane.servingTrainId !== null && !handover) {
         const expected = (previous + 1) % CRANE_CYCLE.length;
         if (crane.legIndex !== expected && crane.legIndex !== 0) {
           bad.push(`leg ${previous} -> ${crane.legIndex}`);
         }
       }
       previous = crane.legIndex;
+      served = crane.servingTrainId;
 
       if (
         crane.holding !== null &&
@@ -320,7 +335,9 @@ describe("the crane", () => {
         bad.push(`holding at leg ${crane.legIndex}`);
       }
       if (crane.hoistZ > CRANE.TRAVEL_Z + 0.01) bad.push(`hoist above travel`);
-      if (crane.stack.length > CRANE.STACK_CAPACITY) bad.push(`stack overfull`);
+      if (world.conveyor.boxes.length > capacityOf(world.conveyor)) {
+        bad.push(`belt overfull`);
+      }
     }
 
     expect(bad).toEqual([]);
@@ -328,13 +345,14 @@ describe("the crane", () => {
 
   it("moves the containers rather than conjuring them", () => {
     /*
-     * The total number of boxes in the yard changes only when the crane lets go of one —
-     * onto a wagon, or onto a stack that is full and therefore trucks it away. Between
-     * latches, nothing appears and nothing evaporates.
+     * The total number of boxes in the yard changes only where the yard meets the world
+     * outside it, which is the far end of the belt and nowhere else. Between latches
+     * nothing appears and nothing evaporates, and the only place a box is created or
+     * destroyed is off camera.
      */
     const { world, rng } = yard();
     const count = () =>
-      world.crane.stack.length +
+      world.conveyor.boxes.length +
       (world.crane.holding === null ? 0 : 1) +
       world.trains.reduce(
         (sum, train) =>
@@ -353,6 +371,41 @@ describe("the crane", () => {
     expect(jumps).toEqual([]);
   });
 
+  it("never lifts a box out of nothing or lowers one onto another", () => {
+    /*
+     * The interlock between the two machines, stated as the property it exists for. A latch
+     * over the belt may only close on a slot that has something settled in it and may only
+     * open over one that is clear — so "containers materialise from nothing" cannot be
+     * expressed, rather than merely not happening to occur.
+     */
+    const { world, rng } = yard();
+    const bad: string[] = [];
+    let holding = world.crane.holding;
+
+    for (let index = 0; index < 30_000; index++) {
+      const before = world.conveyor.boxes.length;
+      const clear = headClear(world.conveyor);
+      const loaded = headLoaded(world.conveyor);
+      step(world, SIM.STEP_MS, rng);
+
+      const took = world.crane.holding !== null && holding === null;
+      const gave = world.crane.holding === null && holding !== null;
+      if (took && world.crane.direction === "load" && !loaded) {
+        bad.push(`lifted from an empty slot at ${index}`);
+      }
+      if (gave && world.crane.direction === "unload" && !clear) {
+        bad.push(`lowered onto an occupied slot at ${index}`);
+      }
+      // The belt itself only ever gains or loses one box in a step, at its own far end.
+      if (Math.abs(world.conveyor.boxes.length - before) > 1) {
+        bad.push(`belt jumped at ${index}`);
+      }
+      holding = world.crane.holding;
+    }
+
+    expect(bad).toEqual([]);
+  });
+
   it("serves a train that arrives while it is busy", () => {
     /*
      * Without a dispatcher a second train stands at the loading road for ever, because
@@ -365,7 +418,10 @@ describe("the crane", () => {
       step(world, SIM.STEP_MS, rng);
       if (world.crane.servingTrainId) served.add(world.crane.servingTrainId);
     }
-    expect(served.size).toBe(world.trains.length);
+    // Every yard train, and no express: a through working has nothing for the crane to do
+    // and must never take its turn away from one that has.
+    const worked = world.trains.filter((train) => train.kind === "yard");
+    expect([...served].sort()).toEqual(worked.map((train) => train.id).sort());
   });
 });
 
@@ -437,6 +493,60 @@ describe("traffic", () => {
     }
 
     expect(overlaps).toEqual([]);
+  });
+
+  it("never leaves the frame empty, and is never long at a standstill", () => {
+    /*
+     * "Traffic is too extreme — either a full queue or no trains on screen."
+     *
+     * Four things produced that. The hidden loop was long enough that every yard train
+     * could be off camera at once; one crane serving them queued the rest; `lineSpeed` held
+     * a train to the speed of a turnout at the far end of a sixteen-hundred-unit run, so it
+     * crossed the frame at less than half line speed; and nothing covered the gaps.
+     *
+     * Ten simulated minutes, sampled every step, against the two claims worth making — and
+     * both are properties rather than any of the constants behind them, because it is
+     * exactly a retune of those constants that produced the empty yard in the first place.
+     *
+     * The frame is checked through the real projection rather than against a range of world
+     * x, and against a train's tail as well as its nose: a rake still coming into the scene
+     * is on screen whatever its locomotive is doing.
+     */
+    const { world, rng } = yard();
+    const view = fitView(RAIL_YARD_SCENE, { width: 960, height: 700, dpr: 1 })!;
+
+    const onScreen = (train: TrainState, at: number): boolean => {
+      const pose = poseAlong(world.graph, train.path, at);
+      // Depth below zero is one of the hidden roads, which projects off the bottom of every
+      // canvas — a train there is somewhere else, not something to look at.
+      if (!pose || pose.y < 0) return false;
+      const screenX = toScreenX(view, pose.x, pose.y);
+      return screenX >= 0 && screenX <= view.width;
+    };
+
+    let empty = 0;
+    let still = 0;
+    let longestEmpty = 0;
+    let longestStill = 0;
+
+    for (let index = 0; index < 30_000; index++) {
+      step(world, SIM.STEP_MS, rng);
+      const showing = world.trains.filter(
+        (train) =>
+          onScreen(train, train.distance) ||
+          onScreen(train, train.distance - trainLength(train)),
+      );
+      empty = showing.length > 0 ? 0 : empty + SIM.STEP_MS;
+      still = showing.some((train) => train.speed > 1) ? 0 : still + SIM.STEP_MS;
+      longestEmpty = Math.max(longestEmpty, empty);
+      longestStill = Math.max(longestStill, still);
+    }
+
+    // Not "briefly empty" — never. There is always a train somewhere in the scene.
+    expect(longestEmpty).toBe(0);
+    // And a yard at a standstill is a queue at the crane, which is a yard at work: the
+    // crane and the belt are both moving throughout. This only bounds the trains.
+    expect(longestStill).toBeLessThanOrEqual(YARD.MAX_STILL_MS);
   });
 
   it("lets a follower close up rather than waiting a whole road back", () => {
@@ -543,7 +653,9 @@ describe("smoke", () => {
      */
     const { world, rng } = yard();
     run(world, rng, 400);
-    const puff = world.puffs[0];
+    // The newest puff, which is the one certain to outlive the steps below — an older one
+    // can age out mid-run, and a puff that has been dropped is not a puff that failed to rise.
+    const puff = world.puffs[world.puffs.length - 1];
     expect(puff).toBeDefined();
     const startZ = puff!.z;
     const startY = puff!.y;
@@ -581,28 +693,71 @@ describe("createWorld", () => {
      */
     const { world } = yard();
     expect(world.elapsedMs).toBe(YARD.WARMUP_MS);
-    expect(world.trains).toHaveLength(YARD.TRAIN_COUNT);
-    expect(world.trains.some((train) => train.phase !== "idle")).toBe(true);
-    expect(world.trains.some((train) => train.speed > 0)).toBe(true);
+    expect(world.trains.filter((train) => train.kind === "yard")).toHaveLength(
+      YARD.TRAIN_COUNT,
+    );
+    expect(world.trains.filter((train) => train.kind === "express")).toHaveLength(
+      RAIL_YARD_SCENE.expresses.length,
+    );
+
+    /*
+     * And it opens on a specified frame rather than on whatever the warm-up happens to
+     * land on: two yard trains working east under the gantry, with an express behind them.
+     * `WARMUP_MS` was probed until the simulation produced this, so the frame is one the
+     * rules really make — and asserting it is what stops a retune quietly moving the page's
+     * first impression back to an empty yard.
+     */
+    const view = fitView(RAIL_YARD_SCENE, { width: 960, height: 700, dpr: 1 })!;
+    const showing = world.trains.filter((train) => {
+      const pose = poseAlong(world.graph, train.path, train.distance);
+      if (!pose || pose.y < 0) return false;
+      const screenX = toScreenX(view, pose.x, pose.y);
+      return screenX >= 0 && screenX <= view.width;
+    });
+
+    expect(showing.length).toBeGreaterThanOrEqual(2);
+    expect(showing.every((train) => train.speed > 1)).toBe(true);
+
+    const gantry = RAIL_YARD_SCENE.structures.find(
+      (structure) => structure.kind === "gantry",
+    )!;
+    const underTheGantry = showing.filter((train) => {
+      if (train.kind !== "yard" || gantry.kind !== "gantry") return false;
+      const pose = poseAlong(world.graph, train.path, train.distance)!;
+      return pose.x >= gantry.travel[0] && pose.x <= gantry.travel[1];
+    });
+    expect(underTheGantry.length).toBeGreaterThanOrEqual(2);
+    expect(
+      world.trains.some(
+        (train) => train.kind === "express" && train.phase === "running",
+      ),
+    ).toBe(true);
   });
 
-  it("keeps a pile in the yard without ever burying it", () => {
+  it("keeps freight on the belt without ever burying it", () => {
     /*
-     * The stack swings: with twelve containers in circulation and six slots on the ground,
-     * it empties when every train is loaded and fills when every train is not. That is a
-     * working yard rather than a defect — what would be a defect is a pile that overflowed
-     * its own slots, or one that was never there at all.
+     * The pile this replaces sat empty 46% of the time and full 48%, swinging between the
+     * two as trains loaded and unloaded — half the time there was nothing to look at, and
+     * the other half the next box off a train was silently trucked away.
+     *
+     * A belt has both ends, so the fill level is a consequence rather than a boundary: it
+     * feeds while the yard takes freight and clears while the yard gives it back. What
+     * would be a defect is a belt that overran its own length, or a head slot that was
+     * empty when a train came to load.
      */
     const { world, rng } = yard();
+    const steps = 20_000;
     let stocked = 0;
     let over = 0;
-    for (let index = 0; index < 20_000; index++) {
+    for (let index = 0; index < steps; index++) {
       step(world, SIM.STEP_MS, rng);
-      if (world.crane.stack.length > 0) stocked += 1;
-      if (world.crane.stack.length > CRANE.STACK_CAPACITY) over += 1;
+      if (world.conveyor.boxes.length > 0) stocked += 1;
+      if (world.conveyor.boxes.length > capacityOf(world.conveyor)) over += 1;
     }
     expect(over).toBe(0);
-    expect(stocked).toBeGreaterThan(20_000 / 4);
+    // Never empty, not "usually stocked": a crane that arrives at a bare belt is a crane
+    // waiting, and the whole point of the belt outrunning it is that it never has to.
+    expect(stocked).toBe(steps);
   });
 
   it("gives every train a path it is standing on", () => {

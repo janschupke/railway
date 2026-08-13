@@ -10,7 +10,7 @@
  * This is the same machine a real yard has, with three visible degrees of freedom: the
  * portal runs along the roads in x, the trolley runs across the beam in y, and the hoist
  * runs in z. Every one of them is a position in the world, stepped by the same fixed
- * timestep as the trains, so a container is only ever somewhere — on the stack, in the
+ * timestep as the trains, so a container is only ever somewhere — on the belt, in the
  * spreader, or on a wagon — and you watch it make the journey between them.
  *
  * The cycle is **one** ten-leg machine rather than two of eleven. Loading and unloading are
@@ -19,9 +19,7 @@
  * be nine functions each needing a test of its own.
  */
 
-import { CONTAINER, CRANE, LOCOMOTIVE, WAGON, YARD } from "./config";
-import { FREIGHT_TOKENS } from "./palette";
-import type { Rng } from "./rng";
+import { CONTAINER, CONVEYOR, CRANE, LOCOMOTIVE, WAGON, YARD } from "./config";
 
 type Place = "source" | "sink";
 
@@ -73,40 +71,31 @@ export type CraneState = {
   servingTrainId: string | null;
   wagonIndex: number;
   direction: "load" | "unload";
-  /** The yard stack, oldest first. Containers come from here and go back to here. */
-  stack: number[];
   /** Where the portal and trolley stand when there is nothing to serve. */
   readonly parkedX: number;
   readonly parkedY: number;
 };
 
-/** Where the crane must be to work a wagon: told to it, because only the sim knows. */
+/**
+ * Where the crane must be to do its work, told to it because only the simulation knows.
+ *
+ * `exchangeReady` is the belt's half of the interlock: a box settled in the head slot when
+ * the crane has come to take one, and a clear slot when it has come to set one down. The
+ * crane holds on the leg that would work the belt until it is true, which is what keeps a
+ * container from being lifted out of thin air or lowered onto one already standing there.
+ */
 export type CraneTarget = {
   readonly wagonX: number;
   readonly wagonY: number;
-  readonly stackX: number;
-  readonly stackY: number;
+  readonly beltX: number;
+  readonly beltY: number;
+  readonly exchangeReady: boolean;
 };
 
-export function createCrane(rng: Rng, parked: number, stackAt: number): CraneState {
-  /*
-   * Opening stock, and never more than the stack holds.
-   *
-   * Seeding past capacity was a real bug with a knock-on: `stackTopZ` measures from however
-   * many boxes are actually piled up, so an overfull stack sent the spreader *above* the
-   * beam it hangs from on the very first lift.
-   */
-  const stack: number[] = [];
-  for (
-    let index = 0;
-    index < Math.min(CRANE.STACK_FLOOR, CRANE.STACK_CAPACITY);
-    index++
-  ) {
-    stack.push(Math.floor(rng() * FREIGHT_TOKENS.length));
-  }
+export function createCrane(parkedX: number, parkedY: number): CraneState {
   return {
-    portalX: parked,
-    trolleyY: stackAt,
+    portalX: parkedX,
+    trolleyY: parkedY,
     hoistZ: CRANE.TRAVEL_Z,
     holding: null,
     legIndex: 0,
@@ -114,9 +103,8 @@ export function createCrane(rng: Rng, parked: number, stackAt: number): CraneSta
     servingTrainId: null,
     wagonIndex: 0,
     direction: "load",
-    stack,
-    parkedX: parked,
-    parkedY: stackAt,
+    parkedX,
+    parkedY,
   };
 }
 
@@ -132,33 +120,18 @@ export function spreaderZ(crane: CraneState): number {
 }
 
 /**
- * Which column and how high the box the crane is about to handle sits.
+ * Whether a leg's `source`/`sink` is the belt rather than a wagon.
  *
- * Taking means the top of the pile — the last box put down. Placing means the slot after
- * it. Exported because the renderer has to draw the stack in exactly the same places the
- * crane reaches for, and two implementations of that would drift.
+ * Loading takes from the belt and gives to a wagon; unloading is the same machine with the
+ * two exchanged. One expression, and it is why there are ten legs rather than twenty.
  */
-export function stackSlot(index: number): { column: number; level: number } {
-  const at = Math.max(0, index);
-  return {
-    column: Math.min(CRANE.STACK_COLUMNS - 1, Math.floor(at / CRANE.STACK_ROWS)),
-    level: at % CRANE.STACK_ROWS,
-  };
-}
+const atBelt = (crane: CraneState, leg: CraneLeg): boolean =>
+  leg.move !== "latch" && (leg.to === "source") === (crane.direction === "load");
 
-const handling = (crane: CraneState, taking: boolean): number =>
-  taking ? crane.stack.length - 1 : crane.stack.length;
-
-/**
- * The grip plane over the stack: the underside of the box being handled.
- *
- * Taking is the box already on top of the pile, placing is the slot above it, and the level
- * arithmetic is the renderer's — a stack box at level L is drawn from `L * STACK_STEP_Z`,
- * so that is what the crane reaches to. The spreader's own thickness used to be added in
- * here, which is what put the grip a spreader too high on every lift off the pile.
- */
-function stackGripZ(crane: CraneState, taking: boolean): number {
-  return stackSlot(handling(crane, taking)).level * CRANE.STACK_STEP_Z;
+/** Every leg that touches the belt: the descent onto it and the latch that follows. */
+function worksBelt(crane: CraneState, leg: CraneLeg): boolean {
+  if (leg.move === "latch") return leg.take === (crane.direction === "load");
+  return leg.move === "z" && leg.to !== "travel" && atBelt(crane, leg);
 }
 
 function axisTarget(
@@ -166,22 +139,15 @@ function axisTarget(
   leg: CraneLeg,
   target: CraneTarget,
 ): number | null {
-  const loading = crane.direction === "load";
-  const atStack = leg.move !== "latch" && (leg.to === "source") === loading;
+  const belt = atBelt(crane, leg);
 
-  if (leg.move === "x") {
-    if (!atStack) return target.wagonX;
-    const taking = leg.to === "source" ? loading : !loading;
-    return (
-      target.stackX + stackSlot(handling(crane, taking)).column * CRANE.STACK_PITCH_X
-    );
-  }
-  if (leg.move === "y") return atStack ? target.stackY : target.wagonY;
+  if (leg.move === "x") return belt ? target.beltX : target.wagonX;
+  if (leg.move === "y") return belt ? target.beltY : target.wagonY;
   if (leg.move === "z") {
     if (leg.to === "travel") return CRANE.TRAVEL_Z;
-    // A wagon's grip plane is its deck whichever way the box is going, which is the whole
-    // point of measuring the box's underside rather than the spreader's.
-    return atStack ? stackGripZ(crane, leg.to === "source") : CONTAINER.deck;
+    // One grip plane per place, whichever way the box is going — which is the whole point
+    // of measuring the box's underside rather than the spreader's.
+    return belt ? CONVEYOR.DECK_Z : CONTAINER.deck;
   }
   return null;
 }
@@ -251,6 +217,17 @@ export function stepCrane(
   }
 
   const leg = CRANE_CYCLE[crane.legIndex] ?? CRANE_CYCLE[0]!;
+
+  /*
+   * The belt's half of the interlock, and the reason a container is never invented.
+   *
+   * The crane holds *above* the belt rather than descending onto it, so it can neither
+   * close on an empty slot nor lower a box onto one that is still occupied. Holding a leg
+   * rather than letting it complete is what keeps the two machines honest with each other
+   * without either of them reaching into the other's state.
+   */
+  if (!target.exchangeReady && worksBelt(crane, leg)) return null;
+
   let done = false;
   let event: CraneEvent = null;
 

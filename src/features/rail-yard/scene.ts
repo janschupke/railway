@@ -12,11 +12,11 @@
  * The version this replaces carried hand-authored quadratic control points and left a 128.7
  * degree heading snap where two of them met, which a locomotive spun through in one frame.
  *
- * **One direction.** Every road carries traffic eastbound, and a train that runs off the
- * east side comes back on the west by a hidden return road. That single decision dissolves
- * a whole class of problem: no two trains can want the same track from opposite ends, so
- * head-on conflict and the deadlock that comes with it are not expressible, and the picture
- * reads left to right the way a diagram does.
+ * **One direction per road.** A road declares its `sense` and every piece of track along it
+ * is worked that way, so no two trains can want the same rails from opposite ends: head-on
+ * conflict and the deadlock that comes with it are not expressible. The yard itself is
+ * entirely eastbound and reads left to right the way a diagram does; the one westbound road
+ * is the front express line, which shares no track with anything.
  *
  * The throat is a **ladder** — a train climbing from the depot road to the main line steps
  * through each road in turn rather than cutting across them. Real yards are built this way
@@ -31,7 +31,7 @@ import { TRACK } from "./config";
 import type { NonEmpty } from "./rng";
 import type { Vec2 } from "./geometry";
 
-/** Eastbound is the only sense. `hidden` track is off-camera and is not drawn. */
+/** `hidden` track is off-camera and is not drawn. */
 type RailStyle = "main" | "siding" | "hidden";
 
 export type Road = {
@@ -40,6 +40,15 @@ export type Road = {
   readonly y: number;
   readonly span: readonly [west: number, east: number];
   readonly rail: RailStyle;
+  /**
+   * Which way this road is worked.
+   *
+   * Declared rather than inferred, and it is the whole of the deadlock argument: every
+   * along-road edge must run this way, so two trains on one road are always going the same
+   * way and a follower only ever waits for a train *ahead of it*. Two roads worked opposite
+   * ways are two different roads, which is why the express lines are a pair.
+   */
+  readonly sense: "east" | "west";
 };
 
 type NodeKind = "stage" | "stop" | "junction";
@@ -79,11 +88,11 @@ export type SceneStructure =
       readonly travel: readonly [west: number, east: number];
     }
   | {
-      readonly kind: "stack";
-      /** West end and depth of the container stack's footprint. */
+      readonly kind: "conveyor";
+      /** The head, where the crane works the belt, and the belt's depth. */
       readonly at: Vec2;
+      /** How far east the belt runs from its head. Far enough that its tail is off camera. */
       readonly length: number;
-      readonly depth: number;
     }
   | { readonly kind: "signal"; readonly at: Vec2; readonly guards: string }
   | { readonly kind: "tower"; readonly at: Vec2; readonly size: Vec2 };
@@ -105,6 +114,23 @@ export type Duty = {
   readonly enterVia: NonEmpty<string>;
 };
 
+/**
+ * A through working: one train, one road, and nothing to do in the yard.
+ *
+ * The bottom two roads exist to be run through rather than worked, and this is all that
+ * takes. There is exactly one of these per express road and exactly one train per entry, so
+ * "never more than one express on the line" is structural rather than a rule the simulation
+ * has to keep. It waits at `holdAt`, runs to `runTo`, and comes back round the way it came
+ * — all three on rails, none of it repositioned.
+ */
+type Express = {
+  readonly id: string;
+  /** Where it stands between runs. Hidden track, so waiting costs the yard nothing. */
+  readonly holdAt: string;
+  /** The far end of its run, likewise hidden — it leaves the frame before it stops. */
+  readonly runTo: string;
+};
+
 export type RailScene = {
   /** The rectangle the camera frames. The roads deliberately run past it on both sides. */
   readonly extent: { readonly width: number; readonly height: number };
@@ -117,17 +143,24 @@ export type RailScene = {
   readonly edges: readonly SceneEdge[];
   readonly structures: readonly SceneStructure[];
   readonly duties: NonEmpty<Duty>;
+  readonly expresses: readonly Express[];
 };
 
 const P = TRACK.ROAD_PITCH;
 
 /**
- * Five roads, front to back, all eastbound.
+ * Five roads, front to back.
  *
- * The running lines are nearest the camera because they carry the fastest movement and the
- * eye should get it first. The loading roads sit under one gantry so the crane can serve
- * either. The depot road runs *through* the shed at the back — through, not into, so a
- * locomotive enters one end and leaves the other and never has to reverse.
+ * The two nearest the camera are express lines, worked in opposite directions and carrying
+ * traffic that has no business in the yard at all. They are nearest because they carry the
+ * fastest movement and the eye should get it first, and they run opposite ways because a
+ * yard with everything going one way reads as a conveyor rather than as a railway. The
+ * front one has no turnouts anywhere along it, which is what lets it be westbound without
+ * touching the deadlock argument: it shares no rails with anything.
+ *
+ * Behind them the loading roads sit under one gantry so the crane can serve either, and the
+ * depot road runs *through* the shed at the back — through, not into, so a locomotive
+ * enters one end and leaves the other and never has to reverse.
  *
  * Every road extends well past `extent`. That is what makes leaving the scene real travel
  * rather than a despawn: a departing train runs out of the frame on rails that continue,
@@ -135,21 +168,38 @@ const P = TRACK.ROAD_PITCH;
  * in behind the first.
  */
 const ROADS: readonly Road[] = [
-  { id: "main-out", y: P * 0, span: [-1500, 3600], rail: "main" },
-  { id: "main-in", y: P * 1, span: [-1500, 3600], rail: "main" },
-  { id: "load-a", y: P * 2, span: [-900, 2100], rail: "siding" },
-  { id: "load-b", y: P * 3, span: [-500, 1700], rail: "siding" },
-  { id: "depot", y: P * 4, span: [-100, 900], rail: "siding" },
+  { id: "express-west", y: P * 0, span: [-1200, 3200], rail: "main", sense: "west" },
+  { id: "express-east", y: P * 1, span: [-1500, 3600], rail: "main", sense: "east" },
+  { id: "load-a", y: P * 2, span: [-900, 2100], rail: "siding", sense: "east" },
+  { id: "load-b", y: P * 3, span: [-500, 1700], rail: "siding", sense: "east" },
+  { id: "depot", y: P * 4, span: [-100, 900], rail: "siding", sense: "east" },
+
   /*
-   * The return, which is the rest of the network.
+   * Three hidden roads: the rest of the network, and where trains wait when they are
+   * somewhere else.
    *
    * In front of the camera rather than behind it, and far enough in front that the
-   * projection puts it below the bottom edge of the canvas at every scale. It has to be a
-   * road of its own: a single edge joining the two staging nodes directly would be a
-   * straight line from one side of the scene to the other, and a train on it would be drawn
-   * running backwards across the middle of the yard. Which is precisely what it did.
+   * projection puts them below the bottom edge of the canvas at every scale. Each has to be
+   * a road of its own — a single edge joining two staging nodes directly would be a straight
+   * line from one side of the scene to the other, and a train on it would be drawn running
+   * backwards across the middle of the yard, which is precisely what it did.
+   *
+   * One per circuit, rather than one shared. Two workings running opposite ways down the
+   * same hidden road would be a head-on conflict that nobody could see and the occupancy
+   * model would have to arbitrate — an invisible deadlock is still a deadlock, and the whole
+   * point of a road having a sense is that it cannot happen.
+   *
+   * They are stacked, and the x at which each circuit dives off the yard is chosen so that
+   * no two of these ever cross. Anything joining the yard to a road in front of it has to
+   * pass *through* the westbound express line on the way, so the corridors are placed
+   * outside the stretch of it a train ever occupies — which is what the staging nodes being
+   * different distances out is for. scene.test.ts sweeps hidden track for crossings along
+   * with everything else now, because leaving it out is how two of them came to converge on
+   * the same point and run a train through another where nobody could see it.
    */
-  { id: "return", y: -560, span: [-2200, 4000], rail: "hidden" },
+  { id: "west-loop", y: -240, span: [-900, 2400], rail: "hidden", sense: "east" },
+  { id: "return", y: -560, span: [-2200, 4000], rail: "hidden", sense: "west" },
+  { id: "east-loop", y: -380, span: [-1700, 3700], rail: "hidden", sense: "west" },
 ];
 
 /**
@@ -176,13 +226,38 @@ export const RAIL_YARD_SCENE: RailScene = {
      * see, which is what "leaves the yard" has to mean if a departure is to read as
      * distance rather than as a despawn.
      */
-    { id: "stage-east", road: "main-out", x: 3300, kind: "stage" },
-    { id: "stage-west", road: "main-in", x: -1320, kind: "stage" },
+    { id: "stage-east", road: "express-east", x: 3300, kind: "stage" },
+    { id: "stage-west", road: "express-east", x: -1320, kind: "stage" },
     { id: "loop-east", road: "return", x: 3700, kind: "stage" },
     { id: "loop-west", road: "return", x: -1900, kind: "stage" },
 
+    /*
+     * The westbound express line and its own way back round. Two nodes on the road itself
+     * and two on a loop of its own, which is the whole of it — no turnout anywhere.
+     */
+    { id: "xw-east", road: "express-west", x: 1900, kind: "junction" },
+    { id: "xw-west", road: "express-west", x: -400, kind: "junction" },
+    { id: "xw-hold", road: "west-loop", x: 2100, kind: "stage" },
+    { id: "xw-back", road: "west-loop", x: -600, kind: "stage" },
+
+    /*
+     * And the eastbound express's, which shares the yard's own running line but waits on
+     * track of its own, so a train standing between runs is never in the yard's way.
+     *
+     * `xe-enter` is why there are three of these rather than two. Bringing the express
+     * straight onto `stage-west` gave it an approach that converged with the yard's own
+     * return for the last five hundred units, and two trains on two different edges met in
+     * the middle of it — the hidden twin of tracks laid over each other, and the traffic
+     * model has nothing to arbitrate with until the rails actually meet at a node. Landing
+     * it a hundred and twenty units short means the two approaches stay apart and the
+     * junction is a junction.
+     */
+    { id: "xe-hold", road: "east-loop", x: -1400, kind: "stage" },
+    { id: "xe-enter", road: "express-east", x: -800, kind: "junction" },
+    { id: "xe-far", road: "east-loop", x: 3400, kind: "stage" },
+
     // The west throat: a ladder stepping down from the arrival line to the depot road.
-    { id: "mi-far-w", road: "main-in", x: -1180, kind: "junction" },
+    { id: "xe-far-w", road: "express-east", x: -1180, kind: "junction" },
     { id: "la-far-w", road: "load-a", x: -770, kind: "junction" },
     { id: "lb-far-w", road: "load-b", x: -360, kind: "junction" },
 
@@ -197,7 +272,7 @@ export const RAIL_YARD_SCENE: RailScene = {
     { id: "lb-e", road: "load-b", x: 1580, kind: "junction" },
 
     // The unloading road, likewise, reached from the arrival line further east.
-    { id: "mi-w", road: "main-in", x: 460, kind: "junction" },
+    { id: "xe-w", road: "express-east", x: 460, kind: "junction" },
     { id: "la-w", road: "load-a", x: 870, kind: "junction" },
     { id: "la-unload", road: "load-a", x: 1280, kind: "stop" },
     { id: "la-e", road: "load-a", x: 1380, kind: "junction" },
@@ -209,27 +284,34 @@ export const RAIL_YARD_SCENE: RailScene = {
      * is the point. A yard with no conflict in it has nothing to simulate.
      */
     { id: "x-load-a", road: "load-a", x: 1990, kind: "junction" },
-    { id: "x-main-in", road: "main-in", x: 2400, kind: "junction" },
-    { id: "mo-e", road: "main-out", x: 2810, kind: "junction" },
+    { id: "x-express-e", road: "express-east", x: 2400, kind: "junction" },
   ],
 
   edges: [
-    // The west throat, stepping down road by road to the shed.
+    /*
+     * The west throat, stepping down road by road to the shed.
+     *
+     * Worked at line speed rather than at yard speed, and every unit of it is west of the
+     * frame. That is a pacing number rather than a look: a train takes the best part of a
+     * minute to come down this ladder at shunting speed, all of it out of sight, and three
+     * trains doing that at once is most of what "either a full queue or nothing on screen"
+     * was. Nobody can see how fast a train takes a turnout nobody can see.
+     */
     {
-      id: "mi-to-la-far",
-      from: "mi-far-w",
+      id: "xe-to-la-far",
+      from: "xe-far-w",
       to: "la-far-w",
       kind: "crossover",
-      speed: 0.5,
+      speed: 1,
     },
     {
       id: "la-to-lb-far",
       from: "la-far-w",
       to: "lb-far-w",
       kind: "crossover",
-      speed: 0.45,
+      speed: 0.95,
     },
-    { id: "lb-to-dp-far", from: "lb-far-w", to: "dp-w", kind: "crossover", speed: 0.4 },
+    { id: "lb-to-dp-far", from: "lb-far-w", to: "dp-w", kind: "crossover", speed: 0.9 },
     { id: "dp-stand-in", from: "dp-w", to: "shed-road", kind: "run", speed: 0.3 },
 
     // Out of the shed, along the depot road and onto the loading road.
@@ -241,14 +323,13 @@ export const RAIL_YARD_SCENE: RailScene = {
     // The east throat, up to the main line and away.
     { id: "lb-to-la-e", from: "lb-e", to: "x-load-a", kind: "crossover", speed: 0.5 },
     {
-      id: "la-to-mi-e",
+      id: "la-to-xe-e",
       from: "x-load-a",
-      to: "x-main-in",
+      to: "x-express-e",
       kind: "crossover",
       speed: 0.62,
     },
-    { id: "mi-to-mo-e", from: "x-main-in", to: "mo-e", kind: "crossover", speed: 0.78 },
-    { id: "mo-away", from: "mo-e", to: "stage-east", kind: "run", speed: 1 },
+    { id: "xe-away", from: "x-express-e", to: "stage-east", kind: "run", speed: 3.4 },
 
     /*
      * The return: off the east end, round the front, and back on at the west.
@@ -259,21 +340,43 @@ export const RAIL_YARD_SCENE: RailScene = {
      * through the traffic. The loop road is far enough in front of the camera to be below
      * the bottom edge of the canvas, so a train on it is genuinely somewhere else.
      *
-     * This is the only track in the yard that is not a piece of railway anyone can see, and
-     * it exists so that no train is ever repositioned — which is what every one of the
-     * vanishing defects came down to.
+     * This is track that is not a piece of railway anyone can see, and it exists so that no
+     * train is ever repositioned — which is what every one of the vanishing defects came
+     * down to.
      */
-    { id: "loop-out", from: "stage-east", to: "loop-east", kind: "hidden", speed: 4 },
-    { id: "loop-round", from: "loop-east", to: "loop-west", kind: "hidden", speed: 4 },
-    { id: "loop-in", from: "loop-west", to: "stage-west", kind: "hidden", speed: 4 },
+    { id: "loop-out", from: "stage-east", to: "loop-east", kind: "hidden", speed: 5 },
+    { id: "loop-round", from: "loop-east", to: "loop-west", kind: "hidden", speed: 5 },
+    { id: "loop-in", from: "loop-west", to: "stage-west", kind: "hidden", speed: 5 },
 
-    // Back in from the west, and along to the unloading road.
-    { id: "mi-in", from: "stage-west", to: "mi-far-w", kind: "run", speed: 1 },
-    { id: "mi-run", from: "mi-far-w", to: "mi-w", kind: "run", speed: 0.92 },
-    { id: "mi-to-la", from: "mi-w", to: "la-w", kind: "crossover", speed: 0.5 },
+    // Back in from the west, along the running line and down to the unloading road. The
+    // through run past `xe-w` is what makes this a main line rather than a dead end into a
+    // turnout: an express uses the whole of it without touching the yard.
+    { id: "xe-in", from: "stage-west", to: "xe-far-w", kind: "run", speed: 3.4 },
+    { id: "xe-run", from: "xe-far-w", to: "xe-enter", kind: "run", speed: 3.2 },
+    { id: "xe-mid", from: "xe-enter", to: "xe-w", kind: "run", speed: 3.2 },
+    { id: "xe-through", from: "xe-w", to: "x-express-e", kind: "run", speed: 3.2 },
+    { id: "xe-to-la", from: "xe-w", to: "la-w", kind: "crossover", speed: 0.5 },
     { id: "la-to-unload", from: "la-w", to: "la-unload", kind: "run", speed: 0.36 },
     { id: "la-unload-out", from: "la-unload", to: "la-e", kind: "run", speed: 0.42 },
     { id: "la-e-join", from: "la-e", to: "x-load-a", kind: "run", speed: 0.55 },
+
+    /*
+     * The westbound express line: one run the length of the scene, and a loop of its own.
+     *
+     * No turnout touches it anywhere, which is what makes running it the other way free.
+     * Its loop is a separate road from the yard's for the same reason the yard's exists at
+     * all — two circuits sharing hidden track in opposite senses is a head-on conflict
+     * nobody can see, and an invisible deadlock is still a deadlock.
+     */
+    { id: "xw-run", from: "xw-east", to: "xw-west", kind: "run", speed: 3.2 },
+    { id: "xw-drop", from: "xw-west", to: "xw-back", kind: "hidden", speed: 5 },
+    { id: "xw-round", from: "xw-back", to: "xw-hold", kind: "hidden", speed: 5 },
+    { id: "xw-launch", from: "xw-hold", to: "xw-east", kind: "hidden", speed: 5 },
+
+    // And the eastbound express's way on and off the yard's running line.
+    { id: "xe-launch", from: "xe-hold", to: "xe-enter", kind: "hidden", speed: 5 },
+    { id: "xe-drop", from: "stage-east", to: "xe-far", kind: "hidden", speed: 5 },
+    { id: "xe-round", from: "xe-far", to: "xe-hold", kind: "hidden", speed: 5 },
   ],
 
   structures: [
@@ -303,21 +406,27 @@ export const RAIL_YARD_SCENE: RailScene = {
      */
     {
       kind: "gantry",
-      near: P * 2 - 32,
+      // The near leg stands clear of the eastbound express's ballast rather than on the
+      // edge of it — that road carries the fastest thing in the scene now.
+      near: P * 2 - 22,
       far: P * 4 + 26,
       travel: [950, 1490],
     },
     /*
-     * The yard stack, on open ground east of the depot road's end so the portal can reach
-     * it without the trolley having to cross a running line. Containers come from here and
-     * go back to here — they are never conjured onto a wagon.
+     * The conveyor, on open ground east of the depot road's end so the portal can reach its
+     * head without the trolley having to cross a running line.
+     *
+     * It runs *east*, out of the frame. That is the point of it: the pile it replaces had no
+     * way in and no way out, so the simulation invented containers at one end and destroyed
+     * them at the other. Freight rides in from off camera and rides back out the same way,
+     * and the only boundary the yard has with the world outside it is one nobody can see.
      */
-    { kind: "stack", at: [1250, P * 4], length: 46, depth: 20 },
+    { kind: "conveyor", at: [1230, P * 4], length: 670 },
 
     { kind: "signal", at: [670, P * 4 - 30], guards: "dp-to-lb" },
     { kind: "signal", at: [1550, P * 3 - 30], guards: "lb-to-la-e" },
     { kind: "signal", at: [1350, P * 2 - 30], guards: "la-e-join" },
-    { kind: "signal", at: [430, P * 1 - 28], guards: "mi-to-la" },
+    { kind: "signal", at: [430, P * 1 - 28], guards: "xe-to-la" },
 
     // The skyline stands on the horizon. Irregular on purpose: evenly spaced blocks read as
     // a fence, and the eye finds a repeat long before it finds a city.
@@ -350,9 +459,27 @@ export const RAIL_YARD_SCENE: RailScene = {
       stable: ["shed-road"],
       loadAt: ["lb-load"],
       unloadAt: ["la-unload"],
-      leaveVia: ["stage-east"],
+      /*
+       * A train that has hauled away waits on the *hidden* road rather than at the end of
+       * the running line. Both are off camera, so it makes no difference to the picture —
+       * and all the difference to the traffic, because the running line is what the
+       * eastbound express uses to get through. A train parked at the end of it is a train
+       * standing in the express's way for the whole of its dwell.
+       */
+      leaveVia: ["loop-east"],
       enterVia: ["stage-west"],
     },
+  ],
+
+  /*
+   * One through working per express road, and exactly one train per working.
+   *
+   * That is what makes "never more than one express on the line" structural: there is no
+   * rule anywhere that enforces it, because there is nothing that could produce a second.
+   */
+  expresses: [
+    { id: "express-west", holdAt: "xw-hold", runTo: "xw-west" },
+    { id: "express-east", holdAt: "xe-hold", runTo: "xe-far" },
   ],
 };
 

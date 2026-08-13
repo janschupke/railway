@@ -171,7 +171,7 @@ describe("the projection", () => {
 describe("trackBandHeight", () => {
   const bare = {
     ...scene,
-    roads: [{ id: "r", y: 20, span: [0, 10], rail: "main" }],
+    roads: [{ id: "r", y: 20, span: [0, 10], rail: "main", sense: "east" }],
   } as const;
 
   it("measures to the top of a train on the furthest running line", () => {

@@ -15,7 +15,7 @@
 
 import {
   CONTAINER,
-  CRANE,
+  CONVEYOR,
   GANTRY,
   LOCOMOTIVE,
   SHED,
@@ -37,7 +37,7 @@ import { poseAlong } from "./graph";
 import type { YardPalette } from "./palette";
 import type { RailScene, SceneStructure } from "./scene";
 import type { TrainState, WorldState } from "./simulation";
-import { spreaderZ, stackSlot } from "./crane";
+import { spreaderZ } from "./crane";
 import { aspectOf } from "./traffic";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";
 import { YARD } from "./config";
@@ -173,12 +173,18 @@ function placeTrain(
  * `globalCompositeOperation`, which is a second rendering mode to reason about and a new op
  * for the recording fake to learn. `bays + 1` uprights between `bays` doorways is the same
  * picture, in the same box walker, at five fills.
+ *
+ * Measured from the **front plane**, which is where the drawable's pose already puts it.
+ * They were measured from the shed's centre as well, so the offset was applied twice and
+ * the wall stood a whole depth in front of the building — a roof hovering with a gap of
+ * clear ground beneath it, which is most of what "roofs aren't attached to walls" was.
  */
-function shedFront(structure: Extract<SceneStructure, { kind: "shed" }>): Box[] {
-  const front = -structure.depth / 2;
+export function shedFrontBoxes(
+  structure: Extract<SceneStructure, { kind: "shed" }>,
+): Box[] {
   const boxes: Box[] = [
     {
-      at: [0, front, SHED.doorHeight],
+      at: [0, 0, SHED.doorHeight],
       size: [structure.length, SHED.wallThickness, structure.height - SHED.doorHeight],
       fill: "structure",
     },
@@ -188,7 +194,7 @@ function shedFront(structure: Extract<SceneStructure, { kind: "shed" }>): Box[] 
   const opening = (structure.length - piers * SHED.pierWidth) / structure.bays;
   for (let index = 0; index < piers; index++) {
     boxes.push({
-      at: [index * (SHED.pierWidth + opening), front, 0],
+      at: [index * (SHED.pierWidth + opening), 0, 0],
       size: [SHED.pierWidth, SHED.wallThickness, SHED.doorHeight],
       fill: "structure",
     });
@@ -269,31 +275,45 @@ function gantryDrawables(
 }
 
 /**
- * The yard stack, as however many boxes are actually on it.
+ * The belt, and whatever freight is riding it.
  *
- * Each box carries its own livery. Passing none was the first version, and every container
- * in the stack fell back to the metal colour — a grey pile that read as a building rather
- * than as the freight the trains are there for.
+ * A drawable rather than part of the static layer even though the deck never moves: the
+ * boxes on it do, and they have to sort against the belt and against everything else at the
+ * same depth in one pass. Baking the deck would put it behind a container standing on it.
+ *
+ * Each box carries its own livery. Passing none was the first version of the pile this
+ * replaces, and every container fell back to the metal colour — a grey heap that read as a
+ * building rather than as the freight the trains are there for.
  */
-function stackDrawables(
+function conveyorDrawables(
   world: WorldState,
-  structure: Extract<SceneStructure, { kind: "stack" }>,
+  structure: Extract<SceneStructure, { kind: "conveyor" }>,
   palette: YardPalette,
 ): Drawable[] {
-  return world.crane.stack.map((colour, index) => {
-    // The same slot arithmetic the crane reaches with, so the pile is where it grabs.
-    const { column, level } = stackSlot(index);
-    return {
-      ...standing(structure.at[0] + column * CRANE.STACK_PITCH_X, structure.at[1], [
+  const [headX, y] = structure.at;
+  // Half a pitch of deck either side of the end slots, so a box always stands on belt.
+  const deck = standing(headX, y, [
+    {
+      at: [-CONVEYOR.PITCH / 2, -CONVEYOR.WIDTH / 2, 0],
+      size: [structure.length + CONVEYOR.PITCH, CONVEYOR.WIDTH, CONVEYOR.DECK_Z],
+      fill: "structureTrim",
+    },
+  ]);
+
+  return [
+    deck,
+    ...world.conveyor.boxes.map((box) => ({
+      // Centred on the box's own x, which is the point the crane reaches for.
+      ...standing(box.at, y, [
         {
-          at: [0, -structure.depth / 2, level * CRANE.STACK_STEP_Z],
-          size: [structure.length, structure.depth, CRANE.STACK_STEP_Z - 1],
-          fill: "cargo",
+          at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, CONVEYOR.DECK_Z],
+          size: CONTAINER.size,
+          fill: "cargo" as const,
         },
       ]),
-      cargo: { colour: palette.freight[colour] ?? palette.metal, ribs: 0 },
-    };
-  });
+      cargo: { colour: palette.freight[box.colour] ?? palette.metal, ribs: 0 },
+    })),
+  ];
 }
 
 function drawSmoke(
@@ -375,14 +395,14 @@ export function drawFrame(
       const road = world.graph.roads.get(structure.road);
       if (!road) continue;
       drawables.push(
-        standing(structure.at, road.y - structure.depth / 2, shedFront(structure)),
+        standing(structure.at, road.y - structure.depth / 2, shedFrontBoxes(structure)),
       );
       continue;
     }
     if (structure.kind === "gantry")
       drawables.push(...gantryDrawables(world, structure, palette));
-    if (structure.kind === "stack")
-      drawables.push(...stackDrawables(world, structure, palette));
+    if (structure.kind === "conveyor")
+      drawables.push(...conveyorDrawables(world, structure, palette));
     if (structure.kind === "signal") {
       drawables.push(
         standing(structure.at[0], structure.at[1], [

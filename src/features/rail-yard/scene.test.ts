@@ -90,18 +90,56 @@ describe("the scene's topology", () => {
     expect(graph.edges.get(edge.id)?.length ?? 0).toBeGreaterThan(0);
   });
 
-  it("works every road in one direction only", () => {
+  it("works every road in the one direction it declares", () => {
     /*
-     * The assertion the whole yard rests on. Two trains can never want the same track from
+     * The assertion the whole yard rests on. Two trains can never want the same rails from
      * opposite ends, so head-on conflict is not expressible and neither is the deadlock
-     * that comes with it. Every edge running west to east is a stronger claim than "no
-     * anti-parallel pair" and is what actually guarantees it.
+     * that comes with it.
+     *
+     * Every along-road edge, hidden ones included. A hidden road is still a piece of
+     * railway two trains can be on at once, and a conflict nobody can see is still a
+     * conflict — which is why each circuit has a loop of its own rather than sharing one.
+     * Edges that *leave* one road for another are the exception, and only those.
      */
     for (const edge of scene.edges) {
-      if (edge.kind === "hidden") continue;
       const from = nodeOf(edge.from)!;
       const to = nodeOf(edge.to)!;
-      expect(to.x, `${edge.id} runs east`).toBeGreaterThan(from.x);
+      if (from.road !== to.road) continue;
+      const sense = roadOf(from.road)!.sense;
+      const runs = to.x > from.x ? "east" : "west";
+      expect(runs, `${edge.id} runs ${sense}`).toBe(sense);
+    }
+  });
+
+  it("gives the westbound line no turnouts at all", () => {
+    /*
+     * What makes running one road the other way free. A crossover onto it would be track
+     * shared between two senses, and the deadlock argument would have to become an argument
+     * about timing instead of an argument about shape.
+     */
+    const westbound = scene.roads.filter((road) => road.sense === "west");
+    for (const road of westbound) {
+      if (road.rail === "hidden") continue;
+      const turnouts = scene.edges.filter(
+        (edge) =>
+          edge.kind === "crossover" &&
+          (nodeOf(edge.from)!.road === road.id || nodeOf(edge.to)!.road === road.id),
+      );
+      expect(
+        turnouts.map((edge) => edge.id),
+        `${road.id} turnouts`,
+      ).toEqual([]);
+    }
+  });
+
+  it("never crosses one sense with another", () => {
+    // A crossover steps between adjacent roads, and both of them have to be worked the same
+    // way or the step itself is a head-on conflict.
+    for (const edge of scene.edges) {
+      if (edge.kind !== "crossover") continue;
+      const from = roadOf(nodeOf(edge.from)!.road)!;
+      const to = roadOf(nodeOf(edge.to)!.road)!;
+      expect(to.sense, `${edge.id} senses`).toBe(from.sense);
     }
   });
 
@@ -141,7 +179,9 @@ describe("the scene's topology", () => {
       const from = nodeOf(edge.from)!;
       const to = nodeOf(edge.to)!;
       const spans = byRoad.get(from.road) ?? [];
-      spans.push([from.x, to.x]);
+      // West to east whichever way the road is worked: this is about where the rails are,
+      // not about which way anything travels along them.
+      spans.push([Math.min(from.x, to.x), Math.max(from.x, to.x)]);
       byRoad.set(from.road, spans);
     }
     for (const [road, spans] of byRoad) {
@@ -162,13 +202,19 @@ describe("the scene's topology", () => {
      * another. A ladder throat has no diamonds in it, and this is the sweep that keeps it
      * that way — sample every edge to a polyline and look for a proper intersection between
      * any pair that does not already meet at a node.
+     *
+     * Hidden track included, and it did not used to be. Leaving it out is exactly how two
+     * hidden approaches came to converge on the same node along nearly the same line: the
+     * traffic model has nothing to arbitrate with until rails meet where a node says they
+     * do, so a train ran straight through another five hundred units short of it. Nobody
+     * could see it happen, which makes it worse rather than better.
      */
-    const drawn = [...graph.edges.values()].filter((edge) => edge.kind !== "hidden");
+    const all = [...graph.edges.values()];
 
-    for (let a = 0; a < drawn.length; a++) {
-      for (let b = a + 1; b < drawn.length; b++) {
-        const first = drawn[a]!;
-        const second = drawn[b]!;
+    for (let a = 0; a < all.length; a++) {
+      for (let b = a + 1; b < all.length; b++) {
+        const first = all[a]!;
+        const second = all[b]!;
         const shares =
           first.from === second.from ||
           first.from === second.to ||
@@ -257,6 +303,62 @@ describe("the duties", () => {
     }
   });
 
+  it.each(scene.expresses)("$id can run its lap and get back to hold", (express) => {
+    expect(nodeOf(express.holdAt), `${express.id} hold`).toBeDefined();
+    expect(nodeOf(express.runTo), `${express.id} destination`).toBeDefined();
+    expect(findPath(graph, express.holdAt, express.runTo)).not.toBeNull();
+    expect(findPath(graph, express.runTo, express.holdAt)).not.toBeNull();
+  });
+
+  it("holds every express on track no other working uses", () => {
+    /*
+     * The reason an express is a train rather than a duty, stated as a property of the
+     * scene. It waits somewhere off camera that nothing else needs, so an express standing
+     * between runs costs the yard nothing — and a yard train that has hauled away waits on
+     * its own loop for the same reason, rather than at the end of the running line where it
+     * would be in the express's way for its whole dwell.
+     */
+    const held = scene.expresses.map((express) => nodeOf(express.holdAt)!);
+    const parked = scene.duties.flatMap((duty) => [
+      ...duty.leaveVia.map((id) => nodeOf(id)!),
+      ...duty.stable.map((id) => nodeOf(id)!),
+    ]);
+
+    for (const node of held) {
+      expect(roadOf(node.road)!.rail, `${node.id} is hidden`).toBe("hidden");
+      for (const other of [...held, ...parked]) {
+        if (other === node) continue;
+        expect(
+          other.road === node.road && other.x === node.x,
+          `${node.id} shared`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("runs each express the length of a road nobody stops on", () => {
+    // "Passing through, skipping the loading logic" — an express's route has to reach both
+    // sides of the frame, or it is a train that appears in the middle of the scene.
+    for (const express of scene.expresses) {
+      const path = findPath(graph, express.holdAt, express.runTo)!;
+      const visited = path.edges.flatMap((id) => {
+        const edge = graph.edges.get(id)!;
+        return [nodeOf(edge.from)!, nodeOf(edge.to)!];
+      });
+      const xs = visited.map((node) => node.x);
+      expect(Math.min(...xs), express.id).toBeLessThan(
+        scene.focusX - scene.extent.width / 2,
+      );
+      expect(Math.max(...xs), express.id).toBeGreaterThan(
+        scene.focusX + scene.extent.width / 2,
+      );
+      // And it stops nowhere in between.
+      for (const node of visited) {
+        expect(node.kind, `${express.id} passes ${node.id}`).not.toBe("stop");
+      }
+    }
+  });
+
   it("stages far enough out that no camera can reach a train standing there", () => {
     /*
      * "Away" has to mean somewhere nobody can see. The widest fit this page produces is the
@@ -295,23 +397,39 @@ describe("the yard's furniture", () => {
     }
   });
 
-  it("puts the stack under the gantry and clear of every road", () => {
-    const stack = scene.structures.find(
-      (structure): structure is Extract<SceneStructure, { kind: "stack" }> =>
-        structure.kind === "stack",
+  it("puts the belt's head under the gantry and clear of every road", () => {
+    const belt = scene.structures.find(
+      (structure): structure is Extract<SceneStructure, { kind: "conveyor" }> =>
+        structure.kind === "conveyor",
     )!;
-    const centre = stack.at[0] + stack.length / 2;
-    expect(centre).toBeGreaterThanOrEqual(gantry.travel[0]);
-    expect(centre).toBeLessThanOrEqual(gantry.travel[1]);
-    expect(stack.at[1]).toBeGreaterThanOrEqual(gantry.near);
-    expect(stack.at[1]).toBeLessThanOrEqual(gantry.far);
+    const [headX, y] = belt.at;
+    expect(headX).toBeGreaterThanOrEqual(gantry.travel[0]);
+    expect(headX).toBeLessThanOrEqual(gantry.travel[1]);
+    expect(y).toBeGreaterThanOrEqual(gantry.near);
+    expect(y).toBeLessThanOrEqual(gantry.far);
 
-    // No track under the pile.
+    // No track under the belt, anywhere along it.
     for (const road of scene.roads) {
-      if (Math.abs(road.y - stack.at[1]) > TRACK.ballastWidth / 2) continue;
-      const overlaps = centre >= road.span[0] && centre <= road.span[1];
-      expect(overlaps, `stack fouls ${road.id}`).toBe(false);
+      if (Math.abs(road.y - y) > TRACK.ballastWidth / 2) continue;
+      const overlaps = headX <= road.span[1] && headX + belt.length >= road.span[0];
+      expect(overlaps, `the belt fouls ${road.id}`).toBe(false);
     }
+  });
+
+  it("runs the belt's tail off the side of the frame", () => {
+    /*
+     * The whole point of a belt over the pile it replaces: freight has to arrive from
+     * somewhere and leave for somewhere. Boxes enter and are taken away at the tail, so the
+     * tail has to be as far outside the camera as a staging node is, or the yard is back to
+     * conjuring containers in plain view.
+     */
+    const belt = scene.structures.find(
+      (structure): structure is Extract<SceneStructure, { kind: "conveyor" }> =>
+        structure.kind === "conveyor",
+    )!;
+    expect(belt.at[0] + belt.length).toBeGreaterThan(
+      scene.focusX + scene.extent.width / 2,
+    );
   });
 
   it("stands the shed over its own road, with the stop inside it", () => {

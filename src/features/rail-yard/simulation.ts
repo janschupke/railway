@@ -15,14 +15,23 @@
  * is that **a train is always somewhere**. It never has a null path, it is never
  * repositioned, and nothing is created or destroyed while anyone could be looking. A train
  * that leaves does so by driving out of the frame on rails that continue; it comes back by
- * driving in. Wagons are made once and kept for the life of the world. Containers move
- * between a stack and a wagon in the jaws of a crane. If something is not visible, it is
- * because it is somewhere else — never because it has stopped existing.
+ * driving in. Wagons are made once and kept for the life of the world. Containers ride a
+ * belt in from off camera and move between it and a wagon in the jaws of a crane. If
+ * something is not visible, it is because it is somewhere else — never because it has
+ * stopped existing.
  */
 
-import { CRANE, LOCOMOTIVE, SIM, WAGON, YARD } from "./config";
+import { LOCOMOTIVE, SIM, WAGON, YARD } from "./config";
 import { localToWorld, type Pose } from "./geometry";
-import { buildGraph, findPath, poseAlong, type Path, type RailGraph } from "./graph";
+import {
+  buildGraph,
+  edgeIndexAt,
+  edgeStart,
+  findPath,
+  poseAlong,
+  type Path,
+  type RailGraph,
+} from "./graph";
 import { FREIGHT_TOKENS } from "./palette";
 import { pick, range, rangeInt, weightedPick, type Rng } from "./rng";
 import { RAIL_YARD_SCENE, type Duty, type RailScene } from "./scene";
@@ -34,8 +43,25 @@ import {
   wagonNoseDistance,
   type CraneState,
 } from "./crane";
+import {
+  createConveyor,
+  headClear,
+  headLoaded,
+  putOnBelt,
+  stepConveyor,
+  takeFromBelt,
+  type Conveyor,
+} from "./conveyor";
 import { limitFor, occupancyOf, type Occupancy } from "./traffic";
 
+/**
+ * Two rings, not one.
+ *
+ * The first eight phases are a yard train's working day. The last three are an express's,
+ * and it is a *train* rather than a duty for a reason: a through working that had to be
+ * expressed as a duty would need a stop it does not make and a crane it does not use, and
+ * every phase handler would grow a branch for the case where none of that applies.
+ */
 export type TrainPhase =
   | "idle"
   | "outbound"
@@ -44,7 +70,24 @@ export type TrainPhase =
   | "away"
   | "inbound"
   | "unloading"
-  | "homebound";
+  | "homebound"
+  | "waiting"
+  | "running"
+  | "returning";
+
+/** The ring each kind of train goes round, in order. Exported for the lifecycle test. */
+export const YARD_RING: readonly TrainPhase[] = [
+  "idle",
+  "outbound",
+  "loading",
+  "hauling",
+  "away",
+  "inbound",
+  "unloading",
+  "homebound",
+];
+
+export const EXPRESS_RING: readonly TrainPhase[] = ["waiting", "running", "returning"];
 
 /**
  * How a phase ends.
@@ -62,6 +105,9 @@ const PHASE_KIND: Readonly<Record<TrainPhase, "timed" | "working" | "moving">> =
   inbound: "moving",
   unloading: "working",
   homebound: "moving",
+  waiting: "timed",
+  running: "moving",
+  returning: "moving",
 };
 
 type Wagon = {
@@ -81,6 +127,8 @@ type Itinerary = {
 export type TrainState = {
   readonly id: string;
   readonly dutyId: string;
+  /** Which ring this train goes round. The crane only ever looks at yard trains. */
+  readonly kind: "yard" | "express";
   phase: TrainPhase;
   /** Never null. A train that cannot be seen is off-camera, not absent. */
   path: Path;
@@ -110,6 +158,7 @@ export type WorldState = {
   elapsedMs: number;
   trains: TrainState[];
   crane: CraneState;
+  conveyor: Conveyor;
   puffs: Puff[];
   occupancy: Occupancy;
 };
@@ -236,6 +285,28 @@ const COMPLETE: Readonly<
     depart(train, path, "homebound");
   },
 
+  /*
+   * The express's ring. It waits on hidden track, runs the length of its road, and comes
+   * back round the way it came — no stop, no crane, and nothing to arbitrate but traffic.
+   */
+  waiting: (world, train) => {
+    const path = routeFrom(world, train, train.itinerary.leaveVia);
+    if (!path) return retry(train);
+    depart(train, path, "running");
+  },
+
+  running: (world, train) => {
+    const path = routeFrom(world, train, train.itinerary.enterVia);
+    if (!path) return retry(train);
+    depart(train, path, "returning");
+  },
+
+  returning: (_world, train, rng) => {
+    train.speed = 0;
+    train.phase = "waiting";
+    train.timer = range(rng, YARD.EXPRESS_GAP_MS);
+  },
+
   homebound: (world, train, rng) => {
     /*
      * Home, and standing in the shed rather than back where it started.
@@ -252,6 +323,26 @@ const COMPLETE: Readonly<
   },
 };
 
+/**
+ * An express standing between runs, and the one thing that can cut its wait short.
+ *
+ * The wait is drawn from a band when the run ends — random, so two runs never look like a
+ * metronome — and that is the whole of the pacing while the yard is working. But a gap drawn
+ * during a busy minute outlives the minute: it was twenty-one seconds once, and the yard
+ * fell quiet eight seconds into it. So the ceiling is applied every step rather than at the
+ * draw, which is the difference between "the express is sooner when the yard is quiet" and
+ * "the express was going to be sooner, back when it was decided".
+ *
+ * It counts what is *showing*, not what is moving, because a train doing three hundred units
+ * a second down a hidden road is not something the frame has in it. The count is taken once
+ * for the whole step and handed in: working it out per waiting express meant two poses per
+ * train per express per step, which is the most expensive thing in the loop asked for twice.
+ */
+function holdExpress(train: TrainState, showing: number): void {
+  if (train.kind !== "express" || train.phase !== "waiting") return;
+  if (showing <= 1) train.timer = Math.min(train.timer, YARD.EXPRESS_URGENT_MS);
+}
+
 function dutyOf(world: WorldState, train: TrainState): Duty {
   return (
     world.graph.scene.duties.find((duty) => duty.id === train.dutyId) ??
@@ -259,24 +350,58 @@ function dutyOf(world: WorldState, train: TrainState): Duty {
   );
 }
 
-/** Line speed for the edge under the nose, and for the one after it, whichever is lower. */
+/**
+ * Line speed: the limit under the nose, and every slower one ahead approached on a curve.
+ *
+ * The curve is the same `sqrt(v^2 + 2 a s)` the brake uses everywhere else, which is what
+ * makes a train slow *into* a turnout rather than either arriving at it too fast or crawling
+ * all the way to it.
+ *
+ * It crawled. The version this replaces took the minimum of the edge under the nose and the
+ * one after it, flat — so a train on the sixteen-hundred-unit run down the main line was
+ * held to the speed of a turnout at the far end of it for the whole distance, thirty-seven
+ * units a second where the road is rated at eighty-five. Forty-four seconds to cross a
+ * frame it should cross in thirteen, and the single biggest reason the yard looked empty:
+ * the train was there, and it was barely moving.
+ */
 function lineSpeed(world: WorldState, train: TrainState): number {
   const { path } = train;
   if (path.edges.length === 0) return 0;
-  let slowest = Infinity;
-  let covered = 0;
-  for (let index = 0; index < path.edges.length; index++) {
-    const edge = world.graph.edges.get(path.edges[index]!);
+
+  const index = edgeIndexAt(path, train.distance);
+  const here = world.graph.edges.get(path.edges[index]!);
+  let limit = YARD.BASE_SPEED * (here?.speed ?? 1);
+
+  for (let next = index + 1; next < path.edges.length; next++) {
+    const gap = Math.max(0, edgeStart(path, next) - train.distance);
+    /*
+     * Nothing further on can lower the answer once the gap alone exceeds what the train
+     * could brake through, because the curve is monotonic in `gap` and the slowest an edge
+     * can be is a standstill. An exact bound rather than a horizon: a homebound leg is a
+     * dozen edges long and this is per train per step.
+     */
+    if (2 * YARD.BRAKE * gap >= limit * limit) break;
+    const edge = world.graph.edges.get(path.edges[next]!);
     if (!edge) continue;
-    const start = index === 0 ? 0 : path.marks[index - 1]!;
-    // The edge the nose is on, plus the next one — so a train slows *before* it reaches a
-    // crossover rather than braking once it is already on the curve.
-    if (path.marks[index]! < train.distance) continue;
-    slowest = Math.min(slowest, edge.speed);
-    covered += 1;
-    if (covered >= 2 || start > train.distance + YARD.HEADWAY) break;
+    const ahead = YARD.BASE_SPEED * edge.speed;
+    limit = Math.min(limit, Math.sqrt(ahead * ahead + 2 * YARD.BRAKE * gap));
   }
-  return YARD.BASE_SPEED * (slowest === Infinity ? 1 : slowest);
+  return limit;
+}
+
+/**
+ * Whether a train is somewhere a visitor can actually see it, and moving.
+ *
+ * The measure the traffic is tuned against, so it has to mean what the eye means: on a road
+ * that is drawn, inside the frame, and going somewhere. A locomotive doing three hundred
+ * units a second down a hidden road is not something to look at.
+ */
+function isShowing(world: WorldState, train: TrainState): boolean {
+  if (train.speed <= 1) return false;
+  const pose = poseAlong(world.graph, train.path, train.distance);
+  if (!pose || pose.y < 0) return false;
+  const { focusX, extent } = world.graph.scene;
+  return Math.abs(pose.x - focusX) <= extent.width / 2;
 }
 
 /** Where the locomotive's chimney is, in the world. Rotated, and rising in z. */
@@ -323,27 +448,29 @@ function ageSmoke(world: WorldState, dtMs: number): void {
  * to be serving actually is, on the ground, right now.
  */
 function craneTarget(world: WorldState) {
-  const stack = world.graph.scene.structures.find((s) => s.kind === "stack");
-  const stackX = stack?.kind === "stack" ? stack.at[0] + stack.length / 2 : 0;
-  const stackY = stack?.kind === "stack" ? stack.at[1] : 0;
+  const { conveyor, crane } = world;
+  const beltX = conveyor.headX;
+  const beltY = conveyor.y;
+  // Taking needs a box settled in the head slot; setting one down needs the slot clear.
+  const exchangeReady =
+    crane.direction === "load" ? headLoaded(conveyor) : headClear(conveyor);
 
-  const train = world.trains.find(
-    (candidate) => candidate.id === world.crane.servingTrainId,
-  );
-  if (!train) return { wagonX: stackX, wagonY: stackY, stackX, stackY };
+  const train = world.trains.find((candidate) => candidate.id === crane.servingTrainId);
+  if (!train) return { wagonX: beltX, wagonY: beltY, beltX, beltY, exchangeReady };
 
-  const nose = wagonNoseDistance(train.distance, world.crane.wagonIndex);
+  const nose = wagonNoseDistance(train.distance, crane.wagonIndex);
   const pose = poseAlong(world.graph, train.path, nose - WAGON.length / 2);
   return {
-    wagonX: pose?.x ?? stackX,
-    wagonY: pose?.y ?? stackY,
-    stackX,
-    stackY,
+    wagonX: pose?.x ?? beltX,
+    wagonY: pose?.y ?? beltY,
+    beltX,
+    beltY,
+    exchangeReady,
   };
 }
 
-function runCrane(world: WorldState, dtMs: number, rng: Rng): void {
-  const { crane } = world;
+function runCrane(world: WorldState, dtMs: number): void {
+  const { conveyor, crane } = world;
 
   /*
    * The crane serves one train at a time, and picks up whoever is waiting.
@@ -356,6 +483,7 @@ function runCrane(world: WorldState, dtMs: number, rng: Rng): void {
   if (crane.servingTrainId === null) {
     const waiting = world.trains.find(
       (train) =>
+        train.kind === "yard" &&
         (train.phase === "loading" || train.phase === "unloading") &&
         train.handled < train.wagons.length,
     );
@@ -363,6 +491,16 @@ function runCrane(world: WorldState, dtMs: number, rng: Rng): void {
       assignCrane(crane, waiting.id, waiting.phase === "loading" ? "load" : "unload");
     }
   }
+
+  /*
+   * Which way the belt runs, which is the crane's business rather than the belt's own.
+   *
+   * Unloading needs the head slot clear to set a box into, so the belt carries the line
+   * away; anything else needs the head slot stocked, so it feeds. That changes once per
+   * train rather than once per frame, which is why there is no hysteresis here.
+   */
+  conveyor.running =
+    crane.servingTrainId !== null && crane.direction === "unload" ? "out" : "in";
 
   const event = stepCrane(crane, dtMs, craneTarget(world));
   if (event === null) return;
@@ -373,23 +511,27 @@ function runCrane(world: WorldState, dtMs: number, rng: Rng): void {
 
   /*
    * Every container is conserved across a latch: one leaves a place and arrives in the
-   * spreader, or leaves the spreader and arrives somewhere. The only two exceptions are the
-   * yard's boundary with the world outside it — a box that comes in off the road when the
-   * stack is bare, and one that is trucked away when it is full — and both are deliberate.
+   * spreader, or leaves the spreader and arrives somewhere. There are no exceptions any
+   * more. The yard's boundary with the world outside it used to be here, as a box invented
+   * when the stack was bare and one destroyed when it was full; it is the far end of the
+   * belt now, which is a place, off camera, that freight travels to and from.
+   *
+   * `holding` staying null is a real outcome rather than a defect: a wagon that turns out
+   * to be empty gives the spreader nothing, and nothing is what it puts down.
    */
   if (event === "closed") {
-    crane.holding =
-      crane.direction === "load"
-        ? (crane.stack.pop() ?? Math.floor(rng() * FREIGHT_TOKENS.length))
-        : (wagon?.cargo ?? Math.floor(rng() * FREIGHT_TOKENS.length));
-    if (crane.direction === "unload" && wagon) wagon.cargo = null;
+    if (crane.direction === "load") crane.holding = takeFromBelt(conveyor);
+    else if (wagon) {
+      crane.holding = wagon.cargo;
+      wagon.cargo = null;
+    }
     return;
   }
 
   if (crane.direction === "load") {
     if (wagon) wagon.cargo = crane.holding;
-  } else if (crane.stack.length < CRANE.STACK_CAPACITY) {
-    crane.stack.push(crane.holding ?? 0);
+  } else if (crane.holding !== null) {
+    putOnBelt(conveyor, crane.holding);
   }
   crane.holding = null;
   train.handled += 1;
@@ -416,8 +558,21 @@ export function step(world: WorldState, dtMs: number, rng: Rng): WorldState {
       path: train.path,
       distance: train.distance,
       length: trainLength(train),
+      speed: train.speed,
     })),
   );
+
+  /*
+   * How much of the yard is in the frame, worked out once. Only a waiting express reads it,
+   * and only two of those exist, but it costs two poses per train and both of them would
+   * otherwise be paid twice a step for an answer that cannot differ.
+   */
+  const waiting = world.trains.some(
+    (train) => train.kind === "express" && train.phase === "waiting",
+  );
+  const showing = waiting
+    ? world.trains.filter((train) => isShowing(world, train)).length
+    : 0;
 
   for (const train of world.trains) {
     const kind = PHASE_KIND[train.phase];
@@ -425,6 +580,7 @@ export function step(world: WorldState, dtMs: number, rng: Rng): WorldState {
     if (kind !== "moving") {
       train.speed = 0;
       train.blocked = false;
+      holdExpress(train, showing);
       if (train.timer > 0) train.timer = Math.max(0, train.timer - dtMs);
       const ready =
         kind === "timed" ? train.timer <= 0 : train.handled >= train.wagons.length;
@@ -440,6 +596,7 @@ export function step(world: WorldState, dtMs: number, rng: Rng): WorldState {
         path: train.path,
         distance: train.distance,
         length: trainLength(train),
+        speed: train.speed,
       },
       stopFor(train),
     );
@@ -487,7 +644,8 @@ export function step(world: WorldState, dtMs: number, rng: Rng): WorldState {
     }
   }
 
-  runCrane(world, dtMs, rng);
+  runCrane(world, dtMs);
+  stepConveyor(world.conveyor, dtMs, rng);
   ageSmoke(world, dtMs);
   return world;
 }
@@ -515,8 +673,13 @@ export function stepsFor(
 
 export function createWorld(rng: Rng, scene: RailScene = RAIL_YARD_SCENE): WorldState {
   const graph = buildGraph(scene);
-  const stack = scene.structures.find((s) => s.kind === "stack");
-  const gantry = scene.structures.find((s) => s.kind === "gantry");
+  const belt = scene.structures.find((s) => s.kind === "conveyor");
+  const conveyor = createConveyor(
+    rng,
+    belt?.kind === "conveyor" ? belt.at[0] : 0,
+    belt?.kind === "conveyor" ? belt.at[0] + belt.length : 0,
+    belt?.kind === "conveyor" ? belt.at[1] : 0,
+  );
 
   const trains: TrainState[] = [];
   for (let index = 0; index < YARD.TRAIN_COUNT; index++) {
@@ -544,6 +707,7 @@ export function createWorld(rng: Rng, scene: RailScene = RAIL_YARD_SCENE): World
     trains.push({
       id: `train-${index}`,
       dutyId: duty.id,
+      kind: "yard",
       phase: "idle",
       path,
       distance: 0,
@@ -557,15 +721,60 @@ export function createWorld(rng: Rng, scene: RailScene = RAIL_YARD_SCENE): World
     });
   }
 
+  /*
+   * One express per through working, standing on its own hidden road.
+   *
+   * Its rake is loaded and stays loaded — an express is freight passing through, so the
+   * containers on it belong to somewhere else and the crane never touches them. That is
+   * also why they are made here with cargo already on: nothing in the yard would ever put
+   * one there.
+   */
+  scene.expresses.forEach((express, index) => {
+    const path = findPath(graph, express.holdAt, express.runTo);
+    if (!path) return;
+
+    const wagons: Wagon[] = [];
+    for (let wagon = 0; wagon < rangeInt(rng, YARD.RAKE_SIZE); wagon++) {
+      wagons.push({
+        cargo: Math.floor(rng() * FREIGHT_TOKENS.length),
+        ribs: rangeInt(rng, [5, 8]),
+      });
+    }
+
+    trains.push({
+      id: express.id,
+      dutyId: express.id,
+      kind: "express",
+      phase: "waiting",
+      path,
+      distance: 0,
+      speed: 0,
+      timer: range(rng, YARD.EXPRESS_GAP_MS) + index * YARD.EXPRESS_STAGGER_MS,
+      handled: 0,
+      wagons,
+      // An express has one stop and it is the one it starts from, so every waypoint on it
+      // is either where it holds or where it runs to. Nothing else applies to a working
+      // that never enters the yard.
+      itinerary: {
+        stable: express.holdAt,
+        loadAt: express.holdAt,
+        unloadAt: express.holdAt,
+        enterVia: express.holdAt,
+        leaveVia: express.runTo,
+      },
+      blocked: false,
+      sinceSmoke: 0,
+    });
+  });
+
   const world: WorldState = {
     graph,
     elapsedMs: 0,
     trains,
-    crane: createCrane(
-      rng,
-      gantry?.kind === "gantry" ? gantry.travel[0] : 0,
-      stack?.kind === "stack" ? stack.at[1] : 0,
-    ),
+    // Parked over the head of the belt: the one place in the crane's reach that is not
+    // above a running line, so an idle magnet is never anything a train can drive into.
+    crane: createCrane(conveyor.headX, conveyor.y),
+    conveyor,
     puffs: [],
     occupancy: { onEdge: new Map(), atNode: new Map() },
   };
@@ -589,7 +798,11 @@ export function snapshot(world: WorldState): unknown {
   return {
     elapsedMs: world.elapsedMs,
     puffs: world.puffs.map((puff) => ({ ...puff })),
-    crane: { ...world.crane, stack: [...world.crane.stack] },
+    crane: { ...world.crane },
+    conveyor: {
+      ...world.conveyor,
+      boxes: world.conveyor.boxes.map((box) => ({ ...box })),
+    },
     trains: world.trains.map((train) => ({
       ...train,
       wagons: train.wagons.map((wagon) => ({ ...wagon })),
