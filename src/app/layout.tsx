@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Inter, Inter_Tight } from "next/font/google";
+import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
@@ -9,11 +9,38 @@ import { Footer } from "@/components/footer";
 import { SkipLink } from "@/components/ui/page";
 import "./globals.css";
 
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
-const interTight = Inter_Tight({
+/**
+ * The two faces, self-hosted from files in the repository.
+ *
+ * `next/font/google` downloads these at **build time**, which makes every build depend on
+ * reaching fonts.gstatic.com — and when that call fails there is no graceful degradation:
+ * Turbopack emits the `@font-face` rules and then cannot resolve the files they name, so the
+ * build ends with one "Module not found" per unicode range. That is what CI hit, twenty-one
+ * times in one run, on a build that is otherwise entirely self-contained: the tests run
+ * against a fake Railway, the yard is seeded rather than clocked, and nothing else in this
+ * repository asks the network for permission to compile.
+ *
+ * Serving is unchanged. `next/font/google` was already emitting these same files under
+ * /_next/static/media — see the CSP note in lib/security-headers.ts — so this moves *when*
+ * they are fetched, not where they come from. The two files are the `latin` subsets of the
+ * variable faces, which is what was being preloaded before and all this app's own text needs;
+ * a Cyrillic container name coming back from Railway now falls back to a system face rather
+ * than pulling a subset nobody had preloaded anyway.
+ *
+ * `100 900` is the variable weight axis both files carry. Declaring the range rather than a
+ * list is what lets the 500/600/700 the type scale asks for come out of one file.
+ */
+const inter = localFont({
+  src: "./fonts/inter-latin.woff2",
+  variable: "--font-inter",
+  weight: "100 900",
+  display: "swap",
+});
+const interTight = localFont({
+  src: "./fonts/inter-tight-latin.woff2",
   variable: "--font-inter-tight",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: "100 900",
+  display: "swap",
 });
 
 export async function generateMetadata(): Promise<Metadata> {
