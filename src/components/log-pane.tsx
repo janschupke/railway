@@ -49,7 +49,7 @@ export function LogPane({
   return (
     <div className="relative">
       <ScrollArea
-        className="bg-subtle h-64 rounded-md"
+        className="bg-subtle h-pane-log rounded-md"
         viewportClassName="p-3"
         viewportRef={viewportRef}
         viewportProps={{

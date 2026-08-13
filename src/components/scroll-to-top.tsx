@@ -64,11 +64,12 @@ export function ScrollToTop() {
         document.getElementById(CONTAINER_HEADING_ID)?.focus({ preventScroll: true });
       }}
       /*
-       * Bottom-LEFT. The toast viewport is fixed bottom-right at z-50, and a button
-       * parked there would sit under every spin-up and destroy confirmation. z-40 keeps
-       * toasts above this when they do collide on a narrow viewport.
+       * Bottom-LEFT. The toast viewport is fixed bottom-right, and a button parked there
+       * would sit under every spin-up and destroy confirmation. The ordering that keeps
+       * toasts above this when they do collide on a narrow viewport is `float` below
+       * `overlay` — declared once in tokens.css rather than argued for here.
        */
-      className="fixed bottom-4 left-4 z-40 shadow-lg"
+      className="z-float fixed bottom-4 left-4 shadow-lg"
     >
       <ArrowUp aria-hidden />
     </Button>

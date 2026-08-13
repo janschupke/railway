@@ -21,10 +21,10 @@ export function AlertDialogContent({
 }: React.ComponentProps<typeof Primitive.Content>) {
   return (
     <Primitive.Portal>
-      <Primitive.Overlay className="animate-overlay bg-overlay fixed inset-0 z-50" />
+      <Primitive.Overlay className="animate-overlay bg-overlay z-overlay fixed inset-0" />
       <Primitive.Content
         className={cn(
-          "border-border bg-raised animate-content fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))]",
+          "border-border bg-raised animate-content z-overlay fixed top-1/2 left-1/2 w-[min(28rem,calc(100vw-2rem))]",
           "-translate-x-1/2 -translate-y-1/2 rounded-xl border p-5 shadow-lg",
           className,
         )}

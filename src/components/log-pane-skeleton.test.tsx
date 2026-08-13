@@ -18,11 +18,11 @@ describe("LogPaneSkeleton", () => {
   it("occupies exactly the height the real pane will", () => {
     // Two files own this number; a mismatch is a jump at the moment the chunk lands.
     const { unmount } = render(<LogPaneSkeleton />);
-    expect(screen.getByRole("log")).toHaveClass("h-64");
+    expect(screen.getByRole("log")).toHaveClass("h-pane-log");
     unmount();
 
     render(<LogPane lines={[]} status="connecting" />);
     // LogPane puts the height on ScrollArea's root, one level above the log viewport.
-    expect(screen.getByRole("log").parentElement).toHaveClass("h-64");
+    expect(screen.getByRole("log").parentElement).toHaveClass("h-pane-log");
   });
 });

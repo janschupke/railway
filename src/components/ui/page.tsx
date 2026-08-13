@@ -109,7 +109,7 @@ export function SkipLink({ label }: { label: string }) {
   return (
     <a
       href={`#${MAIN_ID}`}
-      className="focus-ring bg-surface text-text border-border sr-only rounded-md border px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      className="focus-ring bg-surface text-text border-border focus:z-overlay sr-only rounded-md border px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
     >
       {label}
     </a>

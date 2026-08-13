@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { chip } from "./ui/chip";
 import { Text } from "./ui/text";
 import { isTransitioning, type ContainerState } from "@/lib/railway/types";
 
@@ -35,7 +36,7 @@ export function StatusBadge({
       variant="badge"
       tone="inherit"
       data-state-color={state}
-      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5"
+      className={chip({ gap: "dot" })}
     >
       <span
         aria-hidden

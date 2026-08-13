@@ -89,3 +89,41 @@ describe("motion tokens", () => {
     expect(theme).not.toMatch(/^\s*--duration-[\w-]+:/m);
   });
 });
+
+describe("stacking and pane tokens", () => {
+  /*
+   * Same trap as the durations above, and it bit: `z-*` resolves against
+   * `--z-index-*`, not `--z-*`. Declaring `--z-float` in the theme generated no rule
+   * whatsoever — the class landed in the markup, matched nothing, and the elements
+   * stacked in DOM order, which looks almost right until a toast lands under a dialog.
+   * Nothing in a render test can see that; the generated stylesheet can.
+   */
+  it.each([
+    ["float", "--layer-float"],
+    ["overlay", "--layer-overlay"],
+  ])("exposes z-%s under the --z-index namespace", (name, token) => {
+    expect(declared(GLOBALS, `--z-index-${name}`)).toBe(`var(${token})`);
+    expect(declared(TOKENS, token)).toBeTruthy();
+  });
+
+  it("orders float below overlay, which is the whole contract", () => {
+    // scroll-to-top sits at float; dialogs, popovers, tooltips and toasts at overlay.
+    const value = (token: string) => Number(declared(TOKENS, token));
+    expect(value("--layer-float")).toBeLessThan(value("--layer-overlay"));
+  });
+
+  it("exposes the log pane height as a height utility", () => {
+    // The pane and its skeleton must match exactly or expanding a row jumps.
+    expect(declared(GLOBALS, "--height-pane-log")).toBe("var(--pane-h-log)");
+    expect(declared(TOKENS, "--pane-h-log")).toBe("16rem");
+  });
+
+  it("never declares --z-* or --layer-* inside the theme, which generates nothing", () => {
+    const theme = GLOBALS.slice(
+      GLOBALS.indexOf("@theme inline {"),
+      GLOBALS.indexOf("\n}", GLOBALS.indexOf("@theme inline {")),
+    );
+    expect(theme).not.toMatch(/^\s*--z-(?!index)[\w-]+:/m);
+    expect(theme).not.toMatch(/^\s*--layer-[\w-]+:/m);
+  });
+});

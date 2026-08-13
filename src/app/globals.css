@@ -62,6 +62,23 @@
   --padding-control-lg: var(--control-px-lg);
 
   /*
+   * Stacking and pane geometry, as `z-float` / `z-overlay` / `h-pane-log`.
+   *
+   * Same namespace trap as the control heights above, and it bit on the first attempt:
+   * `z-*` resolves against `--z-index-*`, NOT `--z-*`. Declaring `--z-float` here
+   * generated no utility at all and no error — the class simply had no rule, so the
+   * elements stacked in DOM order and looked almost right. Verified by grepping the
+   * built stylesheet for the generated class rather than by reading the page.
+   *
+   * `h-*` resolves against `--height-*`. Both raw tokens keep different names in
+   * tokens.css so the mapping is not self-referential — the file header says exactly
+   * this about --rc-* versus --color-*.
+   */
+  --z-index-float: var(--layer-float);
+  --z-index-overlay: var(--layer-overlay);
+  --height-pane-log: var(--pane-h-log);
+
+  /*
    * Motion durations. Tailwind's `duration-*` utility reads `--transition-duration-*`,
    * not `--duration-*`, so the token name and the theme key differ on purpose.
    *

@@ -39,7 +39,7 @@ export function Tooltip({
           side={side}
           sideOffset={6}
           className={cn(
-            "border-border bg-raised text-text z-50 rounded-md border px-2 py-1",
+            "border-border bg-raised text-text z-overlay rounded-md border px-2 py-1",
             "text-caption shadow-md",
             /*
              * Explicit, because tooltips used to animate only by accident: the old rule

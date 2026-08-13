@@ -232,7 +232,7 @@ export function Combobox({
               onOpenAutoFocus={(event) => event.preventDefault()}
               onCloseAutoFocus={(event) => event.preventDefault()}
               className={cn(
-                "border-border bg-raised animate-content z-50 max-h-64 overflow-y-auto",
+                "border-border bg-raised animate-content z-overlay max-h-64 overflow-y-auto",
                 "w-[var(--radix-popover-trigger-width)] rounded-md border p-1 shadow-lg",
               )}
             >

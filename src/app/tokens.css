@@ -111,6 +111,35 @@
   --duration-slow: 320ms;
 
   /*
+   * ---- Stacking ----
+   *
+   * The whole contract, in one place. It used to live in a prose comment in
+   * scroll-to-top.tsx explaining why that button is z-40 while everything else is z-50 —
+   * which is the wrong place for a rule six files depend on, and the wrong medium for a
+   * rule that is really an ordering.
+   *
+   * Two layers, because two is all this app has: things that float above the page but
+   * below anything modal, and things that take over — dialogs, popovers, tooltips,
+   * toasts. A third would need a reason written here.
+   */
+  --layer-float: 40; /* back-to-top, and anything else that hovers over content */
+  --layer-overlay: 50; /* dialog, popover, tooltip, toast */
+
+  /*
+   * ---- Panes ----
+   *
+   * The log viewport's height, which the skeleton has to match exactly or expanding a
+   * row jumps. That contract was two `h-64`s in two files kept in step by a comment and
+   * an assertion.
+   *
+   * The popup ceilings in Select and Combobox are deliberately NOT this token. They are
+   * the same 16rem today by coincidence — one is a reading surface sized to show a
+   * useful run of log lines, the other is "how far may a menu grow before it scrolls" —
+   * and tying them together would make one of them move for the other's reason.
+   */
+  --pane-h-log: 16rem;
+
+  /*
    * ---- Controls ----
    *
    * One height and one inline inset per size step, shared by everything that sits on a

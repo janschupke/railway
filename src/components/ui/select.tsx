@@ -86,7 +86,7 @@ export function Select({
               position="popper"
               sideOffset={4}
               className={cn(
-                "border-border bg-raised z-50 max-h-64 min-w-[var(--radix-select-trigger-width)]",
+                "border-border bg-raised z-overlay max-h-64 min-w-[var(--radix-select-trigger-width)]",
                 "overflow-hidden rounded-md border shadow-lg",
                 /*
                  * Enter only, for the reason tooltip.tsx gives: Presence keeps a closing

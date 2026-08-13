@@ -172,7 +172,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           </Toast.Root>
         ))}
 
-        <Toast.Viewport className="fixed right-4 bottom-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
+        <Toast.Viewport className="z-overlay fixed right-4 bottom-4 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
       </Toast.Provider>
     </ToastContext.Provider>
   );

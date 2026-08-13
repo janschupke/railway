@@ -10,10 +10,10 @@ import {
 } from "@/lib/container-filters";
 import { LIST } from "@/lib/constants";
 import { CONTAINER_STATES, type ContainerState } from "@/lib/railway/types";
-import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
+import { chip } from "./ui/chip";
 import { Text } from "./ui/text";
 
 /** Catalog key per origin, so this file owns the order and the catalog owns the wording. */
@@ -104,16 +104,7 @@ export function ContainerFilterBar({
       >
         {CONTAINER_STATES.map((state) => (
           <ToggleGroup.Item key={state} value={state} asChild>
-            <Text
-              asChild
-              variant="badge"
-              className={cn(
-                "focus-ring border-border text-text-muted cursor-pointer rounded-full border px-2 py-0.5",
-                "transition-colors",
-                "hover:bg-subtle hover:text-text",
-                "data-[state=on]:border-accent data-[state=on]:bg-accent-bg data-[state=on]:text-accent",
-              )}
-            >
+            <Text asChild variant="badge" className={chip({ selectable: true })}>
               <button type="button">{tStates(state)}</button>
             </Text>
           </ToggleGroup.Item>
