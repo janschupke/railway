@@ -1,0 +1,30 @@
+# Everything the build produces or the developer's machine holds.
+#
+# `COPY . .` in the build stage is what makes this file load-bearing rather than an
+# optimisation: without it the image would carry the host's node_modules — built for a
+# different platform — over the ones the image just installed, and a stale .next over the
+# one it is about to build.
+node_modules
+.next
+out
+build
+
+# The one that is a security matter rather than a size one. Next loads a .env in the
+# working directory automatically, so a copied .env would bake this machine's real
+# Railway credentials into an image layer. Service variables are the only channel.
+.env
+.env.*
+!.env.example
+
+# Test and audit output, none of which the runtime reads.
+coverage
+playwright-report
+test-results
+.lighthouseci
+.lighthouse-cookie
+
+# History and editor state.
+.git
+.github
+.cursor
+*.tsbuildinfo

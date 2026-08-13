@@ -48,21 +48,22 @@ legitimate CI failure, not something to work around.
 
 ## Node, TypeScript, tooling
 
-- **Node 22**, declared in `package.json` as `engines.node: "22.x"` and nowhere else.
-  That field is not documentation: Nixpacks reads it to choose the build image, and it
-  outranks a `.nvmrc` in its own precedence order — which is why there still is no
-  `.nvmrc`. It was missing once, Nixpacks defaulted to Node 18, and corepack's pinned
-  pnpm 11.9.0 died on it with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` — an error that
-  names pnpm and means "wrong Node". `src/toolchain.test.ts` holds it and the four CI
-  `node-version` keys to the same major.
-- Pinned to a major, not a floor. `>=22` lets the builder resolve to whatever it has
-  newest, which is a different runtime arriving without a commit.
-- pnpm 11.9.0, pinned via `packageManager`. pnpm is not incidental —
-  `pnpm-workspace.yaml`'s `allowBuilds` is a postinstall allowlist npm cannot express, and
-  `pnpm audit --prod` is the shape the CI gate argues for. ADR-11 in
-  [README.md](../README.md) prices the alternative. The pin is also why the Node version
-  has to be declared: corepack fetches exactly that pnpm and runs it on whatever the image
-  provides.
+- **Node 22**, named in three places that must agree: `engines.node: "22.x"` in
+  package.json, the `FROM node:22.x.y-alpine` line in the Dockerfile, and `node-version`
+  in all four CI jobs. Pinned to a major rather than a floor — `>=22` lets a builder
+  resolve to whatever it has newest, a different runtime arriving without a commit.
+- **pnpm 11.9.0**, pinned via `packageManager` _and_ installed by exact version in the
+  Dockerfile. pnpm is not incidental — `pnpm-workspace.yaml`'s `allowBuilds` is a
+  postinstall allowlist npm cannot express, and `pnpm audit --prod` is the shape the CI
+  gate argues for. ADR-11 in [README.md](../README.md) prices the alternative.
+- **Nothing in the deployment path may consult `packageManager`.** That field is a
+  corepack instruction, and corepack's own version belongs to whatever base image is in
+  use, not to this repository. See the deployment section for the failure that taught us
+  this. The Dockerfile installs pnpm from npm for the same reason.
+- `src/toolchain.test.ts` holds all of the above to each other: the `FROM` major against
+  `engines.node`, the installed pnpm against `packageManager`, every CI `node-version`
+  against the deployed major, and the Dockerfile against ever running `corepack enable`.
+  Each pair is two literals with nothing between them.
 - Files under `scripts/` run on Node's type-stripping loader
   (`node --experimental-strip-types`), which is why `allowImportingTsExtensions` is on and
   why those imports carry explicit `.ts` specifiers. Safe because the project never emits.
@@ -91,14 +92,41 @@ legitimate CI failure, not something to work around.
 
 ## Deployment
 
-Railway itself, NIXPACKS. `railway.json`: `startCommand: pnpm start`, healthcheck
-`/api/health` with a 60 s timeout, restart `ON_FAILURE` ×3. `APP_URL` is derived from
-Railway's injected `RAILWAY_PUBLIC_DOMAIN` in production and only needs setting locally.
+Railway, **`DOCKERFILE` builder** — see `railway.json` and the `Dockerfile`. Healthcheck
+`/api/health` with a 60 s timeout, restart `ON_FAILURE` ×3. There is **no
+`startCommand`**: the runtime stage has no package manager in it, so `pnpm start` would
+build cleanly and then fail to boot. `CMD` runs `next start` directly.
 
-The build image's Node comes from `engines.node` — see the toolchain section above.
-Nothing else in the repo reaches Nixpacks: it does not read `.github/workflows/ci.yml`,
-and it does not read the rules. A runtime assumption that lives only in CI is an
-assumption the thing that ships has never seen.
+`APP_URL` is derived from Railway's injected `RAILWAY_PUBLIC_DOMAIN` in production and
+only needs setting locally. The build sets a placeholder for it and for the three
+credentials, inline on the `pnpm build` command, so nothing outside can override them and
+no image layer records them — the same rule `ci.yml` states, enforced rather than
+restated.
+
+### Why not NIXPACKS
+
+It resolved `pnpm` to the corepack shim in its Node derivation. corepack read
+`packageManager`, downloaded pnpm 11.9.0, and compiled its entry point — a three-line CJS
+shim whose only statement is `import('./pnpm.mjs')` — without a dynamic-import callback:
+
+```
+TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]
+    at .../corepack/pnpm/11.9.0/bin/pnpm.cjs:3:1
+    at Module2._compile (.../corepack/dist/lib/corepack.cjs)
+```
+
+Reproduced by version: corepack 0.20.0 and 0.24.1 fail exactly this way and cache to
+`corepack/pnpm/11.9.0`, which is the path the deploy log printed; 0.31.0 and later succeed
+and cache to `corepack/v1/pnpm/11.9.0`, which it did not. **The cause was the builder's
+corepack**, which no file in this repository can pin — which is why declaring
+`engines.node` moved the Node in the trace from 18.20.5 to 22.14.0 and changed nothing
+else.
+
+The Dockerfile is not chosen for control alone. It can be built and run on a laptop, so a
+deployment change is testable before it is a deployment: `docker build -t rw . && docker
+run --rm -p 3000:3000 -e SESSION_SECRET=… -e RAILWAY_CLIENT_ID=… -e
+RAILWAY_CLIENT_SECRET=… -e RAILWAY_PUBLIC_DOMAIN=… rw`. Two guesses at builder
+configuration went out untested before this one did not.
 
 Single replica by design — the SSE stream slot counter is in-memory and per replica, and SSE
 pins a client to one replica anyway.
