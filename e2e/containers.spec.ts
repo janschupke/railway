@@ -125,7 +125,12 @@ test.describe("container lifecycle", () => {
     await expect(
       onlyVisible(postgres.getByRole("button", { name: /^destroy$/i })),
     ).toHaveCount(0);
-    await expect(postgres).toContainText("Not managed here");
+
+    // The slot is not left dead: what a reader wants from a row this app cannot destroy
+    // is Railway's own page for it, and that is what the action column offers instead.
+    const open = onlyVisible(postgres.getByRole("link", { name: "Open in Railway" }));
+    await expect(open).toHaveAttribute("target", "_blank");
+    await expect(open).toHaveAttribute("href", /railway\.com\/project\/.+\/service\//);
   });
 
   test("rejects a duplicate name at the field that caused it", async ({ page }) => {

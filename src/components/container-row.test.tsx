@@ -98,7 +98,23 @@ describe("ContainerRow", () => {
 
     renderRow({ managed: false });
     expect(screen.queryByRole("button", { name: /^destroy$/i })).toBeNull();
-    expect(screen.getByText("Not managed here")).toBeInTheDocument();
+  });
+
+  it("gives an unmanaged container the one action it does have", () => {
+    /*
+     * The slot used to hold a button reading "Not managed here" that did nothing when
+     * pressed — a control whose entire content was an explanation of why it was not a
+     * control, which is read as broken long before it is read as a note. Railway's own
+     * page is where this service can actually be managed, so that is what the row's
+     * action column offers.
+     */
+    renderRow({ managed: false, serviceId: "svc_pg" });
+
+    const open = screen.getByRole("link", { name: "Open in Railway" });
+    expect(open).toHaveAttribute("href", expect.stringContaining("/service/svc_pg"));
+    // A new tab that can reach back into this one is the reason rel is asserted, not
+    // assumed, on every outbound link in this file.
+    expect(open).toHaveAttribute("rel", "noreferrer");
   });
 
   it("explains why an unmanaged container has no destroy control", async () => {
@@ -108,13 +124,13 @@ describe("ContainerRow", () => {
     renderRow({ managed: false, displayName: "postgres" });
 
     /*
-     * The accessible name must be the visible text. It used to be overridden with
-     * "Why can't postgres be destroyed?", which shares no words with the label on
-     * screen — WCAG 2.5.3, and unusable by voice control.
+     * A description, not a label. Overriding the name left it sharing no words with the
+     * visible text — WCAG 2.5.3, and unusable by voice control — so the accessible name
+     * stays "Open in Railway" and the reason rides along as the tooltip.
      */
-    const info = screen.getByRole("button", { name: "Not managed here" });
+    const open = screen.getByRole("link", { name: "Open in Railway" });
     // Radix Tooltip opens on hover or focus, not click.
-    await user.hover(info);
+    await user.hover(open);
 
     expect(
       await screen.findByText(/only services created in this app/i),

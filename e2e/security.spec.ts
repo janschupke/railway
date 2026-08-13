@@ -84,6 +84,40 @@ test("every response carries the security headers", async ({ page }) => {
   expect(headers["x-powered-by"]).toBeUndefined();
 });
 
+test("the app icon is reachable and embeddable, signed out", async ({ page }) => {
+  /*
+   * The mark is the one response here meant to be read by another origin — a README, a
+   * link preview, anything that embeds it by URL. Two things have to hold at once and
+   * each is invisible from the other's side: the session proxy must not gate it (or the
+   * fetch is a redirect to the landing page), and Cross-Origin-Resource-Policy must say
+   * `cross-origin` (or a foreign document is handed the bytes and refuses to paint them).
+   *
+   * No signIn: this runs on a context with no session cookie, which is the state every
+   * caller that matters is in.
+   */
+  const icon = await page.request.get("/icon.svg");
+
+  expect(icon.status()).toBe(200);
+  expect(icon.headers()["content-type"]).toContain("image/svg+xml");
+  expect(icon.headers()["cross-origin-resource-policy"]).toBe("cross-origin");
+  // Still sniff-proofed and still framed by the blanket rule; the exemption is one
+  // header wide, not a hole in the table.
+  expect(icon.headers()["x-content-type-options"]).toBe("nosniff");
+});
+
+test("nothing but the icon is embeddable cross-origin", async ({ page }) => {
+  // The blanket value is what stops another site embedding a page or an API response
+  // while a visitor's session cookie is live, so the exemption is asserted from both
+  // sides — one path grants it, and the ones beside it do not.
+  for (const path of ["/", "/api/health"]) {
+    const response = await page.request.get(path);
+    expect(
+      response.headers()["cross-origin-resource-policy"],
+      `${path} should stay same-origin`,
+    ).toBe("same-origin");
+  }
+});
+
 test("static assets are protected from content sniffing", async ({ page }) => {
   /*
    * The proxy deliberately does not run for /_next/static — it would pay a JWE decrypt

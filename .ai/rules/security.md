@@ -70,8 +70,19 @@ generic message.
 - **CSP is written in `src/proxy.ts` only**, because it carries a per-request nonce.
   `src/lib/security-headers.ts` builds it.
 - **Everything else is in `next.config.ts`** on `/:path*`: HSTS, `nosniff`,
-  `X-Frame-Options: DENY`, `Referrer-Policy`, COOP, CORP, `Permissions-Policy`, and
+  `X-Frame-Options: DENY`, `Referrer-Policy`, COOP, `Permissions-Policy`, and
   `poweredByHeader: false`.
+- **CORP is the one value that is not the same on every path.** `/:path*` gets
+  `same-origin`; `/icon.svg` alone gets `cross-origin`, because the app's mark is the one
+  response here meant to be read by another origin — a README, a link preview. It is not
+  CORS: no credentials, no readable body for script. Widening it to any other path means
+  letting another site embed that response while a visitor's session cookie is live.
+
+  The rules are ordered — a later value for the same key wins — so the blanket rule comes
+  first. `src/app/security-headers.test.ts` asserts the order and both values;
+  `e2e/security.spec.ts` reads them off a live response, signed out, along with the fact
+  that the proxy matcher does not gate the icon. A grant on a path the proxy redirects is
+  a header on a 307.
 
 Two footguns in the CSP path, both load-bearing: the nonce must be set on
 `request.headers` (Next parses it off the request header with `getScriptNonceFromHeader`

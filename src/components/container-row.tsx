@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ChevronDown, ExternalLink, Info } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 import { useThrottledRefresh } from "@/hooks/use-throttled-refresh";
@@ -296,15 +296,39 @@ export function ContainerRow({
           />
         ) : (
           /*
-           * No aria-label here. Overriding the name with a differently-worded question
-           * left the accessible name sharing no words with the visible text, so voice
-           * control could not address the control it can see (WCAG 2.5.3 Label in
-           * Name). The tooltip supplies the explanation as a description instead.
+           * The slot every other row uses to act, holding the one action this row has.
+           *
+           * It used to be a button that said "Not managed here" and did nothing when
+           * pressed — a control whose whole content was an explanation of why it was not
+           * a control. The information is worth keeping and the affordance was a lie:
+           * something that looks like a button and answers a click with nothing is read
+           * as broken long before it is read as a note.
+           *
+           * Railway's own page is genuinely what a reader wants next here, since this
+           * service cannot be destroyed from this app. The name above links to the same
+           * place, which is not a reason to leave this slot dead: the name is navigation
+           * inside a sentence, and this is the row's action, in the column where every
+           * other row keeps one.
+           *
+           * The tooltip still carries the explanation — it is the answer to "where is my
+           * Destroy button", which is the question this row actually raises. As a
+           * description rather than a label, so the accessible name stays the visible
+           * text (WCAG 2.5.3 Label in Name).
            */
           <Tooltip content={t("notManagedTooltip")}>
-            <Button variant="ghost" size="sm">
-              <Info aria-hidden />
-              {t("notManaged")}
+            <Button variant="secondary" size="sm" asChild>
+              <a
+                href={railwayServiceUrl({
+                  projectId,
+                  serviceId: container.serviceId,
+                  environmentId,
+                })}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink aria-hidden />
+                {t("openInRailway")}
+              </a>
             </Button>
           </Tooltip>
         )}

@@ -87,8 +87,7 @@
   "containers": {
     "noSource": "no source",
     "toggleLogs": "Logs for {name}",
-    "notManaged": "Not managed here",
-    "notManagedTooltip": "Only services created in this app can be destroyed here.",
+    "notManagedTooltip": "Only services created in this app can be destroyed here. Manage this one on Railway.",
     "noDeployment": "This service has no deployment yet, so there is nothing to stream.",
     "failedExplanation": "Railway reported this deployment as failed. Its API returns the status and nothing else, so the reason — a missing image, a refused pull, a crash on the first tick — is on Railway's own page for this service.",
     "openInRailway": "Open in Railway",
