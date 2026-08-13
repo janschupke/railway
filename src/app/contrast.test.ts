@@ -392,6 +392,47 @@ describe.each(THEMES)("%s rail yard", (themeName, theme) => {
     expect(tie, `tie vs rail in ${themeName}`).toBeLessThan(rail);
   });
 
+  it("lays the track bed on the ground rather than into it", () => {
+    /*
+     * The bug this exists for: the dark theme ran the ground, the ballast and the ties up
+     * three neighbouring rungs of one ramp, at 1.23:1 and 1.22:1. Inside a banding step,
+     * so the permanent way disappeared and the rails read as two bright lines floating on
+     * nothing. Bounded above as well, because ballast is a shoulder of stone and not a
+     * highlight — the yard would read as a runway if it shouted.
+     */
+    const ballast = ratio("--rc-yard-ballast", "--rc-yard-ground");
+    expect(ballast, `ballast in ${themeName}`).toBeGreaterThanOrEqual(1.35);
+    expect(ballast, `ballast in ${themeName}`).toBeLessThan(AA_LARGE);
+  });
+
+  it("keeps the sleepers darker than the stone they sit in", () => {
+    /*
+     * A direction, not a ratio — and that is why it needs its own assertion. Contrast is
+     * symmetric, so the test above passes just as happily with the two the wrong way
+     * round, which is what the dark theme actually shipped: ties lighter than the ballast,
+     * so the track read as a pale ladder rather than as timber bedded in rock.
+     */
+    expect(
+      luminance(surface("--rc-yard-tie")),
+      `tie vs ballast in ${themeName}`,
+    ).toBeLessThan(luminance(surface("--rc-yard-ballast")));
+  });
+
+  it("models the solids without recolouring them", () => {
+    /*
+     * The tilted-plan projection needs a roof to read brighter than the walls below it or
+     * a wagon stops looking like a wagon. Both washes are bounded: enough to model the
+     * form, not enough to turn a violet locomotive into a different colour, which is what
+     * a heavier shade does to the one object on this canvas the eye has to find.
+     */
+    const shade = ratio("--rc-yard-face-shade", "--rc-yard-loco");
+    const lit = ratio("--rc-yard-face-lit", "--rc-yard-loco");
+    expect(shade, `face shade in ${themeName}`).toBeGreaterThanOrEqual(1.15);
+    expect(shade, `face shade in ${themeName}`).toBeLessThanOrEqual(2.2);
+    expect(lit, `face lit in ${themeName}`).toBeGreaterThanOrEqual(1);
+    expect(lit, `face lit in ${themeName}`).toBeLessThanOrEqual(1.5);
+  });
+
   it("makes the locomotive the focal object on the yard floor", () => {
     // 1.4.11's non-text floor. It is the one thing on this canvas the eye must find.
     expect(
@@ -430,7 +471,11 @@ describe.each(THEMES)("%s rail yard", (themeName, theme) => {
      * lamp is decoration, and every state it reports is already visible as a train
      * standing still.
      */
-    for (const aspect of ["--rc-yard-signal-go", "--rc-yard-signal-stop"]) {
+    for (const aspect of [
+      "--rc-yard-signal-go",
+      "--rc-yard-signal-caution",
+      "--rc-yard-signal-stop",
+    ]) {
       expect(
         ratio(aspect, "--rc-yard-sky-low"),
         `${aspect} in ${themeName}`,

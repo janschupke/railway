@@ -200,4 +200,22 @@ test.describe("the landing page at phone width", () => {
     const box = (await signIn.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(28);
   });
+
+  test("sits the card above centre, leaving the yard the room below it", async ({
+    page,
+  }) => {
+    /*
+     * The `stage` recipe's bottom padding lifts the card off centre so the busiest part of
+     * the scene is not behind it. VIEW.CARD_LIFT_PX in the rail yard's config has to track
+     * that padding — it is what keeps the track band clear — so this asserts the lift
+     * actually happens rather than trusting the two to stay in step by inspection.
+     */
+    await page.goto("/");
+    const card = (await page.locator("main canvas + div").boundingBox())!;
+    const main = (await page.getByRole("main").boundingBox())!;
+
+    const cardCentre = card.y + card.height / 2;
+    const mainCentre = main.y + main.height / 2;
+    expect(cardCentre).toBeLessThan(mainCentre);
+  });
 });

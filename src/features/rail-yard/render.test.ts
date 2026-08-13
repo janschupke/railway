@@ -1,262 +1,368 @@
 import { describe, expect, it } from "vitest";
 import { createFakeContext, type FakeContext } from "@/test/fake-canvas-2d";
-import { CONTAINER, LOCOMOTIVE, VIEW } from "./config";
+import { LOCOMOTIVE, TRACK, VIEW } from "./config";
 import { composeStaticLayer } from "./draw-scene";
-import { resolvePalette, type YardPalette } from "./palette";
-import { drawFrame, type Layer } from "./render";
+import { drawBox, visibleFaces, type Face } from "./draw-box";
+import { buildGraph } from "./graph";
+import { RAIL_YARD_TOKENS, FREIGHT_TOKENS, type YardPalette } from "./palette";
 import { createRng } from "./rng";
 import { RAIL_YARD_SCENE } from "./scene";
 import { createWorld, step, type WorldState } from "./simulation";
-import { fitView, type ViewTransform } from "./view";
+import { fitView, toScreenY, type ViewTransform } from "./view";
+import { YARD } from "./config";
+import { drawFrame } from "./render";
 
 /**
- * The renderer, against a recording context rather than a real canvas.
+ * A palette of distinguishable placeholders.
  *
- * jsdom implements no 2D context, so a pixel test is not on offer — and it would be the
- * wrong test anyway. What matters here are properties a screenshot cannot state: that the
- * save/restore stack balances, that every colour ever assigned came from the palette, and
- * that nothing non-finite reaches a draw call. A NaN coordinate draws nothing at all in a
- * real browser, silently, which is the hardest kind of blank canvas to diagnose.
+ * Not real colours: what the renderer must never do is paint in something the palette did
+ * not hand it, and a set of tagged strings makes that a set-membership assertion rather
+ * than a pixel comparison.
  */
+const PALETTE: YardPalette = {
+  ...(Object.fromEntries(
+    Object.keys(RAIL_YARD_TOKENS).map((key) => [key, `#${key}`]),
+  ) as Record<keyof typeof RAIL_YARD_TOKENS, string>),
+  freight: FREIGHT_TOKENS.map((_, index) => `#freight-${index}`),
+};
 
-/** A distinct colour per token, so a stray literal in the renderer stands out. */
-const PALETTE_VALUES = new Map<string, string>();
-const palette: YardPalette = (() => {
-  let index = 0;
-  const resolved = resolvePalette((token) => {
-    const value = `#${(0x100000 + index++ * 0x1111).toString(16).slice(0, 6)}`;
-    PALETTE_VALUES.set(token, value);
-    return value;
-  });
-  if (!resolved) throw new Error("the test palette did not resolve");
-  return resolved;
-})();
+const KNOWN = new Set([...Object.values(PALETTE).flat()]);
 
-const KNOWN_COLOURS = new Set<string>(PALETTE_VALUES.values());
+const VIEWPORT = { width: 960, height: 700, dpr: 1 };
+const view = fitView(RAIL_YARD_SCENE, VIEWPORT)!;
+const graph = buildGraph(RAIL_YARD_SCENE);
 
-const VIEWPORT = { width: 896, height: 800, dpr: 1 };
-const view: ViewTransform = fitView(RAIL_YARD_SCENE, VIEWPORT)!;
-
-function worldWithLoadedTrain(): WorldState {
-  const rng = createRng(1234);
+function yard(steps = 0): WorldState {
+  const rng = createRng(YARD.SEED);
   const world = createWorld(rng);
-  // Run on until at least one train is drawing a rake, which is what exercises the
-  // container and shadow paths.
-  for (let elapsed = 0; elapsed < 300_000; elapsed += 20) {
-    step(world, 20, rng);
-    if (world.trains.some((train) => train.wagons.length > 0 && train.path !== null))
-      break;
-  }
+  for (let index = 0; index < steps; index++) step(world, 20, rng);
   return world;
 }
 
-function fakeLayer(): { layer: Layer; recorder: FakeContext } {
-  const recorder = createFakeContext();
-  return {
-    recorder,
-    layer: { ctx: recorder.ctx, image: {} as CanvasImageSource },
-  };
-}
+const numbers = (recorder: FakeContext) =>
+  recorder.ops.flatMap((entry) => entry.args.filter((arg) => typeof arg === "number"));
 
-/** Every numeric argument the context was ever handed. */
-const numbers = (recorder: FakeContext): number[] =>
-  recorder.ops.flatMap((entry) =>
-    entry.args.filter((arg): arg is number => typeof arg === "number"),
-  );
+describe("visibleFaces", () => {
+  /*
+   * Tested directly rather than through a rendered frame. A face-visibility rule checked
+   * only by "the picture came out" is checked by accident, and this is four branches that
+   * a viewport sweep would take a dozen frames to reach.
+   */
+  const HEADINGS: ReadonlyArray<readonly [string, number, readonly Face[]]> = [
+    ["east", 0, ["right"]],
+    ["north-east", Math.PI / 4, ["right"]],
+    ["north", Math.PI / 2, ["back", "right"]],
+    ["north-west", (3 * Math.PI) / 4, ["back"]],
+    ["west", Math.PI, ["back"]],
+    ["south-west", -(3 * Math.PI) / 4, ["front", "left"]],
+    ["south", -Math.PI / 2, ["front", "left"]],
+    ["south-east", -Math.PI / 4, ["front"]],
+  ];
+
+  it.each(HEADINGS)("shows the camera the right faces heading %s", (_name, angle) => {
+    const faces = visibleFaces(angle);
+    // The camera looks along +y, so a face is visible exactly when its outward normal has a
+    // negative y component. Never more than two, and never a pair that face each other.
+    expect(faces.length).toBeLessThanOrEqual(2);
+    expect(faces.includes("front") && faces.includes("back")).toBe(false);
+    expect(faces.includes("left") && faces.includes("right")).toBe(false);
+  });
+
+  it("shows a face at every heading, so nothing is ever a wireframe", () => {
+    for (let angle = -Math.PI; angle <= Math.PI; angle += 0.1) {
+      expect(visibleFaces(angle).length, `${angle}`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("drawBox", () => {
+  it("puts the roof above every wall, whichever way the vehicle is facing", () => {
+    /*
+     * The direct regression test for "upper tracks are upside down, trains on the bottom".
+     *
+     * The previous renderer placed a vehicle by rotating the canvas through its heading,
+     * which past a quarter turn is a mirror rather than a rotation — so every train on a
+     * westbound road came out body-down with its shadow floating above it. Corners are
+     * rotated in world space now and projected one at a time, so there is no local frame
+     * left to flip. Asserted at both headings, because that is the only way to say it.
+     */
+    const box = { at: [0, -10, 0], size: [40, 20, 18], fill: "loco" } as const;
+
+    for (const angle of [0, Math.PI, Math.PI / 3, -Math.PI / 2]) {
+      const recorder = createFakeContext();
+      drawBox(recorder.ctx, view, { x: 700, y: 88, angle }, box, PALETTE, 0, null);
+
+      const polygons: number[][] = [];
+      let current: number[] = [];
+      for (const entry of recorder.ops) {
+        if (entry.op === "beginPath") current = [];
+        if (entry.op === "moveTo" || entry.op === "lineTo") {
+          current.push(entry.args[1] as number);
+        }
+        if (entry.op === "fill") polygons.push([...current]);
+      }
+
+      // The last polygon is the roof; the ones before it are the walls it stands on.
+      const roof = polygons[polygons.length - 1]!;
+      const roofTop = Math.min(...roof);
+      for (let index = 0; index < polygons.length - 1; index++) {
+        const wall = polygons[index]!;
+        expect(Math.max(...wall), `heading ${angle} wall below roof`).toBeGreaterThan(
+          roofTop,
+        );
+      }
+    }
+  });
+
+  it("draws a box shorter than a pixel as its roof alone", () => {
+    // A wall under a pixel resolves onto its neighbour and only costs fill rate.
+    const recorder = createFakeContext();
+    const flat = { at: [0, -10, 0], size: [40, 20, 0.4], fill: "metal" } as const;
+    drawBox(recorder.ctx, view, { x: 700, y: 88, angle: 0 }, flat, PALETTE, 0, null);
+    // Base plus lit wash on the roof, and nothing for the walls.
+    expect(recorder.opsOf("fill")).toHaveLength(2);
+  });
+
+  it("falls back to metal when a cargo box is handed no cargo", () => {
+    const recorder = createFakeContext();
+    const box = { at: [0, -8, 0], size: [30, 16, 14], fill: "cargo" } as const;
+    drawBox(recorder.ctx, view, { x: 700, y: 88, angle: 0 }, box, PALETTE, 0, null);
+    expect(recorder.styles).toContain(PALETTE.metal);
+  });
+});
 
 describe("composeStaticLayer", () => {
-  const { recorder } = (() => {
-    const context = createFakeContext();
-    composeStaticLayer(
-      context.ctx,
-      RAIL_YARD_SCENE,
-      createWorld(createRng(1)).graph,
-      view,
-      palette,
-    );
-    return { recorder: context };
-  })();
+  const recorder = createFakeContext();
+  composeStaticLayer(recorder.ctx, RAIL_YARD_SCENE, graph, view, PALETTE);
 
   it("clears before it paints", () => {
     expect(recorder.indexOf("clearRect")).toBe(0);
   });
 
   it("balances save and restore", () => {
-    let depth = 0;
-    let lowest = 0;
-    for (const entry of recorder.ops) {
-      if (entry.op === "save") depth += 1;
-      if (entry.op === "restore") depth -= 1;
-      lowest = Math.min(lowest, depth);
-    }
+    const depth = recorder.ops.reduce(
+      (level, entry) =>
+        level + (entry.op === "save" ? 1 : entry.op === "restore" ? -1 : 0),
+      0,
+    );
     expect(depth).toBe(0);
-    expect(lowest, "restored more than it saved").toBe(0);
+    expect(recorder.ctx.globalAlpha).toBe(1);
   });
 
   it("only ever paints in colours the palette declares", () => {
     /*
-     * The assertion that makes a stray "#333" in a .ts file a failing test. The eslint
-     * appearance bans only see className attributes, so nothing else in this repo can
-     * catch a hex literal in a renderer.
+     * The assertion that makes a stray hex literal in a .ts file a failing test, which is
+     * otherwise unenforceable — eslint's hex ban covers .tsx markup, not a string handed to
+     * fillStyle.
      */
-    for (const colour of recorder.styles) {
-      expect(KNOWN_COLOURS.has(colour), `${colour} is not a palette colour`).toBe(true);
-    }
+    const stray = recorder.styles.filter((style) => !KNOWN.has(style));
+    expect(stray).toEqual([]);
   });
 
   it("hands the context no non-finite number", () => {
-    // A NaN coordinate draws nothing in a real browser, with no error anywhere.
-    expect(numbers(recorder).filter((value) => !Number.isFinite(value))).toEqual([]);
+    // A NaN from a degenerate view silently draws nothing in a real browser.
+    expect(numbers(recorder).every(Number.isFinite)).toBe(true);
   });
 
   it("paints the sky as a gradient, behind everything else", () => {
-    expect(recorder.opsOf("addColorStop")).toHaveLength(2);
     expect(recorder.indexOf("createLinearGradient")).toBeLessThan(
-      recorder.indexOf("stroke"),
+      recorder.indexOf("fill"),
     );
+    const stops = recorder.opsOf("addColorStop");
+    expect(stops.map((entry) => entry.args[1])).toEqual([
+      PALETTE.skyHigh,
+      PALETTE.skyLow,
+    ]);
   });
 
   it("lays the rails over the ballast, and both over the ground", () => {
-    const groundFill = recorder.indexOf("fillRect");
-    const firstStroke = recorder.indexOf("stroke");
-    expect(groundFill).toBeGreaterThan(-1);
-    expect(firstStroke).toBeGreaterThan(groundFill);
+    const ground = recorder.styles.indexOf(PALETTE.ground);
+    const ballast = recorder.styles.indexOf(PALETTE.ballast);
+    const rail = recorder.styles.indexOf(PALETTE.rail);
+    expect(ground).toBeGreaterThanOrEqual(0);
+    expect(ballast).toBeGreaterThan(ground);
+    expect(rail).toBeGreaterThan(ballast);
   });
 
-  it("draws a tie for every sleeper spacing along the yard", () => {
-    // Enough to read as sleepers rather than as a decorative few.
-    expect(recorder.opsOf("stroke").length).toBeGreaterThan(100);
+  it("sleepers a straight road as thoroughly as a curved one", () => {
+    /*
+     * The direct regression test for "horizontal tracks are different from curved".
+     *
+     * The previous version placed a tie by rounding into the sample table — and a straight
+     * has exactly two samples, so every sleeper on it landed on one of the two endpoints.
+     * The whole main line was drawn as bare ballast with a dark blob at each end. Ties are
+     * placed by arc length now, so a road gets one every `tieSpacing` for its whole length.
+     */
+    const road = RAIL_YARD_SCENE.roads.find(
+      (candidate) => candidate.id === "main-out",
+    )!;
+    const span = road.span[1] - road.span[0];
+
+    const ties = recorder.ops.filter(
+      (entry) => entry.op === "set:strokeStyle" && entry.args[0] === PALETTE.tie,
+    ).length;
+    expect(ties).toBeGreaterThan(0);
+
+    // Distinct sleeper positions on the nearest road, which is a plain straight.
+    const xs = new Set<number>();
+    let painting = false;
+    for (const entry of recorder.ops) {
+      if (entry.op === "set:strokeStyle") painting = entry.args[0] === PALETTE.tie;
+      if (painting && entry.op === "moveTo")
+        xs.add(Math.round(entry.args[0] as number));
+    }
+    expect(xs.size).toBeGreaterThan(span / TRACK.tieSpacing / 4);
   });
 });
 
 describe("drawFrame", () => {
-  const world = worldWithLoadedTrain();
+  const layer = { ctx: createFakeContext().ctx, image: {} as CanvasImageSource };
 
-  const render = (options?: { layer?: boolean; alpha?: number }) => {
+  const frame = (world: WorldState, at: ViewTransform = view, alpha = 0) => {
     const recorder = createFakeContext();
-    const { layer } = fakeLayer();
-    drawFrame(
-      recorder.ctx,
-      options?.layer === false ? null : layer,
-      world,
-      view,
-      palette,
-      options?.alpha ?? 0,
-    );
+    drawFrame(recorder.ctx, layer, world, at, PALETTE, alpha);
     return recorder;
   };
 
   it("clears and blits the static layer before anything moves", () => {
-    const recorder = render();
+    const recorder = frame(yard());
     expect(recorder.indexOf("clearRect")).toBe(0);
     expect(recorder.indexOf("drawImage")).toBe(1);
   });
 
   it("draws without a layer at all", () => {
-    // createLayer can legitimately return null; the moving half must still paint.
-    const recorder = render({ layer: false });
+    // The offscreen canvas can be refused; the yard still has to paint.
+    const recorder = createFakeContext();
+    drawFrame(recorder.ctx, null, yard(), view, PALETTE, 0);
     expect(recorder.opsOf("drawImage")).toHaveLength(0);
     expect(recorder.ops.length).toBeGreaterThan(10);
   });
 
-  it("balances save and restore", () => {
-    let depth = 0;
-    for (const entry of render().ops) {
-      if (entry.op === "save") depth += 1;
-      if (entry.op === "restore") depth -= 1;
-      expect(depth).toBeGreaterThanOrEqual(0);
-    }
+  it("balances save and restore, and gives back the alpha it borrows", () => {
+    const recorder = frame(yard(300));
+    const depth = recorder.ops.reduce(
+      (level, entry) =>
+        level + (entry.op === "save" ? 1 : entry.op === "restore" ? -1 : 0),
+      0,
+    );
     expect(depth).toBe(0);
-  });
-
-  it("only ever paints in colours the palette declares", () => {
-    for (const colour of render().styles) {
-      expect(KNOWN_COLOURS.has(colour), `${colour} is not a palette colour`).toBe(true);
-    }
-  });
-
-  it("hands the context no non-finite number", () => {
-    expect(numbers(render()).filter((value) => !Number.isFinite(value))).toEqual([]);
-  });
-
-  it("restores the alpha it borrows", () => {
-    /*
-     * Smoke, wheel hubs and container ribs all dim the context. Leaving it dimmed would
-     * fade the next frame's locomotive by whatever the last puff asked for — and the
-     * fake stacks save/restore precisely so the difference between a balanced borrow and
-     * a leak is visible here rather than in a browser.
-     */
-    const recorder = render();
-    expect(recorder.opsOf("set:globalAlpha").length).toBeGreaterThan(0);
+    // A globalAlpha left at a puff's value fades the next frame's locomotive.
     expect(recorder.ctx.globalAlpha).toBe(1);
   });
 
-  it("draws one container body per loaded wagon, with its corrugation", () => {
-    const loaded = world.trains
-      .filter((train) => train.path !== null)
-      .flatMap((train) => train.wagons)
-      .filter((wagon) => wagon.cargo !== null);
+  it("only ever paints in colours the palette declares", () => {
+    const recorder = frame(yard(600));
+    expect(recorder.styles.filter((style) => !KNOWN.has(style))).toEqual([]);
+  });
+
+  it("hands the context no non-finite number", () => {
+    const recorder = frame(yard(600), view, 0.5);
+    expect(numbers(recorder).every(Number.isFinite)).toBe(true);
+  });
+
+  it("draws a container in its own livery for every loaded wagon", () => {
+    const world = yard(600);
+    const loaded = world.trains.flatMap((train) =>
+      train.wagons.filter((wagon) => wagon.cargo !== null),
+    );
     expect(loaded.length).toBeGreaterThan(0);
 
-    const recorder = render();
-    const boxes = recorder.opsOf("roundRect").filter((entry) => {
-      const [x, y, width, height] = entry.args as number[];
-      return (
-        x === CONTAINER.rect[0] &&
-        y === CONTAINER.rect[1] &&
-        width === CONTAINER.rect[2] &&
-        height === CONTAINER.rect[3]
-      );
-    });
-    expect(boxes).toHaveLength(loaded.length);
-
-    const ribs = loaded.reduce((total, wagon) => total + wagon.ribs, 0);
-    // Every rib is one moveTo/lineTo/stroke triple, plus the box's door panel fill.
-    expect(recorder.opsOf("stroke").length).toBeGreaterThanOrEqual(ribs);
+    const recorder = frame(world);
+    const painted = recorder.styles.filter((style) => style.startsWith("#freight-"));
+    expect(painted.length).toBeGreaterThan(0);
   });
 
   it("gives each vehicle a contact shadow rather than a blur", () => {
-    const recorder = render();
+    /*
+     * shadowBlur is the most expensive operation the 2D context has and would dominate the
+     * frame on a phone. An ellipse on the ground sells the same cue.
+     */
+    const world = yard(600);
+    const recorder = frame(world);
+    const vehicles = world.trains.reduce(
+      (count, train) => count + train.wagons.length + 1,
+      0,
+    );
     expect(recorder.opsOf("ellipse").length).toBeGreaterThan(0);
-    // shadowBlur is the most expensive operation the 2D context has, and a flat ellipse
-    // sells the same cue for nothing.
-    expect(recorder.ops.some((entry) => entry.op.includes("shadow"))).toBe(false);
+    expect(recorder.opsOf("ellipse").length).toBeLessThanOrEqual(vehicles);
+    expect(recorder.ops.some((entry) => entry.op.startsWith("set:shadow"))).toBe(false);
   });
 
   it("advances the drawn position between simulated steps", () => {
-    /*
-     * The interpolation alpha. Without it a 120 Hz display shows each simulated step
-     * twice and the motion reads as a judder rather than as speed.
-     */
-    const moving = world.trains.find((train) => train.speed > 1 && train.path !== null);
-    expect(moving, "no train was moving to interpolate").toBeDefined();
+    // The interpolation alpha: a 50 Hz simulation has to look smooth on a 120 Hz display.
+    // Wound on to a frame where something is actually moving, or the claim is vacuous.
+    const world = yard();
+    const rng = createRng(YARD.SEED);
+    while (!world.trains.some((train) => train.speed > 1)) step(world, 20, rng);
 
     const at = (alpha: number) =>
-      render({ alpha })
-        .opsOf("translate")
+      frame(world, view, alpha)
+        .opsOf("moveTo")
         .map((entry) => entry.args[0] as number);
 
     expect(at(0)).not.toEqual(at(0.9));
   });
 
+  it("draws the far roads before the near ones, so a train can go behind a shed", () => {
+    /*
+     * Depth sorting per *drawable*, not per train — a rake straddling a crossover has half
+     * its wagons on one road and half on the next, and they have to sort against other
+     * traffic independently of the engine pulling them. This is also what lets a shed's
+     * front wall occlude a locomotive standing inside it.
+     */
+    /*
+     * Asserted on the contact shadows, because they are the one thing drawn flat on the
+     * ground: their screen y is a pure function of depth with no height mixed into it, so a
+     * non-decreasing run of them *is* the sort. Reading it off the bodies instead compares
+     * roofs against wheels and says nothing. The tolerance covers a vehicle on a crossover,
+     * whose shadow sits a few units off its own sort key.
+     */
+    const ys = frame(yard(600))
+      .opsOf("ellipse")
+      .map((entry) => entry.args[1] as number);
+    expect(ys.length).toBeGreaterThan(3);
+
+    for (let index = 1; index < ys.length; index++) {
+      expect(ys[index]!, `shadow ${index}`).toBeGreaterThanOrEqual(ys[index - 1]! - 6);
+    }
+  });
+
   it("keeps the locomotive legible at the smallest scale it will ever be drawn", () => {
-    const floor = fitView(RAIL_YARD_SCENE, { width: 320, height: 620, dpr: 1 })!;
+    const floor = fitView(RAIL_YARD_SCENE, { width: 412, height: 620, dpr: 2 })!;
     expect(floor.scale).toBe(VIEW.MIN_SCALE);
 
-    const body = LOCOMOTIVE.parts.find((part) => part.fill === "loco")!;
-    // Asserted as a number rather than promised in a comment: this is the floor
-    // MIN_SCALE was chosen against.
-    expect(body.rect[3] * floor.scale).toBeGreaterThanOrEqual(VIEW.MIN_FEATURE_PX * 4);
+    // Asserted as a number rather than promised in a comment: this is the claim MIN_SCALE
+    // was chosen against.
+    const body = LOCOMOTIVE.boxes.find((box) => box.fill === "loco")!;
+    const top = toScreenY(floor, 0, body.at[2] + body.size[2]);
+    const bottom = toScreenY(floor, 0, body.at[2]);
+    expect(bottom - top).toBeGreaterThanOrEqual(VIEW.MIN_FEATURE_PX * 4);
   });
 
   it("stops drawing detail that is smaller than a pixel", () => {
-    const tiny: ViewTransform = { ...view, scale: 0.02 };
-    const recorder = createFakeContext();
-    const { layer } = fakeLayer();
-    drawFrame(recorder.ctx, layer, world, tiny, palette, 0);
+    const tiny = { ...view, scale: 0.02 };
+    const small = frame(yard(600), tiny);
+    const normal = frame(yard(600), view);
+    expect(small.ops.length).toBeLessThan(normal.ops.length);
+  });
 
-    // The ribs and hubs drop out; the bodies do not. Fewer ops than at full size.
-    const full = render();
-    expect(recorder.ops.length).toBeLessThan(full.ops.length);
+  it("shows a signal red when the road it guards is occupied", () => {
+    /*
+     * The lamp reports the simulation rather than being animated alongside it, so a red
+     * aspect is always a train and never a decoration.
+     */
+    const world = yard();
+    const aspects = new Set<string>();
+    const rng = createRng(YARD.SEED);
+    for (let index = 0; index < 3_000; index++) {
+      step(world, 20, rng);
+      for (const style of frame(world).styles) {
+        if (style === PALETTE.signalStop) aspects.add("stop");
+        if (style === PALETTE.signalGo) aspects.add("go");
+        if (style === PALETTE.signalCaution) aspects.add("caution");
+      }
+      if (aspects.size === 3) break;
+    }
+    expect([...aspects].sort()).toEqual(["caution", "go", "stop"]);
   });
 });

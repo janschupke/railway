@@ -1,162 +1,219 @@
 /**
- * Everything that does not move: sky, skyline, ground, the permanent way, the sheds, the
- * gantry legs and the signal posts.
+ * Everything that does not move, composed once into a cached layer.
  *
- * All of it depends only on `(scene, view, palette)`, so it is composed once into a
- * cached layer and blitted per frame. That takes roughly four hundred tie rectangles and
- * twenty rail strokes out of every frame, which is most of the drawing cost — the moving
- * half is a few dozen fills.
+ * Sky, skyline, ground, the permanent way and the backs of the buildings depend only on
+ * `(scene, view, palette)`, so they are drawn once and blitted per frame. That takes some
+ * six hundred tie strokes and forty rail runs out of every frame, which is the difference
+ * between this being free on a phone and not.
+ *
+ * The track is drawn **per road**, not per edge. That is the fix for rails that did not
+ * connect: the previous version drew each edge independently end to end with round caps, so
+ * where three of them met their ballast bands overdrew each other and their rails
+ * terminated at different offsets, leaving a visible kink at every junction. A road is one
+ * continuous run of railway and is now drawn as one; a crossover is drawn as its own run and
+ * meets the road tangentially, because both are horizontal at their ends by construction.
  */
 
-import { GANTRY, PERMANENT_WAY, SHED, SHED_DOOR, SIGNAL, VIEW } from "./config";
-import type { Pose } from "./geometry";
+import { SHED, TRACK, VIEW } from "./config";
+import { localToWorld, poseAtDistance, sampleRun, type Pose } from "./geometry";
 import type { RailGraph } from "./graph";
 import type { YardPalette } from "./palette";
 import type { RailScene, SceneStructure } from "./scene";
+import { drawBoxes, visible } from "./draw-box";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";
 
-/** A point offset perpendicular to the track's heading, in world units. */
-function offsetPose(pose: Pose, by: number): { x: number; y: number } {
-  return {
-    x: pose.x - Math.sin(pose.angle) * by,
-    y: pose.y + Math.cos(pose.angle) * by,
-  };
+/** A polygon of the ground plane, offset either side of a centreline in world depth. */
+function fillBand(
+  ctx: CanvasRenderingContext2D,
+  view: ViewTransform,
+  poses: readonly Pose[],
+  half: number,
+): void {
+  ctx.beginPath();
+  for (let index = 0; index < poses.length; index++) {
+    const [x, y] = localToWorld(poses[index]!, 0, -half);
+    const draw = index === 0 ? ctx.moveTo : ctx.lineTo;
+    draw.call(ctx, toScreenX(view, x, y), toScreenY(view, y));
+  }
+  for (let index = poses.length - 1; index >= 0; index--) {
+    const [x, y] = localToWorld(poses[index]!, 0, half);
+    ctx.lineTo(toScreenX(view, x, y), toScreenY(view, y));
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
-function strokeAlong(
+/** A line running along a centreline, offset across it. Used for both rails. */
+function strokeRail(
   ctx: CanvasRenderingContext2D,
   view: ViewTransform,
   poses: readonly Pose[],
   offset: number,
 ): void {
   ctx.beginPath();
-  poses.forEach((pose, index) => {
-    const point = offsetPose(pose, offset);
-    const x = toScreenX(view, point.x);
-    const y = toScreenY(view, point.y);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
+  for (let index = 0; index < poses.length; index++) {
+    const [x, y] = localToWorld(poses[index]!, 0, offset);
+    const draw = index === 0 ? ctx.moveTo : ctx.lineTo;
+    draw.call(ctx, toScreenX(view, x, y), toScreenY(view, y));
+  }
   ctx.stroke();
 }
 
+type TrackRun = {
+  readonly poses: readonly Pose[];
+  readonly samples: Parameters<typeof poseAtDistance>[0];
+  readonly weight: number;
+};
+
 /**
- * Ballast, ties and two rails along one edge.
+ * Ballast, then sleepers, then rails, along one continuous piece of track.
  *
- * Ties are laid at a fixed spacing in *arc length*, not at a fixed sample count, or a
- * long straight and a tight curve get the same number of sleepers and the curve reads as
- * a different gauge of railway.
+ * Ties are placed by **arc length** through `poseAtDistance`. The previous version indexed
+ * the sample table with `Math.round(ratio * (poses.length - 1))`, and a straight has exactly
+ * two samples — so every sleeper on it landed on one of the two endpoints and the whole main
+ * line was drawn as bare ballast with a dark blob at each end. Straights and curves are now
+ * sleepered identically, which is the whole of "horizontal tracks look different from
+ * curved ones".
  */
 function drawTrack(
   ctx: CanvasRenderingContext2D,
-  graph: RailGraph,
   view: ViewTransform,
-  edgeId: string,
+  run: TrackRun,
   palette: YardPalette,
 ): void {
-  const edge = graph.edges.get(edgeId);
-  if (!edge || edge.rail === "hidden") return;
+  const { poses, samples, weight } = run;
+  const scale = view.scale;
 
-  const weight = edge.rail === "siding" ? PERMANENT_WAY.sidingScale : 1;
-  const poses = edge.samples.poses;
+  ctx.save();
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "round";
 
-  ctx.lineCap = "round";
-  ctx.strokeStyle = palette.ballast;
-  ctx.lineWidth = PERMANENT_WAY.ballastHeight * weight * view.scale;
-  strokeAlong(ctx, view, poses, 0);
+  ctx.fillStyle = palette.ballast;
+  fillBand(ctx, view, poses, (TRACK.ballastWidth * weight) / 2);
 
-  ctx.strokeStyle = palette.tie;
-  ctx.lineWidth = PERMANENT_WAY.tieWidth * weight * view.scale;
-  const half = (PERMANENT_WAY.tieLength * weight) / 2;
-  const spacing = PERMANENT_WAY.tieSpacing;
-  for (let at = spacing / 2; at < edge.length; at += spacing) {
-    const ratio = at / edge.length;
-    const pose = poses[Math.round(ratio * (poses.length - 1))] ?? edge.samples.start;
-    const a = offsetPose(pose, -half);
-    const b = offsetPose(pose, half);
-    ctx.beginPath();
-    ctx.moveTo(toScreenX(view, a.x), toScreenY(view, a.y));
-    ctx.lineTo(toScreenX(view, b.x), toScreenY(view, b.y));
-    ctx.stroke();
+  if (visible(TRACK.tieWidth * weight, scale)) {
+    ctx.strokeStyle = palette.tie;
+    ctx.lineWidth = Math.max(VIEW.MIN_FEATURE_PX, TRACK.tieWidth * weight * scale);
+    const spacing = TRACK.tieSpacing * weight;
+    const half = (TRACK.tieLength * weight) / 2;
+    for (let at = spacing / 2; at < samples.length; at += spacing) {
+      const pose = poseAtDistance(samples, at);
+      const [ax, ay] = localToWorld(pose, 0, -half);
+      const [bx, by] = localToWorld(pose, 0, half);
+      ctx.beginPath();
+      ctx.moveTo(toScreenX(view, ax, ay), toScreenY(view, ay));
+      ctx.lineTo(toScreenX(view, bx, by), toScreenY(view, by));
+      ctx.stroke();
+    }
   }
 
   ctx.strokeStyle = palette.rail;
-  ctx.lineWidth = Math.max(
-    VIEW.MIN_FEATURE_PX,
-    PERMANENT_WAY.railWidth * weight * view.scale,
-  );
-  const gauge = (PERMANENT_WAY.gauge * weight) / 2;
-  strokeAlong(ctx, view, poses, gauge);
-  strokeAlong(ctx, view, poses, -gauge);
-}
+  ctx.lineWidth = Math.max(VIEW.MIN_FEATURE_PX, TRACK.railWidth * weight * scale);
+  const gauge = (TRACK.gauge * weight) / 2;
+  strokeRail(ctx, view, poses, -gauge);
+  strokeRail(ctx, view, poses, gauge);
 
-function drawShed(
-  ctx: CanvasRenderingContext2D,
-  view: ViewTransform,
-  at: readonly [number, number],
-  size: readonly [number, number],
-  bays: number,
-  palette: YardPalette,
-): void {
-  const x = toScreenX(view, at[0]);
-  const base = toScreenY(view, at[1]);
-  const width = size[0] * view.scale;
-  const height = size[1] * view.scale;
-
-  // SHED's parts are fractions of the footprint, so one spec covers every shed size.
-  for (const part of SHED.parts) {
-    const [px, py, pw, ph] = part.rect;
-    ctx.fillStyle = palette[part.fill === "cargo" ? "structure" : part.fill];
-    ctx.fillRect(x + px * width, base - (py + ph) * height, pw * width, ph * height);
-  }
-
-  ctx.fillStyle = palette.depot;
-  const doorWidth = SHED_DOOR.width * width;
-  const doorHeight = SHED_DOOR.height * height;
-  for (let bay = 0; bay < bays; bay++) {
-    const offset = (SHED_DOOR.offset + bay * (SHED_DOOR.width + SHED_DOOR.gap)) * width;
-    if (offset + doorWidth > width) break;
-    ctx.fillRect(x + offset, base - doorHeight, doorWidth, doorHeight);
-  }
-}
-
-function drawGantryLegs(
-  ctx: CanvasRenderingContext2D,
-  view: ViewTransform,
-  structure: Extract<SceneStructure, { kind: "gantry" }>,
-  palette: YardPalette,
-): void {
-  ctx.fillStyle = palette.structureTrim;
-  const base = toScreenY(view, structure.at[1]);
-  const height = GANTRY.height * view.scale;
-  const width = GANTRY.legWidth * view.scale;
-  for (const x of [structure.at[0], structure.at[0] + structure.span]) {
-    ctx.fillRect(toScreenX(view, x) - width / 2, base - height, width, height);
-  }
-}
-
-/** The post only. The lamp changes colour with the traffic, so it is drawn per frame. */
-function drawSignalPost(
-  ctx: CanvasRenderingContext2D,
-  view: ViewTransform,
-  at: readonly [number, number],
-  palette: YardPalette,
-): void {
-  ctx.fillStyle = palette.structureTrim;
-  ctx.fillRect(
-    toScreenX(view, at[0]) - (SIGNAL.postWidth * view.scale) / 2,
-    toScreenY(view, at[1]) - SIGNAL.height * view.scale,
-    SIGNAL.postWidth * view.scale,
-    SIGNAL.height * view.scale,
-  );
+  ctx.restore();
 }
 
 /**
- * Paints the whole static picture into a layer's context.
+ * The switch blade at a crossover's foot.
  *
- * The painter's order is the file's real content: sky, skyline, ground, the far shed,
- * track, the near shed, gantry legs, signal posts. Everything after this in render.ts
- * goes on top.
+ * Cosmetic, and its absence was most of why the junctions read as two pieces of track
+ * meeting rather than as one piece of railway: a real turnout has a pair of tapering rails
+ * lying alongside the through road before the curve begins.
+ */
+function drawBlade(
+  ctx: CanvasRenderingContext2D,
+  view: ViewTransform,
+  pose: Pose,
+  weight: number,
+  palette: YardPalette,
+): void {
+  const length = TRACK.bladeLength * weight;
+  if (!visible(length, view.scale)) return;
+
+  ctx.save();
+  ctx.strokeStyle = palette.rail;
+  ctx.lineWidth = Math.max(VIEW.MIN_FEATURE_PX, TRACK.railWidth * weight * view.scale);
+  for (const side of [-1, 1]) {
+    const [ax, ay] = localToWorld(pose, -length, (side * TRACK.gauge * weight) / 2);
+    const [bx, by] = localToWorld(pose, 0, 0);
+    ctx.beginPath();
+    ctx.moveTo(toScreenX(view, ax, ay), toScreenY(view, ay));
+    ctx.lineTo(toScreenX(view, bx, by), toScreenY(view, by));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSky(
+  ctx: CanvasRenderingContext2D,
+  view: ViewTransform,
+  palette: YardPalette,
+): void {
+  const gradient = ctx.createLinearGradient(0, 0, 0, view.horizonY);
+  gradient.addColorStop(0, palette.skyHigh);
+  gradient.addColorStop(1, palette.skyLow);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, view.width, Math.max(0, view.horizonY));
+}
+
+function drawSkyline(
+  ctx: CanvasRenderingContext2D,
+  scene: RailScene,
+  view: ViewTransform,
+  palette: YardPalette,
+): void {
+  ctx.save();
+  ctx.globalAlpha = VIEW.SKYLINE_ALPHA;
+  ctx.fillStyle = palette.skyline;
+  for (const structure of scene.structures) {
+    if (structure.kind !== "tower") continue;
+    const [x, y] = structure.at;
+    const [width, height] = structure.size;
+    const base = toScreenY(view, y);
+    ctx.fillRect(
+      toScreenX(view, x, y),
+      base - height * view.scale,
+      width * view.scale,
+      height * view.scale,
+    );
+  }
+  ctx.restore();
+}
+
+/** The back wall and roof of a shed. Its front is a drawable, so a train can go inside. */
+function shedBackBoxes(structure: Extract<SceneStructure, { kind: "shed" }>) {
+  const half = structure.depth / 2;
+  return [
+    {
+      at: [0, half - SHED.wallThickness, 0] as const,
+      size: [structure.length, SHED.wallThickness, structure.height] as const,
+      fill: "structure" as const,
+    },
+    {
+      at: [-SHED.eaves, -half - SHED.eaves, structure.height] as const,
+      size: [
+        structure.length + SHED.eaves * 2,
+        structure.depth + SHED.eaves * 2,
+        SHED.roofThickness,
+      ] as const,
+      fill: "structureTrim" as const,
+    },
+  ];
+}
+
+/** A pose standing still at a world point, facing east. Structures do not have headings. */
+const standing = (x: number, y: number): Pose => ({ x, y, angle: 0 });
+
+/**
+ * Paints the whole static layer.
+ *
+ * Painter's order is sky, skyline, ground, track, then the parts of the buildings that
+ * nothing can get in front of. Everything else — rolling stock, the crane, the front walls
+ * of the sheds — is drawn per frame into the depth sort, because a train can be in front of
+ * it or behind it depending on where the train is.
  */
 export function composeStaticLayer(
   ctx: CanvasRenderingContext2D,
@@ -166,53 +223,77 @@ export function composeStaticLayer(
   palette: YardPalette,
 ): void {
   ctx.clearRect(0, 0, view.width, view.height);
-
-  const sky = ctx.createLinearGradient(0, 0, 0, Math.max(1, view.horizonY));
-  sky.addColorStop(0, palette.skyHigh);
-  sky.addColorStop(1, palette.skyLow);
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, view.width, view.horizonY);
-
-  ctx.save();
-  ctx.globalAlpha = VIEW.SKYLINE_ALPHA;
-  ctx.fillStyle = palette.skyline;
-  for (const structure of scene.structures) {
-    if (structure.kind !== "tower") continue;
-    const width = structure.size[0] * view.scale;
-    const height = structure.size[1] * view.scale;
-    const base = toScreenY(view, structure.at[1]);
-    ctx.fillRect(
-      toScreenX(view, structure.at[0]) - width / 2,
-      base - height,
-      width,
-      height,
-    );
-  }
-  ctx.restore();
+  drawSky(ctx, view, palette);
+  drawSkyline(ctx, scene, view, palette);
 
   ctx.fillStyle = palette.ground;
   ctx.fillRect(0, view.horizonY, view.width, Math.max(0, view.height - view.horizonY));
 
   /*
-   * Sheds back to front, so a nearer one overlaps a further one rather than the other
-   * way round. The far ones are hazed for the same reason the skyline is — depth, from
-   * alpha rather than from a blur nobody can afford per frame.
+   * Roads first, back to front, then the crossovers between them. Back to front so a
+   * crossover's ballast laps over the road behind it rather than under it, which is the
+   * order the ground itself is in.
    */
-  const sheds = scene.structures
-    .filter((structure) => structure.kind === "shed")
-    .sort((a, b) => b.at[1] - a.at[1]);
-
-  for (const shed of sheds) {
-    ctx.save();
-    if (shed.at[1] > VIEW.HAZE_ABOVE_UNITS) ctx.globalAlpha = VIEW.FAR_STRUCTURE_ALPHA;
-    drawShed(ctx, view, shed.at, shed.size, shed.bays, palette);
-    ctx.restore();
+  const roads = [...scene.roads].sort((a, b) => b.y - a.y);
+  for (const road of roads) {
+    if (road.rail === "hidden") continue;
+    const samples = sampleRun([road.span[0], road.y], [road.span[1], road.y]);
+    drawTrack(
+      ctx,
+      view,
+      {
+        poses: samples.poses,
+        samples,
+        weight: road.rail === "siding" ? TRACK.sidingScale : 1,
+      },
+      palette,
+    );
   }
 
-  for (const edge of scene.edges) drawTrack(ctx, graph, view, edge.id, palette);
+  const crossovers = [...graph.edges.values()]
+    .filter((edge) => edge.kind === "crossover")
+    .sort((a, b) => b.samples.start.y - a.samples.start.y);
 
-  for (const structure of scene.structures) {
-    if (structure.kind === "gantry") drawGantryLegs(ctx, view, structure, palette);
-    if (structure.kind === "signal") drawSignalPost(ctx, view, structure.at, palette);
+  for (const edge of crossovers) {
+    const weight = edge.rail === "siding" ? TRACK.sidingScale : 1;
+    drawTrack(
+      ctx,
+      view,
+      { poses: edge.samples.poses, samples: edge.samples, weight },
+      palette,
+    );
+    drawBlade(ctx, view, edge.samples.start, weight, palette);
   }
+
+  // Buildings, back to front. Only the parts a train can never be in front of.
+  const structures = [...scene.structures].sort(
+    (a, b) => depthOf(scene, b) - depthOf(scene, a),
+  );
+  for (const structure of structures) {
+    if (structure.kind === "shed") {
+      const road = graph.roads.get(structure.road);
+      if (!road) continue;
+      ctx.save();
+      if (road.y > VIEW.HAZE_BEYOND_UNITS) ctx.globalAlpha = VIEW.FAR_STRUCTURE_ALPHA;
+      drawBoxes(
+        ctx,
+        view,
+        standing(structure.at, road.y),
+        shedBackBoxes(structure),
+        palette,
+        0,
+      );
+      ctx.restore();
+      continue;
+    }
+  }
+}
+
+function depthOf(scene: RailScene, structure: SceneStructure): number {
+  if (structure.kind === "shed") {
+    return scene.roads.find((road) => road.id === structure.road)?.y ?? 0;
+  }
+  if (structure.kind === "gantry") return structure.far;
+  if (structure.kind === "tower") return structure.at[1];
+  return structure.at[1];
 }

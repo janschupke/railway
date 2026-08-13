@@ -1,198 +1,206 @@
 import { describe, expect, it } from "vitest";
-import { buildGraph, edgeIndexAt, findPath, poseAlong } from "./graph";
+import { buildGraph, edgeIndexAt, edgeStart, findPath, poseAlong } from "./graph";
 import { RAIL_YARD_SCENE, type RailScene } from "./scene";
 
-const graph = buildGraph(RAIL_YARD_SCENE);
-
-/** A three-node line with one branch, small enough to reason about by hand. */
-const toy: RailScene = {
-  extent: { width: 100, height: 100 },
-  focusX: 50,
-  horizon: 80,
+/**
+ * A miniature yard: three roads, one run each, and a ladder between them. Small enough to
+ * reason about by hand and shaped exactly like the real one.
+ */
+const TOY: RailScene = {
+  extent: { width: 600, height: 100 },
+  focusX: 300,
+  horizon: 400,
+  roads: [
+    { id: "near", y: 0, span: [0, 900], rail: "main" },
+    { id: "mid", y: 50, span: [0, 900], rail: "siding" },
+    { id: "far", y: 100, span: [0, 900], rail: "siding" },
+  ],
   nodes: [
-    { id: "a", at: [0, 0], kind: "depot" },
-    { id: "b", at: [40, 0], kind: "junction" },
-    { id: "c", at: [100, 0], kind: "bay" },
-    { id: "lonely", at: [50, 50], kind: "siding" },
+    { id: "a", road: "far", x: 0, kind: "stop" },
+    { id: "b", road: "far", x: 100, kind: "junction" },
+    { id: "c", road: "mid", x: 400, kind: "junction" },
+    { id: "d", road: "mid", x: 500, kind: "junction" },
+    { id: "e", road: "near", x: 800, kind: "stop" },
   ],
   edges: [
-    {
-      id: "ab",
-      from: "a",
-      to: "b",
-      shape: { type: "straight" },
-      rail: "main",
-      speed: 1,
-    },
-    {
-      id: "bc",
-      from: "b",
-      to: "c",
-      shape: { type: "straight" },
-      rail: "main",
-      speed: 1,
-    },
-    // Same endpoints, half the speed and a detour: it must lose on travel time.
-    {
-      id: "slow",
-      from: "a",
-      to: "c",
-      shape: { type: "curve", via: [50, 30] },
-      rail: "siding",
-      speed: 0.2,
-    },
+    { id: "ab", from: "a", to: "b", kind: "run", speed: 0.5 },
+    { id: "bc", from: "b", to: "c", kind: "crossover", speed: 0.5 },
+    { id: "cd", from: "c", to: "d", kind: "run", speed: 1 },
+    { id: "de", from: "d", to: "e", kind: "crossover", speed: 0.5 },
   ],
   structures: [],
   duties: [
     {
       id: "toy",
       weight: 1,
-      home: ["a"],
+      stable: ["a"],
       loadAt: ["c"],
-      exitVia: ["c"],
+      unloadAt: ["d"],
+      leaveVia: ["e"],
       enterVia: ["a"],
-      wagons: [1, 1],
     },
   ],
 };
 
+const graph = buildGraph(TOY);
+
 describe("buildGraph", () => {
-  it("indexes every node and edge", () => {
-    expect(graph.nodes.size).toBe(RAIL_YARD_SCENE.nodes.length);
-    expect(graph.edges.size).toBe(RAIL_YARD_SCENE.edges.length);
+  it("gives every node the depth of the road it names", () => {
+    // A node cannot be authored a few units off its own track, because it carries no
+    // depth of its own — this is what the scene's road model buys.
+    expect(graph.nodes.get("a")?.at).toEqual([0, 100]);
+    expect(graph.nodes.get("c")?.at).toEqual([400, 50]);
+    expect(graph.nodes.get("e")?.at).toEqual([800, 0]);
   });
 
-  it("indexes adjacency in the declared direction only", () => {
-    expect(graph.out.get("bay-west")?.map((edge) => edge.id)).toEqual(["bay-road"]);
-    // bay-road is bay-west → bay-east, so bay-east leads on rather than back.
-    expect(graph.out.get("bay-east")?.map((edge) => edge.id)).not.toContain("bay-road");
+  it("measures a run as its chord and a crossover as longer", () => {
+    expect(graph.edges.get("ab")?.length).toBeCloseTo(100);
+    expect(graph.edges.get("bc")?.length).toBeGreaterThan(Math.hypot(300, 50));
   });
 
-  it("skips an edge that names a node the scene does not declare", () => {
-    // A typo should cost that edge, not the landing page.
+  it("indexes the edges leaving each node", () => {
+    expect(graph.out.get("a")?.map((edge) => edge.id)).toEqual(["ab"]);
+    expect(graph.out.get("e")).toBeUndefined();
+  });
+
+  it("draws a connection into a siding as siding track", () => {
+    // A crossover off the main line into a yard is lighter track at the yard end, which
+    // is what it looks like in life.
+    expect(graph.edges.get("de")?.rail).toBe("siding");
+    expect(graph.edges.get("ab")?.rail).toBe("siding");
+  });
+
+  it("skips an edge naming a node that does not exist", () => {
+    // A dangling reference is a scene bug and scene.test.ts fails on it. Skipping is what
+    // stops a typo taking the landing page down with it.
     const broken = buildGraph({
-      ...toy,
+      ...TOY,
       edges: [
-        ...toy.edges,
-        {
-          id: "dangling",
-          from: "a",
-          to: "nowhere",
-          shape: { type: "straight" },
-          rail: "main",
-          speed: 1,
-        },
+        ...TOY.edges,
+        { id: "oops", from: "a", to: "nowhere", kind: "run", speed: 1 },
       ],
     });
-    expect(broken.edges.has("dangling")).toBe(false);
-    expect(broken.edges.size).toBe(toy.edges.length);
+    expect(broken.edges.get("oops")).toBeUndefined();
+  });
+
+  it("skips a node naming a road that does not exist", () => {
+    const broken = buildGraph({
+      ...TOY,
+      nodes: [...TOY.nodes, { id: "lost", road: "nowhere", x: 0, kind: "stop" }],
+    });
+    expect(broken.nodes.get("lost")).toBeUndefined();
   });
 });
 
 describe("findPath", () => {
-  const toyGraph = buildGraph(toy);
-
-  it("returns contiguous edges", () => {
-    const path = findPath(graph, "depot-north", "exit-east");
-    expect(path).not.toBeNull();
-    for (let index = 1; index < path!.edges.length; index++) {
-      const previous = graph.edges.get(path!.edges[index - 1]!)!;
-      const current = graph.edges.get(path!.edges[index]!)!;
-      expect(previous.to).toBe(current.from);
-    }
-  });
-
-  it("reports a length equal to the sum of its edges", () => {
-    const path = findPath(graph, "depot-north", "exit-east")!;
-    const summed = path.edges.reduce(
-      (total, id) => total + (graph.edges.get(id)?.length ?? 0),
-      0,
-    );
-    expect(path.length).toBeCloseTo(summed);
-  });
-
-  it("produces a strictly increasing mark table ending at the length", () => {
-    const path = findPath(graph, "depot-north", "exit-east")!;
-    expect(path.marks).toHaveLength(path.edges.length);
-    for (let index = 1; index < path.marks.length; index++) {
-      expect(path.marks[index]!).toBeGreaterThan(path.marks[index - 1]!);
-    }
-    expect(path.marks[path.marks.length - 1]).toBeCloseTo(path.length);
-  });
-
-  it("weighs by travel time rather than distance", () => {
-    /*
-     * `slow` joins a to c directly and is geometrically the shorter option in edge count,
-     * but it runs at a fifth of line speed. Weighting by distance sent every train down
-     * the siding at a crawl in preference to the main line beside it.
-     */
-    expect(findPath(toyGraph, "a", "c")!.edges).toEqual(["ab", "bc"]);
+  it("finds the way across the ladder", () => {
+    expect(findPath(graph, "a", "e")?.edges).toEqual(["ab", "bc", "cd", "de"]);
   });
 
   it("returns an empty path for a node to itself", () => {
-    const path = findPath(graph, "bay-west", "bay-west")!;
-    expect(path.edges).toEqual([]);
-    expect(path.length).toBe(0);
+    expect(findPath(graph, "c", "c")).toEqual({ edges: [], length: 0, marks: [] });
   });
 
-  it("returns null when there is no way through", () => {
-    expect(findPath(toyGraph, "a", "lonely")).toBeNull();
-    // Directed: c has no outgoing edge at all.
-    expect(findPath(toyGraph, "c", "a")).toBeNull();
+  it("returns nothing when there is no way, or no such node", () => {
+    expect(findPath(graph, "e", "a")).toBeNull();
+    expect(findPath(graph, "a", "nowhere")).toBeNull();
+    expect(findPath(graph, "nowhere", "a")).toBeNull();
   });
 
-  it("returns null for a node that does not exist", () => {
-    expect(findPath(graph, "bay-west", "atlantis")).toBeNull();
-    expect(findPath(graph, "atlantis", "bay-west")).toBeNull();
+  it("weights by travel time rather than by distance", () => {
+    /*
+     * Weighting by distance made the slow depot road a shortcut whenever it happened to be
+     * geometrically shorter, and trains crawled along it in preference to the main line
+     * beside them. A long fast road has to beat a short slow one.
+     */
+    const forked = buildGraph({
+      ...TOY,
+      nodes: [...TOY.nodes, { id: "slow", road: "far", x: 50, kind: "junction" }],
+      edges: [
+        { id: "a-slow", from: "a", to: "slow", kind: "run", speed: 0.05 },
+        { id: "slow-b", from: "slow", to: "b", kind: "run", speed: 0.05 },
+        ...TOY.edges,
+      ],
+    });
+    expect(findPath(forked, "a", "b")?.edges).toEqual(["ab"]);
+  });
+
+  it("marks the cumulative length at the end of each edge", () => {
+    const path = findPath(graph, "a", "e")!;
+    expect(path.marks[0]).toBeCloseTo(100);
+    expect(path.marks[path.marks.length - 1]).toBeCloseTo(path.length);
+    for (let index = 1; index < path.marks.length; index++) {
+      expect(path.marks[index]!).toBeGreaterThan(path.marks[index - 1]!);
+    }
   });
 });
 
-describe("edgeIndexAt", () => {
-  const path = findPath(graph, "depot-north", "exit-east")!;
+describe("edgeIndexAt and edgeStart", () => {
+  const path = findPath(graph, "a", "e")!;
 
-  it("clamps into the path at both ends", () => {
-    expect(edgeIndexAt(path, -1_000)).toBe(0);
-    expect(edgeIndexAt(path, path.length * 10)).toBe(path.edges.length - 1);
+  it("finds the edge holding a distance, and where it begins", () => {
+    expect(edgeIndexAt(path, 50)).toBe(0);
+    expect(edgeStart(path, 0)).toBe(0);
+    expect(edgeIndexAt(path, 120)).toBe(1);
+    expect(edgeStart(path, 1)).toBeCloseTo(100);
   });
 
-  it("puts a distance just past a mark onto the next edge", () => {
-    const first = path.marks[0]!;
-    expect(edgeIndexAt(path, first - 0.1)).toBe(0);
-    expect(edgeIndexAt(path, first + 0.1)).toBe(1);
+  it("clamps into the path at both ends", () => {
+    expect(edgeIndexAt(path, -900)).toBe(0);
+    expect(edgeIndexAt(path, 90_000)).toBe(path.edges.length - 1);
   });
 });
 
 describe("poseAlong", () => {
-  const path = findPath(graph, "depot-north", "exit-east")!;
+  const path = findPath(graph, "a", "e")!;
 
-  it("starts on the origin node and ends on the destination", () => {
-    const from = graph.nodes.get("depot-north")!.at;
-    const to = graph.nodes.get("exit-east")!.at;
-    const start = poseAlong(graph, path, 0)!;
-    const end = poseAlong(graph, path, path.length)!;
-    expect([start.x, start.y]).toEqual([from[0], from[1]]);
-    expect(end.x).toBeCloseTo(to[0]);
-    expect(end.y).toBeCloseTo(to[1]);
-  });
-
-  it("clamps rather than extrapolating past either end", () => {
-    expect(poseAlong(graph, path, -500)).toEqual(poseAlong(graph, path, 0));
-    expect(poseAlong(graph, path, path.length + 500)).toEqual(
-      poseAlong(graph, path, path.length),
-    );
-  });
-
-  it("moves monotonically along the path", () => {
-    let previous = poseAlong(graph, path, 0)!;
-    for (let at = 20; at <= path.length; at += 20) {
-      const pose = poseAlong(graph, path, at)!;
-      expect(Number.isFinite(pose.x) && Number.isFinite(pose.y)).toBe(true);
-      expect(pose.x).toBeGreaterThanOrEqual(previous.x - 1);
-      previous = pose;
-    }
-  });
-
-  it("returns null for an empty path", () => {
+  it("returns nothing for an empty path", () => {
     expect(poseAlong(graph, { edges: [], length: 0, marks: [] }, 0)).toBeNull();
+  });
+
+  it("returns nothing when a path names an edge the graph does not have", () => {
+    expect(
+      poseAlong(graph, { edges: ["ghost"], length: 10, marks: [10] }, 5),
+    ).toBeNull();
+  });
+
+  it("walks continuously across a junction", () => {
+    /*
+     * The defect this pins: the first version sampled each edge from its own hand-authored
+     * control point, so two edges meeting at a node disagreed about the heading by as much
+     * as 128 degrees and a locomotive spun through the join in a single frame. Every edge is
+     * horizontal at its ends now, so the seam cannot exist.
+     */
+    const join = path.marks[0]!;
+    const before = poseAlong(graph, path, join - 0.5)!;
+    const after = poseAlong(graph, path, join + 0.5)!;
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(2);
+    expect(Math.abs(after.angle - before.angle)).toBeLessThan(0.02);
+  });
+
+  it("puts a rake's rear wagon behind the first node rather than on top of it", () => {
+    /*
+     * Negative distances are the normal case, not an edge case: while a locomotive is still
+     * leaving the shed its wagons are genuinely behind where the path starts. Clamping drew
+     * the whole rake stacked on one point and then unfolded it, which is what made every
+     * departure look like a concertina.
+     */
+    const behind = poseAlong(graph, path, -220)!;
+    expect(behind.x).toBeCloseTo(-220);
+    expect(behind.y).toBeCloseTo(100);
+  });
+
+  it("carries a train on past the end of its path", () => {
+    const beyond = poseAlong(graph, path, path.length + 400)!;
+    expect(beyond.x).toBeCloseTo(1200);
+    expect(beyond.y).toBeCloseTo(0);
+  });
+});
+
+describe("the real yard", () => {
+  it("builds every edge the scene declares", () => {
+    const built = buildGraph(RAIL_YARD_SCENE);
+    expect(built.edges.size).toBe(RAIL_YARD_SCENE.edges.length);
+    expect(built.nodes.size).toBe(RAIL_YARD_SCENE.nodes.length);
   });
 });

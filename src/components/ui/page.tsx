@@ -32,13 +32,19 @@ const column = cva("mx-auto w-full", {
       /**
        * A full-height stage: something pinned behind, one centred column in front.
        *
-       * `relative` is what the landing page's canvas positions against, and it belongs
-       * here rather than in that component for the same reason every other appearance
-       * does — a feature may not write its own layout recipe any more than its own
-       * colours. The column in front carries its own width and padding, which is why
-       * this recipe pairs with `pad="none"`.
+       * `relative` is what the landing page's canvas positions against, and it belongs here
+       * rather than in that component for the same reason every other appearance does — a
+       * feature may not write its own layout recipe any more than its own colours. The
+       * column in front carries its own width and padding, which is why this recipe pairs
+       * with `pad="none"`.
+       *
+       * The bottom padding lifts the card off centre, which gives the yard behind it room
+       * to be a yard. A centred flex item moves up by half of whatever sits below it, so
+       * this has to stay in step with VIEW.CARD_LIFT_PX in the rail yard's config — that
+       * constant is what keeps the track band clear of the card, and it would otherwise go
+       * on protecting a band the card had left.
        */
-      stage: "relative flex items-center justify-center",
+      stage: "relative flex items-center justify-center pb-16 sm:pb-32",
     },
     pad: { page: "p-6", bar: "px-6 py-3", none: "" },
   },

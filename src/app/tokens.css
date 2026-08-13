@@ -233,20 +233,48 @@
   --rc-yard-sky-high: var(--plum-950);
   --rc-yard-sky-low: var(--plum-800);
   --rc-yard-skyline: var(--plum-700);
-  --rc-yard-ground: var(--plum-850);
-  --rc-yard-ballast: var(--plum-700);
-  --rc-yard-tie: var(--plum-600);
-  --rc-yard-rail: var(--gray-500);
+  /*
+   * The permanent way is grey stone on a plum floor, not plum on plum.
+   *
+   * The first version ran the ground, the ballast and the ties up three neighbouring rungs
+   * of the same ramp — 1.23:1 between the ground and the ballast, 1.22:1 between the
+   * ballast and the ties. That is inside the width of one banding step: the whole track bed
+   * vanished into the ground and the rails read as two bright lines floating on nothing.
+   * The ties were also *lighter* than the ballast, which is backwards — a sleeper is
+   * creosoted timber and what surrounds it is crushed rock.
+   *
+   * contrast.test.ts now bounds the ballast against the ground in both directions, and
+   * asserts by luminance that the tie is darker than the ballast — a direction, which a
+   * contrast ratio cannot express because it is symmetric.
+   */
+  --rc-yard-ground: var(--plum-900);
+  --rc-yard-ballast: var(--gray-700);
+  --rc-yard-tie: var(--plum-700);
+  --rc-yard-rail: var(--gray-400);
   --rc-yard-structure: var(--plum-600);
   --rc-yard-structure-trim: var(--gray-600);
   --rc-yard-depot: var(--violet-700);
   --rc-yard-smoke: rgb(165 165 181 / 0.2);
   --rc-yard-signal-go: var(--emerald-300);
+  --rc-yard-signal-caution: var(--amber-300);
   --rc-yard-signal-stop: var(--red-300);
   --rc-yard-loco: var(--violet-400);
   --rc-yard-loco-trim: var(--plum-950);
   --rc-yard-metal: var(--gray-600);
   --rc-yard-shadow: rgb(10 9 16 / 0.45);
+  /*
+   * Face shading for the tilted-plan projection. Every solid in the yard takes the shade
+   * on its vertical faces and the lit wash on its roof, which is what stops a box reading
+   * as a flat rectangle lying on the floor.
+   *
+   * Two translucent overlays rather than a lightened and a darkened variant of each
+   * colour: there are six container liveries plus the locomotive, the sheds, the gantry and
+   * the stack, and pairing every one of them would be twenty tokens that all have to move
+   * together. It also keeps the arithmetic out of TypeScript, where a computed hex would be
+   * the same rule violation as a literal one — see design-system.md.
+   */
+  --rc-yard-face-shade: rgb(10 9 16 / 0.34);
+  --rc-yard-face-lit: rgb(199 179 248 / 0.1);
 
   /*
    * The container livery: the violet ladder, walked light-to-dark here and dark-to-light
@@ -322,7 +350,7 @@
     --rc-yard-sky-low: #f4f6fb;
     --rc-yard-skyline: #c3c7d4;
     --rc-yard-ground: #cdd1da;
-    --rc-yard-ballast: #dfe2e8;
+    --rc-yard-ballast: #f2f4f8;
     --rc-yard-tie: var(--gray-400);
     --rc-yard-rail: var(--gray-600);
     --rc-yard-structure: #ffffff;
@@ -330,11 +358,14 @@
     --rc-yard-depot: var(--violet-600);
     --rc-yard-smoke: rgb(92 92 107 / 0.16);
     --rc-yard-signal-go: #047857;
+    --rc-yard-signal-caution: var(--orange-600);
     --rc-yard-signal-stop: var(--red-600);
     --rc-yard-loco: var(--violet-600);
     --rc-yard-loco-trim: #ffffff;
     --rc-yard-metal: var(--gray-500);
     --rc-yard-shadow: rgb(24 24 27 / 0.14);
+    --rc-yard-face-shade: rgb(24 24 27 / 0.26);
+    --rc-yard-face-lit: rgb(255 255 255 / 0.16);
 
     --rc-yard-freight-1: var(--violet-700);
     --rc-yard-freight-2: var(--violet-500);
@@ -408,7 +439,7 @@
   --rc-yard-sky-low: #f4f6fb;
   --rc-yard-skyline: #c3c7d4;
   --rc-yard-ground: #cdd1da;
-  --rc-yard-ballast: #dfe2e8;
+  --rc-yard-ballast: #f2f4f8;
   --rc-yard-tie: var(--gray-400);
   --rc-yard-rail: var(--gray-600);
   --rc-yard-structure: #ffffff;
@@ -416,11 +447,14 @@
   --rc-yard-depot: var(--violet-600);
   --rc-yard-smoke: rgb(92 92 107 / 0.16);
   --rc-yard-signal-go: #047857;
+  --rc-yard-signal-caution: var(--orange-600);
   --rc-yard-signal-stop: var(--red-600);
   --rc-yard-loco: var(--violet-600);
   --rc-yard-loco-trim: #ffffff;
   --rc-yard-metal: var(--gray-500);
   --rc-yard-shadow: rgb(24 24 27 / 0.14);
+  --rc-yard-face-shade: rgb(24 24 27 / 0.26);
+  --rc-yard-face-lit: rgb(255 255 255 / 0.16);
 
   --rc-yard-freight-1: var(--violet-700);
   --rc-yard-freight-2: var(--violet-500);
@@ -487,20 +521,23 @@
   --rc-yard-sky-high: var(--plum-950);
   --rc-yard-sky-low: var(--plum-800);
   --rc-yard-skyline: var(--plum-700);
-  --rc-yard-ground: var(--plum-850);
-  --rc-yard-ballast: var(--plum-700);
-  --rc-yard-tie: var(--plum-600);
-  --rc-yard-rail: var(--gray-500);
+  --rc-yard-ground: var(--plum-900);
+  --rc-yard-ballast: var(--gray-700);
+  --rc-yard-tie: var(--plum-700);
+  --rc-yard-rail: var(--gray-400);
   --rc-yard-structure: var(--plum-600);
   --rc-yard-structure-trim: var(--gray-600);
   --rc-yard-depot: var(--violet-700);
   --rc-yard-smoke: rgb(165 165 181 / 0.2);
   --rc-yard-signal-go: var(--emerald-300);
+  --rc-yard-signal-caution: var(--amber-300);
   --rc-yard-signal-stop: var(--red-300);
   --rc-yard-loco: var(--violet-400);
   --rc-yard-loco-trim: var(--plum-950);
   --rc-yard-metal: var(--gray-600);
   --rc-yard-shadow: rgb(10 9 16 / 0.45);
+  --rc-yard-face-shade: rgb(10 9 16 / 0.34);
+  --rc-yard-face-lit: rgb(199 179 248 / 0.1);
 
   --rc-yard-freight-1: var(--violet-200);
   --rc-yard-freight-2: var(--violet-400);

@@ -24,11 +24,23 @@ export const RAIL_YARD_TOKENS = {
   depot: "--rc-yard-depot",
   smoke: "--rc-yard-smoke",
   signalGo: "--rc-yard-signal-go",
+  signalCaution: "--rc-yard-signal-caution",
   signalStop: "--rc-yard-signal-stop",
   loco: "--rc-yard-loco",
   locoTrim: "--rc-yard-loco-trim",
   metal: "--rc-yard-metal",
   shadow: "--rc-yard-shadow",
+  /*
+   * Face shading, as two translucent overlays.
+   *
+   * A solid seen from above needs its top to read brighter than its sides or it stops
+   * looking solid, and this feature may not compute a colour any more than it may write
+   * one — a lightened hex in TypeScript is the same design-system violation as a literal.
+   * So the lightening is a token too, laid over the base fill, and contrast.test.ts holds
+   * both to a bounded effect: enough to model the form, not enough to change the colour.
+   */
+  faceShade: "--rc-yard-face-shade",
+  faceLit: "--rc-yard-face-lit",
 } as const;
 
 /**
