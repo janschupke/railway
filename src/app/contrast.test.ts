@@ -316,3 +316,68 @@ describe("token parsing", () => {
     }
   });
 });
+
+/**
+ * Every themed token exists in every theme.
+ *
+ * accessibility.md and design-system.md both say a new colour token must be declared in
+ * dark, in light AND in the prefers-color-scheme block. Nothing checked it, and the
+ * failure is quiet in the worst way: a token missing from one theme inherits whatever
+ * the base `:root` happens to hold, so the app does not crash or fall back visibly — it
+ * renders one theme with a colour from the other, which is exactly the case the contrast
+ * assertions above cannot reach because they only test the pairs someone remembered.
+ */
+describe("token parity across themes", () => {
+  /** The three places a semantic token can be declared. */
+  const DARK_BLOCK = block(':root[data-theme="dark"]');
+  const LIGHT_BLOCK = block(':root[data-theme="light"]');
+
+  /*
+   * The media-query block, which stripMediaBlocks deliberately removes for the contrast
+   * scan. Read from the raw source instead: it is the theme an OS preference selects,
+   * so a token missing here is missing for every user who never touched the toggle.
+   */
+  const MEDIA = (() => {
+    const source = TOKENS.replace(/\/\*[\s\S]*?\*\//g, "");
+    const start = source.indexOf("@media (prefers-color-scheme: light)");
+    if (start === -1) return new Map<string, string>();
+    const open = source.indexOf("{", start);
+    let depth = 0;
+    let cursor = open;
+    for (; cursor < source.length; cursor++) {
+      if (source[cursor] === "{") depth += 1;
+      else if (source[cursor] === "}") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    const body = source.slice(open + 1, cursor);
+    const merged = new Map<string, string>();
+    for (const match of body.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const [key, value] of declarationsOf(match[2]!)) merged.set(key, value);
+    }
+    return merged;
+  })();
+
+  /** Semantic tokens only: --rc-*. Primitives and geometry are not themed. */
+  const semantic = (names: Iterable<string>) =>
+    [...names].filter((name) => name.startsWith("--rc-")).sort();
+
+  it("declares each theme's tokens in the other", () => {
+    expect(semantic(LIGHT_BLOCK.keys())).toEqual(semantic(DARK_BLOCK.keys()));
+  });
+
+  it("declares every light token in the prefers-color-scheme block too", () => {
+    /*
+     * The two light sources must agree, or the toggle and the OS preference render
+     * different apps. This is the half most easily forgotten: the explicit
+     * [data-theme="light"] block is the one you are looking at when you add a token.
+     */
+    expect(semantic(MEDIA.keys())).toEqual(semantic(LIGHT_BLOCK.keys()));
+  });
+
+  it("finds a non-trivial number of tokens, so the parser cannot pass vacuously", () => {
+    expect(semantic(DARK_BLOCK.keys()).length).toBeGreaterThan(20);
+    expect(semantic(MEDIA.keys()).length).toBeGreaterThan(20);
+  });
+});

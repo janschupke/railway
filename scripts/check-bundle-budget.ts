@@ -21,7 +21,11 @@ const STATS = ".next/diagnostics/route-bundle-stats.json";
 const BUDGETS = "bundle-budgets.json";
 
 type RouteStats = { route: string; firstLoadChunkPaths: string[] };
-type Budgets = { routes: Record<string, number> };
+type Budgets = {
+  /** Prose. Every routes number must appear here — see the rationale check below. */
+  $comment: string[];
+  routes: Record<string, number>;
+};
 
 const KB = 1024;
 
@@ -79,7 +83,37 @@ if (unbudgeted) {
   );
 }
 
-if (failed || unbudgeted) {
+/*
+ * Every number must be argued for somewhere.
+ *
+ * performance.md makes "raising a budget needs a written reason" a headline rule, and it
+ * was the one rule in this file nothing enforced — a number could be nudged up in the
+ * same commit that made it necessary, with no trace of why, and the gate would go green
+ * and stay green. Raising a budget is the one edit here that must not be quiet.
+ *
+ * Checked as "the number appears in the $comment prose" rather than by diffing against
+ * git: it needs no history, works on a fresh clone, and it fails on exactly the change
+ * worth reviewing — a new value nobody wrote about. It cannot tell a good reason from a
+ * bad one, which is the reviewer's job; it can only insist that one was offered.
+ */
+const rationale = budgets.$comment.join("\n");
+const unexplained = Object.entries(budgets.routes).filter(
+  ([, budget]) => !new RegExp(`\\b${budget}\\b`).test(rationale),
+);
+
+if (unexplained.length > 0) {
+  console.error("\nBudget numbers with no stated reason:\n");
+  for (const [route, budget] of unexplained) {
+    console.error(`  ${route.padEnd(16)}${String(budget).padStart(6)} kB`);
+  }
+  console.error(
+    `\nRaising a budget needs a written reason — see performance.md.` +
+      `\nAdd a line to the "$comment" array in ${BUDGETS} saying what grew and why,` +
+      `\nnaming the new number. Measure with \`pnpm build && pnpm size\`.\n`,
+  );
+}
+
+if (failed || unbudgeted || unexplained.length > 0) {
   console.error("\nBundle budget exceeded.\n");
   process.exit(1);
 }
