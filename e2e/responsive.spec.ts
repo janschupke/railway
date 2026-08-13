@@ -4,7 +4,9 @@ import {
   expect,
   searchBox as search,
   seedServices,
+  selectStatus,
   settled,
+  statusOptions,
   signIn,
   test,
 } from "./support";
@@ -43,16 +45,41 @@ test.describe("the dashboard at phone width", () => {
     await noSidewaysScroll(page);
 
     await search(page).fill("web");
-    await button(page, /^Running$/).click();
+    await selectStatus(page, "Running");
     await noSidewaysScroll(page);
 
     await button(page, /load more/i).click();
     await noSidewaysScroll(page);
   });
 
-  test("wraps the status chips instead of clipping them", async ({ page }) => {
-    const chips = page.getByRole("toolbar", { name: "Status" }).getByRole("button");
-    await expect(chips).toHaveCount(9);
+  test("keeps the whole status list reachable from a phone-width row", async ({
+    page,
+  }) => {
+    /*
+     * The nine states used to be nine chips in the control row, which is what made this
+     * a wrapping question at all: at this width they took three lines and pushed the list
+     * down the page. Behind a dropdown the row cannot wrap, and the question becomes
+     * whether the popup they moved into is itself usable here — a menu that renders
+     * off-screen or under the fold is a worse answer than a strip that wrapped.
+     */
+    await button(page, /^Status/).click();
+    const options = statusOptions(page).getByRole("checkbox");
+    await expect(options).toHaveCount(9);
+
+    for (const option of await options.all()) await expect(option).toBeInViewport();
+  });
+
+  test("wraps the selected chips instead of clipping them", async ({ page }) => {
+    // The strip that replaced the toggles carries only what is selected, so the wrapping
+    // case is now several selections rather than the default state.
+    for (const state of ["Running", "Failed", "Sleeping", "Removed"]) {
+      await selectStatus(page, state);
+    }
+
+    const chips = page
+      .getByRole("group", { name: "Selected statuses" })
+      .getByRole("button");
+    await expect(chips).toHaveCount(4);
 
     // Every chip is inside the viewport, which is what "wrapped" means here — a strip
     // that overflowed would leave the last few outside it.

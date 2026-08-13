@@ -43,8 +43,10 @@ describe("ContainerSectionSkeleton", () => {
       <ContainerSectionSkeleton heading="Containers" rows={5} />,
     );
 
-    // Each row contributes a pill placeholder for the status badge. Scoped to the rows,
-    // because the filter strip above the card is made of pills too.
+    // Each row contributes a pill placeholder for the status badge, so this counts rows.
+    // Scoped to them regardless of what else is on screen: the bar above the card carried
+    // a strip of pills until the status filter became a dropdown, and will again the
+    // moment anything else here is drawn as one.
     expect(
       container.querySelectorAll('[data-loading="container-rows"] .rounded-full'),
     ).toHaveLength(5);
@@ -57,10 +59,15 @@ describe("ContainerSectionSkeleton", () => {
     /*
      * Without this the card jumps a control row down the page the moment the fetch lands
      * — the skeleton-versus-real drift this file exists to prevent, now that the real
-     * section grows a search field and a chip strip above its card.
+     * section grows a search field, a status dropdown, two checkboxes and a Clear button
+     * above its card.
+     *
+     * `basis-80` and not merely "a wide thing": the basis is what decides whether the
+     * search field shares its line with the status trigger at phone width, so a
+     * placeholder at the old 64 would reserve one row where the real bar draws two.
      */
     const { container } = render(<ContainerSectionSkeleton heading="Containers" />);
-    expect(container.querySelector(".h-control-md.basis-64")).toBeInTheDocument();
+    expect(container.querySelector(".h-control-md.basis-80")).toBeInTheDocument();
   });
 
   it("stands in for the time column at the width the row actually uses", () => {

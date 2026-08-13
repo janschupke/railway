@@ -107,7 +107,7 @@ export function ContainerList({
         onStatusesChange={setStatuses}
         onOwnersChange={setOwners}
         onClear={clear}
-        showClear={filtered}
+        canClear={filtered}
       />
 
       <Card>

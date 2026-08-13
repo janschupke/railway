@@ -9,6 +9,8 @@ import {
   row,
   searchBox,
   seedServices,
+  selectStatus,
+  statusOptions,
   settled,
   signIn,
   spinUp,
@@ -232,23 +234,50 @@ test.describe("keyboard operation", () => {
     await expect(log).not.toHaveAttribute("aria-live", "assertive");
   });
 
-  test("walks the status chips with the arrow keys, one tab stop for nine", async ({
+  test("opens, ticks and dismisses the status filter without a pointer", async ({
     page,
   }) => {
     /*
-     * The reason the chips are a Radix ToggleGroup rather than nine buttons in a div:
-     * a roving tabindex means the filter strip costs one Tab, not nine, to pass through.
+     * The filter strip used to be nine toggles behind one Tab stop, walked with the
+     * arrow keys. A dropdown replaces that with a single control, and the thing worth
+     * proving moves with it: the popup is enterable, a box can be ticked from the
+     * keyboard, and Escape both closes it and puts focus back where it started — which
+     * is the failure mode of every hand-rolled popup, and the reason this is a Radix
+     * Popover rather than a div that toggles.
      */
     await signIn(page);
 
-    const chips = page.getByRole("toolbar", { name: "Status" }).getByRole("button");
-    await chips.first().focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(chips.nth(1)).toBeFocused();
+    const trigger = button(page, /^Status/);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+
+    const options = statusOptions(page).getByRole("checkbox");
+    await expect(options.first()).toBeFocused();
 
     await page.keyboard.press("Space");
-    await expect(chips.nth(1)).toHaveAttribute("aria-pressed", "true");
-    await expect(page).toHaveURL(/[?&]status=building/);
+    await expect(page).toHaveURL(/[?&]status=pending/);
+    // The popup survives the tick on purpose: narrowing is iterative, and a popup that
+    // closed per box would make the second choice cost a second trip.
+    await expect(options.first()).toBeChecked();
+
+    await page.keyboard.press("Escape");
+    await expect(statusOptions(page)).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  test("removes one status from the chip strip with the keyboard", async ({ page }) => {
+    // The count on the trigger says how many; only the chips can say which, and taking
+    // one off has to be reachable without a pointer like everything else here.
+    await signIn(page);
+    await selectStatus(page, "Running");
+    await selectStatus(page, "Failed");
+
+    const remove = button(page, "Remove the Running filter");
+    await remove.focus();
+    await page.keyboard.press("Enter");
+
+    await expect(page).toHaveURL(/[?&]status=failed(&|$)/);
+    await expect(button(page, "Remove the Running filter")).toHaveCount(0);
   });
 
   test("pages the list to its end from the keyboard", async ({ page }) => {
@@ -288,6 +317,10 @@ test.describe("keyboard operation", () => {
     page,
   }) => {
     await signIn(page);
+    // So the chip's remove control exists to be checked. It is the one focusable thing
+    // on this page drawn from scratch rather than from the Button primitive, which makes
+    // it the one most able to lose its ring without anyone noticing.
+    await selectStatus(page, "Running");
 
     for (const locator of [
       onlyVisible(page.getByRole("combobox", { name: "Project" })),
@@ -295,7 +328,8 @@ test.describe("keyboard operation", () => {
       field(page, "Name"),
       button(page, /spin up container/i),
       searchBox(page),
-      page.getByRole("toolbar", { name: "Status" }).getByRole("button").first(),
+      button(page, /^Status/),
+      button(page, "Remove the Running filter"),
       onlyVisible(page.getByLabel("Created here")),
     ]) {
       await locator.focus();

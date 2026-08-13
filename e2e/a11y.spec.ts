@@ -12,6 +12,7 @@ import {
   row,
   searchBox,
   seedServices,
+  selectStatus,
   setTheme,
   signIn,
   spinUp,
@@ -62,17 +63,18 @@ test.describe("accessibility", () => {
 
     test(`a filtered, paged list has no violations (${theme})`, async ({ page }) => {
       /*
-       * Three surfaces the other cases never reach: nine selected/unselected chips in a
-       * toolbar, two checkboxes in a group, and the back-to-top button floating over the
-       * rows. Contrast on the selected chip is the one most likely to move with a token,
-       * and a floating control overlapping an interactive one is something axe can see.
+       * Three surfaces the other cases never reach: the removable chip strip the status
+       * dropdown writes, two checkboxes in a group, and the back-to-top button floating
+       * over the rows. Contrast on a chip is the one most likely to move with a token —
+       * it takes its colour from the same state token pair as the badge it filters — and
+       * a floating control overlapping an interactive one is something axe can see.
        */
       await signIn(page);
       await seedServices(page, { name: "spun-web", count: 45 });
       await page.reload();
       await setTheme(page, theme);
 
-      await button(page, /^Running$/).click();
+      await selectStatus(page, "Running");
       await expect(containerRows(page)).toHaveCount(20);
       await containerRows(page).last().scrollIntoViewIfNeeded();
       await expect(button(page, /back to top/i)).toBeVisible();

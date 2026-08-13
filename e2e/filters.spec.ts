@@ -6,6 +6,7 @@ import {
   searchBox as search,
   seedServices,
   settled,
+  statusOptions,
   signIn,
   test,
 } from "./support";
@@ -80,16 +81,37 @@ test.describe("filtering and paging the container list", () => {
     await page.reload();
     await settled(page);
 
-    await button(page, /^Failed$/).click();
+    await button(page, /^Status/).click();
+    const options = statusOptions(page);
+
+    await options.getByLabel("Failed", { exact: true }).check();
     await expect(page).toHaveURL(/[?&]status=failed/);
     await expect(rows(page)).toHaveCount(3);
 
-    await button(page, /^Sleeping$/).click();
+    // Both choices in one visit: the popup deliberately survives a tick, because the
+    // answer to "is this narrow enough" is the list behind it.
+    await options.getByLabel("Sleeping", { exact: true }).check();
     // One param, both members: the URL says OR rather than repeating itself.
     await expect(page).toHaveURL(/[?&]status=failed,sleeping/);
     await expect(rows(page)).toHaveCount(5);
 
+    await page.keyboard.press("Escape");
+    await expect(options).toBeHidden();
+
     await search(page).fill("asleep");
+    await expect(rows(page)).toHaveCount(2);
+
+    /*
+     * The trigger can only say how many; the chips say which, and each takes off only
+     * itself. Removing Failed from a selection of two is the case a count cannot express
+     * and the reason the strip exists — and the search is still ANDed underneath it, so
+     * the three sleeping-but-not-"asleep" rows stay out.
+     */
+    await expect(button(page, /^Status/)).toHaveAccessibleName("Status, 2 selected");
+    await button(page, "Remove the Failed filter").click();
+
+    await expect(page).toHaveURL(/[?&]status=sleeping(&|$)/);
+    await expect(page).toHaveURL(/[?&]q=asleep/);
     await expect(rows(page)).toHaveCount(2);
   });
 

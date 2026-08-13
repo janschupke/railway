@@ -117,6 +117,24 @@ export const containerRows = (page: Page) => containerList(page).getByRole("list
 export const searchBox = (page: Page) =>
   onlyVisible(page.getByLabel("Search containers"));
 
+/** The status dropdown's checkbox group, once it is open. */
+export const statusOptions = (page: Page) =>
+  onlyVisible(page.getByRole("group", { name: "Filter by status" }));
+
+/**
+ * Ticks one status in the filter dropdown, then closes it.
+ *
+ * The popup deliberately survives a tick — narrowing a list is iterative — so closing it
+ * is a separate act, and it is done here rather than left to the caller: a spec that read
+ * the list through an open popup covering it would be asserting about the wrong pixels.
+ */
+export async function selectStatus(page: Page, label: string) {
+  await button(page, /^Status/).click();
+  await statusOptions(page).getByLabel(label, { exact: true }).check();
+  await page.keyboard.press("Escape");
+  await expect(statusOptions(page)).toBeHidden();
+}
+
 export function row(page: Page, name: string) {
   return onlyVisible(
     containerList(page).getByRole("listitem").filter({ hasText: name }),

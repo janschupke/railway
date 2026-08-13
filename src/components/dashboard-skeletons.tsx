@@ -19,14 +19,15 @@ import { Skeleton } from "./ui/skeleton";
 const PLACEHOLDER_ROWS = 3;
 
 /**
- * Chips in the status strip's placeholder.
+ * The two origin checkboxes' placeholder.
  *
- * Fewer than the nine states, on purpose: the real strip wraps to two or three lines on a
- * narrow viewport and a placeholder that matched it exactly would be a wall of grey. One
- * line's worth is enough to reserve the row's height, which is what the card below cares
- * about.
+ * This used to be four chips standing in for a nine-toggle status strip that wrapped to
+ * two or three lines on a narrow viewport — a placeholder that matched it exactly would
+ * have been a wall of grey, and one that did not left the card jumping a line. The status
+ * filter is one dropdown now, so what is left to stand in for beside it is the pair of
+ * checkboxes, which is a number rather than a guess.
  */
-const PLACEHOLDER_CHIPS = 4;
+const PLACEHOLDER_OWNERS = 2;
 
 /*
  * Control placeholders take their height from the same `--control-h-*` tokens the real
@@ -142,16 +143,21 @@ export function ContainerSectionSkeleton({
         the fetch lands, which is the drift e2e/skeleton.spec.ts exists to catch.
 
         Heights come from the same `--control-h-*` tokens the real controls use, and the
-        chip strip mirrors ContainerFilterBar's `flex flex-wrap gap-1` rather than a bar
-        of its own width.
+        row mirrors ContainerFilterBar's own — including `basis-80`, which is what decides
+        whether the search field shares its line at phone width. There is no placeholder
+        for the selected-status chips: a fresh load has nothing selected, so a strip there
+        would reserve a line the real bar does not draw, which is the same defect in the
+        other direction.
       */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <Skeleton shape="control" className="h-control-md min-w-0 grow basis-64" />
-        <div className="flex flex-wrap gap-1">
-          {Array.from({ length: PLACEHOLDER_CHIPS }, (_, i) => (
-            <Skeleton key={i} shape="pill" className="h-5 w-16" />
+        <Skeleton shape="control" className="h-control-md min-w-0 grow basis-80" />
+        <Skeleton shape="control" className="h-control-md w-24 shrink-0" />
+        <div className="flex shrink-0 gap-3">
+          {Array.from({ length: PLACEHOLDER_OWNERS }, (_, i) => (
+            <Skeleton key={i} className="h-4 w-24" />
           ))}
         </div>
+        <Skeleton shape="control" className="h-control-md ml-auto w-28 shrink-0" />
       </div>
 
       <Card>
