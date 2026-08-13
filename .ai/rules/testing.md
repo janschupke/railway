@@ -1,0 +1,122 @@
+---
+meta:
+  updated: 2026-08-13
+---
+
+# Testing
+
+## Four tiers, and a change belongs in one of them
+
+`vitest.config.mts` defines three Vitest projects; Playwright is the fourth tier.
+
+| Tier          | Files                          | Environment | Use it for                                                         |
+| ------------- | ------------------------------ | ----------- | ------------------------------------------------------------------ |
+| `unit`        | `src/**/*.test.ts`             | node        | `src/lib/**`, pure logic, serializers, the session layer           |
+| `component`   | `src/**/*.test.tsx`            | jsdom       | anything in `src/components` and `src/hooks`, including async RSCs |
+| `integration` | `src/**/*.integration.test.ts` | node        | route handlers and Server Actions against MSW-backed HTTP          |
+| `e2e`         | `e2e/*.spec.ts`                | chromium    | the real browser: navigation, streaming, keyboard, a11y, CSP       |
+
+**Tests are colocated** next to the source they cover — `src/lib/sse.ts` ↔
+`src/lib/sse.test.ts`. There is no `__tests__` directory and no mirrored tree.
+
+The component project loads `setup-intl` as well as `setup-dom`, which is what lets an async
+Server Component be rendered by awaiting it. The two are additive: `setup-dom` mocks
+`next-intl` for client components, `setup-intl` mocks `next-intl/server`.
+
+## Coverage is 80% on all four metrics, and the exclude list is not a lever
+
+`include: ["src/**"]`, thresholds 80 for lines, branches, functions and statements. A miss
+fails `pnpm test:coverage`, which fails `pnpm check` and CI.
+
+Excluded: `src/test/**`, `*.d.ts`, `*.test.*`, and the framework shells — `layout.tsx`,
+`page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`. Those are React Server Components
+and route boundaries whose behaviour is composition; Playwright covers them end to end, and
+Playwright does not feed this number. Counting them here would either inflate the figure or
+invite render tests that assert nothing.
+
+Everything with logic in it — `lib`, `hooks`, `components`, Server Actions, data loaders,
+API route handlers — is inside the gate. **Widening the exclude list to pass is not an
+option**; write the test.
+
+## Log records are asserted, not printed past
+
+`src/test/setup.ts` installs `src/test/log-capture.ts` globally and sets `LOG_LEVEL=debug` —
+`debug`, not `silent`, because two suites were writing real error output to stdout during
+`pnpm test` and nobody noticed. The capture passes non-log writes through so the terminal
+stays readable.
+
+Use it:
+
+- `logRecords()` — parsed records, for asserting an event name and its fields.
+- `rawLogLines()` — the unparsed lines, for **credential canaries**. There is already one
+  over the real OAuth callback asserting no token text ever reaches stdout. If you touch
+  anything on a token path, add one.
+
+`src/test/log-capture.ts` deliberately imports nothing from `src/lib`: `knip.jsonc` ignores
+`src/test/**`, so an import from there does not register as usage and would report the
+imported symbol as dead code. The trade is the one literal it has to keep in sync with
+`logger.ts`'s `base.service`.
+
+## Tests assert real copy, through the real translator
+
+`src/test/setup-intl.ts` wires next-intl's own `createTranslator` over `messages/en.json`.
+So a test fails if a key is missing from the catalog, if an ICU argument is misnamed, or if a
+plural form is malformed — none of which a key-echoing stub would notice.
+
+Assert the rendered sentence. Do not assert `"containers.destroyed"`.
+
+## Playwright is `workers: 1`, and that is not negotiable
+
+`playwright.config.ts` sets `workers: 1` and `fullyParallel: false`. The fake Railway holds
+shared in-memory state and the suite resets it between specs, so parallel workers race. It
+also keeps a browser pool off developer machines.
+
+Two projects, and the split is deliberate: `chromium` runs everything except
+`responsive.spec.ts`, and `mobile` (Pixel 7) runs only that one. A second full project would
+roughly double CI wall-clock at `workers: 1` and buy very little — the app declares one `sm:`
+in all of `src/` and adapts by wrapping everywhere else, so there is no viewport-conditional
+code for a second pass to regress. Put a phone-width assertion in `e2e/responsive.spec.ts`
+rather than adding a project.
+
+Run the suite as one invocation — `pnpm test:e2e`. Do not add workers, do not add browsers,
+do not shard.
+
+## The fake Railway is the test double, and it can fail on demand
+
+`e2e/fixtures/fake-railway/` signs real RS256 OIDC with a JWKS endpoint, serves GraphQL over
+an in-memory store, and speaks hand-rolled `graphql-transport-ws`. The app runs unmodified
+against it, so PKCE, token exchange and refresh rotation are all genuinely exercised.
+
+- Every spec resets it: the `test` fixture in `e2e/support.ts` posts to `/__test/reset`
+  before the page is used.
+- Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
+  and supports `rateLimit`, `unauthorized`, `refreshFails`, `accessTokenTtl`,
+  `deploymentsFail`, `logPhase`, `variablesFail`, `projectsSource`, `rejectWorkspaces`,
+  `rejectPersonal`, `rejectViewer` and `slowMs`.
+- `fixtureStats(page)` exposes grant counters, because refresh happens server-side and
+  Playwright cannot observe it with `waitForRequest`.
+
+**Prefer a fault or a stats assertion over a sleep.** A `slowMs` fault makes a pending state
+observable deterministically; a `waitForTimeout` makes it observable sometimes.
+
+Never point a test at the real Railway API.
+
+## Before you call this done
+
+```sh
+pnpm test:coverage
+```
+
+and, if the change is reachable from the browser:
+
+```sh
+pnpm build && pnpm test:e2e
+```
+
+A single spec is `pnpm test:e2e e2e/containers.spec.ts`; a single Vitest file is
+`pnpm test src/lib/sse.test.ts` — positional filters, no `--`, which Vitest would otherwise
+swallow and run the whole suite.
+
+`playwright.config.ts` starts `next start`, so the app must be built first. Both webservers
+reuse an existing one outside CI, so a dev server already on 3100 or a fixture on 4010 will
+be adopted rather than replaced.
