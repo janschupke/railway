@@ -143,6 +143,43 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
+/*
+ * Pointer cursors on controls.
+ *
+ * Tailwind v4's preflight stopped setting `cursor: pointer` on buttons — it defers to the
+ * browser, which draws the default arrow. That is a defensible call for a reset and the
+ * wrong one for this app, where a button is the thing a reader is looking for on every
+ * screen. It came back one class at a time — chips, combobox rows, select rows, the
+ * checkbox's label — until the only controls that answered the pointer were the four that
+ * had remembered to ask. That is the shape of a missing base rule.
+ *
+ * The checkbox's own box is here for a second reason. It sits inside a `<label>` that does
+ * carry `cursor-pointer`, and a native control's user-agent cursor beats an inherited one —
+ * so the row hovered and the box in the middle of it did not, which is the half-working
+ * state that makes a control look broken rather than plain.
+ *
+ * In `@layer base` deliberately: a utility has to be able to override it, which is what
+ * `disabled:cursor-not-allowed` on Input and `has-disabled:cursor-not-allowed` on Checkbox
+ * are doing. Unlayered — as the `body` rule above is — this would quietly beat both.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+  }
+}
+
 @layer utilities {
   /* Flush focus ring — visible on both themes, no offset gap. */
   .focus-ring {

@@ -1,4 +1,5 @@
-import { expect, onlyVisible, signIn, test } from "./support";
+import type { Locator } from "@playwright/test";
+import { button, expect, onlyVisible, signIn, statusOptions, test } from "./support";
 
 /**
  * The chrome, asserted as an invariant rather than page by page.
@@ -51,6 +52,32 @@ test.describe("the app shell", () => {
     expect(response?.status()).toBe(404);
     await expect(onlyVisible(page.getByRole("heading", { level: 1 }))).toBeVisible();
     await expect(page.getByRole("link", { name: /back to the start/i })).toBeVisible();
+  });
+
+  test("every control answers the pointer", async ({ page }) => {
+    /*
+     * Tailwind v4's preflight leaves a button at the browser's default arrow, so this came
+     * back as a base rule — and a base rule is exactly the kind of thing that gets deleted
+     * by someone who cannot see what depends on it.
+     *
+     * A real browser, because there is nothing to assert anywhere else: jsdom applies no
+     * stylesheets, so the unit suite would agree that a button has no cursor at all. The
+     * checkbox's *box* is named separately from its label because that is the pair that was
+     * wrong — the row hovered, the control in the middle of it did not.
+     */
+    await signIn(page);
+
+    const cursorOf = (target: Locator) =>
+      target.evaluate((node) => getComputedStyle(node).cursor);
+
+    await expect
+      .poll(() => cursorOf(page.getByRole("button", { name: /sign out/i })))
+      .toBe("pointer");
+
+    await button(page, /^Status/).click();
+    await expect
+      .poll(() => cursorOf(statusOptions(page).getByRole("checkbox").first()))
+      .toBe("pointer");
   });
 
   test("the dashboard reuses the same single bar", async ({ page }) => {
