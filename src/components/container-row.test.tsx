@@ -218,6 +218,47 @@ describe("ContainerRow", () => {
     }
   });
 
+  it("keeps the relative time on one line", async () => {
+    /*
+     * The cell was 80px with wrapping left on, and at 12px "34 minutes ago" measures
+     * about 78px — so the longest values in the commonest unit broke across two lines and
+     * grew the row. The floor keeps the column aligned; nowrap is what stops the wrap,
+     * and neither works without the other.
+     */
+    const { container: dom } = renderRow();
+    const time = dom.querySelector("time")!;
+    expect(time).toHaveClass("min-w-24", "whitespace-nowrap");
+  });
+
+  it("points a failed deployment at the page that has the reason", async () => {
+    /*
+     * Railway answers this app with the enum FAILED and nothing else, and an image source
+     * that fails to pull may write to neither log phase — so the row was a red badge over
+     * an empty pane with no route to the explanation.
+     */
+    const user = userEvent.setup();
+    renderRow({ state: "failed", rawStatus: "FAILED" });
+
+    await expand(user);
+
+    expect(screen.getByText(/reported this deployment as failed/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /open in railway/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://railway.com/project/p1/service/svc_1?environmentId=e1",
+    );
+    expect(link).toHaveAttribute("rel", "noreferrer");
+  });
+
+  it("says nothing of the sort for a deployment that is fine", async () => {
+    const user = userEvent.setup();
+    renderRow({ state: "running" });
+
+    await expand(user);
+
+    expect(screen.queryByRole("link", { name: /open in railway/i })).toBeNull();
+  });
+
   it("says nothing about the connection once the stream has finished normally", async () => {
     const user = userEvent.setup();
     streamState.status = "closed";

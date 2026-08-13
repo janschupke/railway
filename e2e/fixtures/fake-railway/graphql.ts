@@ -200,8 +200,12 @@ export function execute(
     case "DeploymentLogs":
     case "BuildLogs": {
       const deployment = store.deployments.get(variables.deploymentId as string);
-      const field = operationName === "BuildLogs" ? "buildLogs" : "deploymentLogs";
-      return { data: { [field]: deployment?.logs ?? [] } };
+      const isBuild = operationName === "BuildLogs";
+      const field = isBuild ? "buildLogs" : "deploymentLogs";
+      // Per phase, because the two are not the same output — see Deployment.logs.
+      return {
+        data: { [field]: deployment?.logs[isBuild ? "build" : "deploy"] ?? [] },
+      };
     }
 
     default:

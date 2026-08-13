@@ -250,6 +250,86 @@ describe("monitorDeployment", () => {
     expect(events.some((e) => e.type === "status")).toBe(true);
   });
 
+  describe("when a failure produced no output", () => {
+    const failed = () =>
+      vi.fn(async () => ({ id: "dep_1", status: "FAILED", updatedAt: null }));
+
+    it("reads the other phase rather than reporting nothing at all", async () => {
+      /*
+       * The row picks its phase from a status as old as the page, and a failed deployment
+       * is sent to deploy logs — so a build-phase failure on a container that was already
+       * failed when the page loaded asked Railway for the half of the output that is
+       * empty, and the pane said "No log output for this deployment."
+       */
+      const getLogs = vi.fn(async (_token, _id, kind: "build" | "deploy") =>
+        kind === "build" ? [line("pull failed")] : [],
+      );
+
+      const events = await drain(
+        monitorDeployment(params(), deps({ getLogs, getDeployment: failed() })),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(getLogs.mock.calls.map((c) => c[2])).toEqual(["deploy", "build"]);
+      const types = events.map((e) => e.type);
+      expect(types.indexOf("log")).toBeLessThan(types.indexOf("done"));
+      expect(events.find((e) => e.type === "log")).toMatchObject({
+        line: { message: "pull failed" },
+      });
+      expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+    });
+
+    it("does not go looking when the subscribed phase already said something", async () => {
+      const getLogs = vi.fn(async () => [line("output")]);
+
+      await drain(
+        monitorDeployment(params(), deps({ getLogs, getDeployment: failed() })),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(getLogs).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not go looking for a deployment that simply succeeded quietly", async () => {
+      /*
+       * A successful deployment with no output is normal and common — a database service
+       * that logs nothing on boot is one — and fetching the other phase for every quiet
+       * success would double the query cost of the commonest case to answer a question
+       * nobody asked.
+       */
+      const getLogs = vi.fn(async () => []);
+
+      await drain(monitorDeployment(params(), deps({ getLogs })), async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+      });
+
+      expect(getLogs).toHaveBeenCalledTimes(1);
+    });
+
+    it("still finishes when the fallback fetch fails too", async () => {
+      // A failure to explain the failure is not worth a second banner over the first, and
+      // certainly not worth a stream that never ends.
+      const getLogs = vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockRejectedValue(new RailwayApiError("nope", { kind: "server" }));
+
+      const events = await drain(
+        monitorDeployment(params(), deps({ getLogs, getDeployment: failed() })),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(events.map((e) => e.type)).not.toContain("warning");
+      expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+    });
+  });
+
   it("stops when the caller aborts", async () => {
     const controller = new AbortController();
     const gen = monitorDeployment(

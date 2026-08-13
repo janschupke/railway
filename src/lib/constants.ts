@@ -124,5 +124,31 @@ export const UI = {
 export const LINKS = {
   RAILWAY_DASHBOARD: "https://railway.com/dashboard",
   RAILWAY_HOME: "https://railway.com",
+  /** Base for a deep link into one service; see railwayServiceUrl below. */
+  RAILWAY_PROJECT: "https://railway.com/project",
   REPOSITORY: "https://github.com/janschupke/railway",
 } as const;
+
+/**
+ * One service on Railway's own dashboard.
+ *
+ * Built entirely from ids a container row already holds, so this escape hatch costs no
+ * API call — which is the only reason it can sit on every failed row.
+ *
+ * It exists because the app's whole knowledge of a failed deployment is the enum FAILED:
+ * the deployment query returns a status and nothing else, a service created from an image
+ * performs no build, and a pull that fails may write no deployment logs either. The badge
+ * says "Failed" over a legitimately empty pane, and Railway's own page is the only place
+ * the reason exists. Pointing at it is more honest than leaving the user to guess.
+ *
+ * The ids are Railway's rather than the user's, and encoded anyway — a link builder that
+ * trusts its inputs is one refactor away from not being able to.
+ */
+export const railwayServiceUrl = (params: {
+  projectId: string;
+  serviceId: string;
+  environmentId: string;
+}): string =>
+  `${LINKS.RAILWAY_PROJECT}/${encodeURIComponent(params.projectId)}` +
+  `/service/${encodeURIComponent(params.serviceId)}` +
+  `?environmentId=${encodeURIComponent(params.environmentId)}`;

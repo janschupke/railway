@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base, type Locator, type Page } from "@playwright/test";
-import type { ProjectsSource } from "./fixtures/fake-railway/store";
+import type { LogPhaseFault, ProjectsSource } from "./fixtures/fake-railway/store";
 
 const FIXTURE_URL = `http://localhost:${process.env.FAKE_RAILWAY_PORT ?? 4010}`;
 
@@ -22,6 +22,7 @@ export async function injectFaults(
     refreshFails: boolean;
     accessTokenTtl: number;
     deploymentsFail: boolean;
+    logPhase: LogPhaseFault;
     variablesFail: boolean;
     projectsSource: ProjectsSource;
     rejectWorkspaces: boolean;

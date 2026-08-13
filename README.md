@@ -785,9 +785,13 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
 5. **Ownership:** create a service in the Railway dashboard directly. It appears here as
    _Not managed here_, with no destroy control.
 6. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
-   **Failed** with build logs, rather than spinning forever. Revoke the app's
-   authorization mid-session and confirm you are sent back to sign in with an
-   explanation, not a stack trace.
+   **Failed** rather than spinning forever, and that expanding the row explains the
+   failure and offers **Open in Railway**. Do not expect build logs here: an image source
+   performs no build, and a pull that never resolves may write nothing to either log
+   phase — which is exactly why the row carries an explanation and a deep link. Reload the
+   page and expand the row again; if Railway did write output to the other phase, the
+   monitor's fallback fetches it. Then revoke the app's authorization mid-session and
+   confirm you are sent back to sign in with an explanation, not a stack trace.
 
 ---
 
@@ -798,6 +802,29 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **Image references are validated for syntax, never for existence.** `nonexistent/image:tag`
+  is a well-formed reference, so it is accepted and becomes a failed deployment. Checking
+  the registry from the server was considered and refused on two grounds. First, it would
+  create an SSRF that does not exist today: `IMAGE_PATTERN` admits a bare host as the first
+  component (`169.254.169.254/foo/bar` is a valid reference, and Docker's own rules make a
+  first component containing a dot a registry), so dereferencing user input would reach
+  cloud metadata and every address the container can route to — closing that needs a
+  registry allowlist plus DNS-rebinding protection, guarding a check that is not
+  authoritative anyway. Second, Docker Hub's anonymous pull limits are per source IP, and
+  every user of a deployed instance shares one egress IP, so the failure mode is the worst
+  available: the form refuses a perfectly good image because the _server_ is rate-limited.
+  Registry existence would also not catch architecture mismatches, private images or
+  registry outages, all of which pass a manifest check and still fail the deploy.
+- **A failed deployment's reason lives on Railway, not here.** The deployment query returns
+  a status and nothing else, so a failure reaches this app as the enum `FAILED`. When the
+  subscribed log phase produced nothing, the monitor fetches the other phase before giving
+  up; when both are empty — the usual shape for a failed image pull — the row says so and
+  links straight to the service on Railway, which does have the reason. Surfacing it here
+  would mean selecting a field nobody has proved exists, and the deployment query is polled
+  every 2.5s for the life of every open stream: a withdrawn or refused field there would
+  turn each of those polls into a schema rejection the monitor treats as transient, failing
+  in silence for the full duration ceiling. That needs a probe against a real failed
+  deployment and a separate best-effort document, not a guess in the hot path.
 - **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
   API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been
   built. Offering it means a second confirm path, a fourth container state the dashboard

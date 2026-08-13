@@ -6,15 +6,28 @@
  * against a frozen fixture.
  */
 
+type LogLine = { timestamp: string; message: string };
+
 export type Deployment = {
   id: string;
   serviceId: string;
   status: string;
   updatedAt: string;
-  logs: Array<{ timestamp: string; message: string }>;
+  /**
+   * The two phases Railway keeps apart, kept apart here too.
+   *
+   * This was one array served for both `buildLogs` and `deploymentLogs`, which made the
+   * fixture structurally incapable of expressing the failure it is now used to test: a
+   * service created from an image performs no build, so real build logs are empty, and a
+   * pull that fails writes nothing to the deploy logs either. With one array every phase
+   * always had output and the app's phase selection could never be wrong.
+   */
+  logs: { build: LogLine[]; deploy: LogLine[] };
   /** Index into PROGRESSION. */
   step: number;
   failing: boolean;
+  /** Which phases this deployment writes to; snapshotted from the fault at creation. */
+  logPhase: LogPhaseFault;
 };
 
 export type Service = {
@@ -53,6 +66,16 @@ export type ProjectsSource =
   | "both" // in both connections — the de-duplication case
   | "none"; // authorized, but nothing to show
 
+/**
+ * Which phase a new deployment writes its output to.
+ *
+ * `both` is what Railway does for a repo source and is the default, so every spec written
+ * before this knob existed is unaffected. The other three are the shapes an image source
+ * actually produces: output in one phase only, or — for a pull that never resolves —
+ * nothing anywhere, which is the case that reaches the user as an empty pane.
+ */
+export type LogPhaseFault = "both" | "build" | "deploy" | "none";
+
 export type Faults = {
   /** Next N GraphQL calls answer 429. */
   rateLimit: number;
@@ -64,6 +87,8 @@ export type Faults = {
   accessTokenTtl: number;
   /** Newly created deployments fail their build. */
   deploymentsFail: boolean;
+  /** Which phase newly created deployments write their output to. */
+  logPhase: LogPhaseFault;
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
   /** Where the Projects query finds projects, if anywhere. */
@@ -94,6 +119,7 @@ const DEFAULT_FAULTS: Faults = {
   refreshFails: false,
   accessTokenTtl: 3600,
   deploymentsFail: false,
+  logPhase: "both",
   projectsSource: "personal",
   variablesFail: false,
   rejectWorkspaces: false,
@@ -176,9 +202,12 @@ export class Store {
       serviceId,
       status: "QUEUED",
       updatedAt: new Date(0).toISOString(),
-      logs: [],
+      logs: { build: [], deploy: [] },
       step: 0,
       failing: this.faults.deploymentsFail,
+      // Snapshotted, like `failing`: a spec that flips the fault afterwards is describing
+      // the next deployment, not rewriting the history of this one.
+      logPhase: this.faults.logPhase,
     };
     this.deployments.set(deployment.id, deployment);
     const service = this.services.get(serviceId);
@@ -195,10 +224,17 @@ export class Store {
       deployment.step += 1;
       deployment.status = progression[deployment.step]!;
       deployment.updatedAt = new Date().toISOString();
-      deployment.logs.push({
+
+      const line: LogLine = {
         timestamp: new Date().toISOString(),
         message: `[fake-railway] ${deployment.status.toLowerCase()} ${deployment.id}`,
-      });
+      };
+      if (deployment.logPhase === "both" || deployment.logPhase === "build") {
+        deployment.logs.build.push(line);
+      }
+      if (deployment.logPhase === "both" || deployment.logPhase === "deploy") {
+        deployment.logs.deploy.push(line);
+      }
     }
   }
 

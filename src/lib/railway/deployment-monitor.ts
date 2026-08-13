@@ -96,6 +96,14 @@ export async function* monitorDeployment(
   };
   signal.addEventListener("abort", stop, { once: true });
 
+  /*
+   * Every line this stream has put on the wire, backfill included.
+   *
+   * The fallback below turns on exactly one condition — a deployment that failed having
+   * shown the reader nothing at all — and there is no other way to know that from here.
+   */
+  let linesEmitted = 0;
+
   // Backfill first so attaching mid-build does not start from an empty pane.
   try {
     const backfill = await deps.getLogs(
@@ -106,6 +114,7 @@ export async function* monitorDeployment(
       signal,
     );
     for (const line of backfill) queue.push({ type: "log", line });
+    linesEmitted += backfill.length;
     queue.push({ type: "ready", deploymentId, phase, backfilled: backfill.length });
   } catch (error) {
     // Missing history is not fatal — the live subscription may still work.
@@ -119,6 +128,62 @@ export async function* monitorDeployment(
   let missingPolls = 0;
   let unsettledPolls = 0;
   let consecutiveFailures = 0;
+  /*
+   * Set synchronously the moment a terminal status is first seen.
+   *
+   * `timers.drain` was a sufficient guard while the terminal branch ran start to finish in
+   * one tick. It no longer does: the fallback below awaits, and the status interval does
+   * not wait for the previous call to return, so two polls could both pass a check on a
+   * timer that neither had assigned yet and fetch — and emit — the same fallback twice.
+   */
+  let settling = false;
+
+  /**
+   * Last resort for a failure that showed the reader nothing.
+   *
+   * A row picks its log phase from a status that is as old as the page, and `phaseFor`
+   * sends a failed deployment to deploy logs — so a build-phase failure on a container
+   * that was already failed when the page loaded (a reload, or one that failed while
+   * nobody was looking) asks Railway for the one half of the output that is empty, and
+   * the pane reports "No log output for this deployment." That is also the shape of the
+   * case this exists for: an image source performs no build, so a pull that fails writes
+   * to whichever phase Railway decides, and the app cannot know which in advance.
+   *
+   * Deliberately failed-only, and empty-only. A successful deployment with no output is a
+   * normal, common state — a seeded database service is one — and fetching the other phase
+   * for every quiet success would double the query cost of the commonest case to answer a
+   * question nobody asked.
+   *
+   * Best effort throughout: this runs while the user is already looking at a failure, and
+   * a failure to explain the failure is not worth a second banner over the first.
+   */
+  const explainFailure = async () => {
+    if (linesEmitted > 0) return;
+    const other: LogPhase = phase === "build" ? "deploy" : "build";
+    try {
+      const lines = await deps.getLogs(
+        accessToken,
+        deploymentId,
+        other,
+        STREAM.BACKFILL_LINES,
+        signal,
+      );
+      for (const line of lines) queue.push({ type: "log", line });
+      linesEmitted += lines.length;
+      log.debug("railway.deployment.fallback_logs", {
+        deployment_id: deploymentId,
+        from_phase: other,
+        lines: lines.length,
+      });
+    } catch (error) {
+      if (signal.aborted) return;
+      log.debug("railway.deployment.fallback_logs_failed", {
+        deployment_id: deploymentId,
+        from_phase: other,
+        error,
+      });
+    }
+  };
 
   const pollStatus = async () => {
     try {
@@ -159,8 +224,20 @@ export async function* monitorDeployment(
         updatedAt: deployment.updatedAt,
       });
 
-      if (isTerminal(state) && !timers.drain) {
+      if (isTerminal(state) && !settling) {
+        settling = true;
         if (timers.status) clearInterval(timers.status);
+
+        /*
+         * Before the drain window is armed, not inside it. `stop()` ends the queue and
+         * AsyncQueue drops everything pushed after that, so a fallback resolving a moment
+         * late would be discarded in silence — the same empty pane, with more code behind
+         * it. The drain still does its own job afterwards: trailing frames from the live
+         * subscription routinely arrive after the status flips.
+         */
+        if (state === "failed") await explainFailure();
+        if (signal.aborted) return;
+
         timers.drain = setTimeout(() => {
           queue.push({ type: "done", deploymentId, state });
           stop();
@@ -245,6 +322,7 @@ export async function* monitorDeployment(
         signal,
       )) {
         queue.push({ type: "log", line });
+        linesEmitted += 1;
       }
     } catch (error) {
       if (!signal.aborted) {

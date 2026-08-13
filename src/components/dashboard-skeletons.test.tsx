@@ -50,6 +50,17 @@ describe("ContainerSectionSkeleton", () => {
     }
   });
 
+  it("stands in for the time column at the width the row actually uses", () => {
+    /*
+     * The pair drifted once already: the row's time cell grew to fit "34 minutes ago"
+     * without a wrap and the placeholder stayed at the old 80px, so every row settled
+     * wider than the skeleton it replaced. Asserted by class because that is the only
+     * place the two agree.
+     */
+    const { container } = render(<ContainerSectionSkeleton heading="Containers" />);
+    expect(container.querySelector(".w-24.shrink-0")).toBeInTheDocument();
+  });
+
   it("renders synchronously from plain strings", () => {
     /*
      * The guard against making a composition `async` to fetch its own translations. A

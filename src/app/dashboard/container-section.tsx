@@ -50,9 +50,20 @@ export async function ContainerSection({
     <section className="space-y-2">
       <div className="flex items-baseline justify-between">
         <Heading level={2}>{t("containersHeading")}</Heading>
-        <Text asChild variant="caption" tone="subtle">
-          <p>{t("createdHere", { managed: managedCount, total: containers.length })}</p>
-        </Text>
+        {/*
+          Nothing to count, nothing to say. At zero this read "0 of no containers created
+          here" — ICU resolving a `=0` branch that replaced only the count and left the
+          rest of the sentence around it — directly above the empty state that already
+          says nothing is running. The catalog no longer carries a zero form at all, so
+          this guard is what keeps that promise rather than a comment asking it to.
+        */}
+        {containers.length > 0 && (
+          <Text asChild variant="caption" tone="subtle">
+            <p>
+              {t("createdHere", { managed: managedCount, total: containers.length })}
+            </p>
+          </Text>
+        )}
       </div>
 
       {error && <Banner tone="error">{error}</Banner>}

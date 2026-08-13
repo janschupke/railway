@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Info } from "lucide-react";
+import { ChevronDown, ExternalLink, Info } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 import {
@@ -13,12 +13,14 @@ import {
   type ContainerState,
   type LogPhase,
 } from "@/lib/railway/types";
+import { railwayServiceUrl } from "@/lib/constants";
 import { cn, relativeTime } from "@/lib/utils";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
+import { ErrorBlock } from "./ui/error-block";
 import { Tooltip } from "./ui/tooltip";
 import { Text } from "./ui/text";
 
@@ -188,7 +190,18 @@ export function ContainerRow({
           asChild
           variant="caption"
           tone="subtle"
-          className="w-20 shrink-0 text-right"
+          /*
+           * `min-w-`, and `whitespace-nowrap` alongside it.
+           *
+           * At 12px "34 minutes ago" measures about 78px against the 80px box this used
+           * to be, with wrapping left on — so the longest values in the commonest unit
+           * broke across two lines and grew the row. A fixed width plus nowrap would fix
+           * English and hide the same failure everywhere else: the text would simply
+           * overflow into the status badge, silently. The floor keeps the column aligned
+           * for every value Intl produces in English; the absence of a ceiling is what
+           * keeps a longer locale honest, taking the space it needs from the flex row.
+           */
+          className="min-w-24 shrink-0 text-right whitespace-nowrap"
         >
           <time
             // Relative time is computed from the client clock; the server's differs.
@@ -265,6 +278,47 @@ export function ContainerRow({
                   <Banner tone="error">{t("streamUnavailable")}</Banner>
                 )}
                 {stream.warning && <Banner tone="info">{stream.warning}</Banner>}
+                {/*
+                  A terminal failure says what it can, and where the rest of it is.
+
+                  Railway's API answers this app with one enum member. A service created
+                  from an image performs no build, so the build logs are empty, and a pull
+                  that never resolves writes no deployment logs either — which is a red
+                  badge over a pane reading "No log output for this deployment", and no
+                  route from there to the reason. The monitor already tries the other log
+                  phase before giving up; this is what is left when that also comes back
+                  empty, and it is the only thing on screen that Railway's own page can
+                  answer.
+
+                  ErrorBlock rather than Banner because this one has an action attached:
+                  Banner is a <p> and cannot legally hold a control — see its docblock for
+                  the stranded Retry that taught us.
+
+                  Driven by `state`, which prefers the stream but falls back to the server
+                  render, so a row that was already failed when the page loaded gets this
+                  on expand without a stream ever having spoken.
+                */}
+                {state === "failed" && (
+                  <ErrorBlock
+                    message={t("failedExplanation")}
+                    actions={
+                      <Button asChild variant="danger" size="sm">
+                        <a
+                          href={railwayServiceUrl({
+                            projectId,
+                            serviceId: container.serviceId,
+                            environmentId,
+                          })}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {t("openInRailway")}
+                          <ExternalLink aria-hidden />
+                        </a>
+                      </Button>
+                    }
+                  />
+                )}
                 {container.deploymentId ? (
                   <LogPane
                     lines={stream.logs}

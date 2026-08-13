@@ -128,6 +128,29 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `log-panel/${theme}`);
     });
 
+    test(`a failed row's explanation has no violations (${theme})`, async ({
+      page,
+    }) => {
+      /*
+       * A tinted danger surface carrying a danger-weight control — danger on danger is
+       * exactly the contrast pair a token change breaks, and it is why the escape hatch
+       * in dashboard/page.tsx takes the block's own weight rather than staying ghost.
+       */
+      await injectFaults(page, { deploymentsFail: true, logPhase: "none" });
+      await signIn(page);
+      await spinUp(page, "broken");
+      await setTheme(page, theme);
+
+      const broken = row(page, "broken");
+      await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+      await onlyVisible(broken.getByRole("button", { name: /^broken/ })).click();
+      await expect(
+        broken.getByRole("link", { name: /open in railway/i }),
+      ).toBeVisible();
+
+      await expectNoA11yViolations(page, `failed-row/${theme}`);
+    });
+
     test(`form validation errors have no violations (${theme})`, async ({ page }) => {
       await signIn(page);
       await setTheme(page, theme);

@@ -92,7 +92,10 @@ function ContainerRowSkeleton() {
           </div>
         </div>
         <Skeleton shape="pill" className="h-5 w-20" />
-        <Skeleton className="h-3 w-20 shrink-0" />
+        {/* Tracks the time column's floor in container-row.tsx. A placeholder narrower
+            than the thing it stands in for is exactly the drift this file exists to
+            prevent — the row would settle wider than its own skeleton. */}
+        <Skeleton className="h-3 w-24 shrink-0" />
         <Skeleton shape="control" className="h-control-sm w-24" />
       </div>
     </div>

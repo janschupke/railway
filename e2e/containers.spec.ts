@@ -7,6 +7,7 @@ import {
   onlyVisible,
   openDestroyDialog,
   row,
+  settled,
   signIn,
   spinUp,
   test,
@@ -181,6 +182,58 @@ test.describe("container lifecycle", () => {
     await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
   });
 
+  test("reads the other log phase when a failure showed nothing", async ({ page }) => {
+    /*
+     * The row picks its log phase from the status it can see, and a failed deployment is
+     * sent to deploy logs — so a build-phase failure on a row that was *already* failed
+     * when the page rendered asked Railway for the half of the output that is empty and
+     * reported "No log output for this deployment." The reload below is what creates that
+     * row: without it the stream follows the deployment through BUILDING and the wrong
+     * phase is never chosen.
+     */
+    await injectFaults(page, { deploymentsFail: true, logPhase: "build" });
+
+    await spinUp(page, "broken");
+
+    const broken = row(page, "broken");
+    await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+    await page.reload();
+    await settled(page);
+
+    const reloaded = row(page, "broken");
+    await onlyVisible(reloaded.getByRole("button", { name: /^broken/ })).click();
+    await expect(reloaded.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+  });
+
+  test("points a failure with no output at all towards Railway", async ({ page }) => {
+    /*
+     * The genuine image-pull shape: no build, no deploy logs, and an API that answers
+     * with the enum FAILED and nothing else. The pane is legitimately empty — what must
+     * not be empty is the route to the reason, which only Railway's own page has.
+     */
+    await injectFaults(page, { deploymentsFail: true, logPhase: "none" });
+
+    await spinUp(page, "broken");
+
+    const broken = row(page, "broken");
+    await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+    await onlyVisible(broken.getByRole("button", { name: /^broken/ })).click();
+
+    await expect(broken.getByRole("log")).toContainText(
+      "No log output for this deployment.",
+    );
+    await expect(
+      broken.getByRole("link", { name: /open in railway/i }),
+    ).toHaveAttribute(
+      "href",
+      /railway\.com\/project\/proj_demo\/service\/svc_\d+\?environmentId=env_prod/,
+    );
+  });
+
   test("surfaces a Railway rate limit instead of failing silently", async ({
     page,
   }) => {
@@ -226,5 +279,11 @@ test.describe("container lifecycle", () => {
     await expect(
       onlyVisible(page.getByText("Nothing running in this environment")),
     ).toBeVisible();
+    /*
+     * And no count above it. The heading row used to carry "0 of no containers created
+     * here" here — ICU resolving a zero branch that replaced the count and left the
+     * sentence built around it — directly on top of the empty state that says this.
+     */
+    await expect(onlyVisible(page.getByText(/\d+ of /))).toHaveCount(0);
   });
 });

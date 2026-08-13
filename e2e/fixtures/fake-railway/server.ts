@@ -194,17 +194,20 @@ wss.on("connection", (socket: WebSocket) => {
     if (message.type === "subscribe" && message.id) {
       const id = message.id;
       const deploymentId = String(message.payload?.variables?.deploymentId ?? "");
-      const field = /buildLogs/.test(message.payload?.query ?? "")
-        ? "buildLogs"
-        : "deploymentLogs";
+      const isBuild = /buildLogs/.test(message.payload?.query ?? "");
+      const field = isBuild ? "buildLogs" : "deploymentLogs";
+      const phase = isBuild ? "build" : "deploy";
 
+      // Per subscription, so the two phases advance independently — which is the point
+      // of the split: a subscription to the empty phase must stay empty.
       let sent = 0;
       const push = () => {
         const deployment = store.deployments.get(deploymentId);
         if (!deployment) return;
-        const fresh = deployment.logs.slice(sent);
+        const lines = deployment.logs[phase];
+        const fresh = lines.slice(sent);
         if (fresh.length === 0) return;
-        sent = deployment.logs.length;
+        sent = lines.length;
         socket.send(
           JSON.stringify({ id, type: "next", payload: { data: { [field]: fresh } } }),
         );
