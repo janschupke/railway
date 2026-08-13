@@ -292,20 +292,23 @@ body {
   transform-origin: var(--radix-popper-transform-origin, center);
 }
 /*
- * `.animate-content-enter` is deliberately absent from the exit rule, and Select carries
- * neither class at all. Both are findings rather than oversights.
+ * `.animate-content-enter` is deliberately absent from the exit rule: it is what a
+ * surface opts into when it should arrive but leave at once.
  *
- * Radix Select is a modal layer: while its content is mounted it holds a focus scope, a
- * scroll lock and `aria-hidden` on the rest of the document, and Presence keeps a closing
- * node mounted for as long as an animation runs on it. Animating select content at all —
- * enter alone was enough — left that layer alive past its own close, and every subsequent
- * Escape went there rather than to whatever the user was looking at. Open the project
- * dropdown, dismiss it, open the destroy dialog: that dialog could no longer be dismissed.
- * Established by elimination, and pinned by e2e/motion.spec.ts and e2e/security.spec.ts.
+ * Which way a surface animates follows from what it is. The dialog and the toast animate
+ * both ways — they announce and confirm, and a confirmation that vanishes on one frame
+ * reads as a glitch rather than as a dismissal. The tooltip and the select animate in
+ * only: both are modal or transient layers that hold something while they live (the
+ * select holds a scroll lock and `aria-hidden` on the rest of the document), Presence
+ * keeps a closing node mounted for exactly as long as an animation runs on it, and a
+ * dismissed dropdown is a user getting back to work.
  *
- * The select loses nothing that matters. The reported bug was that it painted in the
- * viewport's top-left corner for a frame, and the fix for that is the rule above — the
- * popup now simply appears where it belongs, immediately.
+ * A correction, because the previous version of this comment asserted the opposite and
+ * was wrong: animating the select was once blamed for the destroy dialog refusing to
+ * close on Escape. It was not the cause. Radix attaches a layer's Escape handler a render
+ * *after* the layer appears, and the specs were pressing Escape inside that window — see
+ * dismissWithEscape in e2e/support.ts. Removing the animation only shifted the timing
+ * enough to look like a cure; with the race actually closed, the animation is fine.
  */
 [data-state="closed"].animate-content {
   animation: content-out var(--duration-fast) ease-in;

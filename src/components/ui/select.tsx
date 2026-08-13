@@ -76,6 +76,15 @@ export function Select({
               className={cn(
                 "border-border bg-raised z-50 max-h-64 min-w-[var(--radix-select-trigger-width)]",
                 "overflow-hidden rounded-md border shadow-lg",
+                /*
+                 * Enter only, for the reason tooltip.tsx gives: Presence keeps a closing
+                 * node mounted for as long as an animation runs on it, and this one is a
+                 * modal layer — it holds a scroll lock and `aria-hidden` on the rest of
+                 * the document while it lives. A dismissed dropdown is a user getting
+                 * back to work, so it goes at once; the dialog and the toast, which
+                 * announce and confirm, animate both ways.
+                 */
+                "animate-content-enter",
               )}
             >
               <Primitive.Viewport className="p-1">

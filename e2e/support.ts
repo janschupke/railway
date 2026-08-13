@@ -120,10 +120,13 @@ export function row(page: Page, name: string) {
  * The count alone was not enough. `spin-up-form` starts its refresh inside a
  * `useTransition`, and a transition commits the *whole* new tree at once — so the list
  * can read as settled while the refresh is still in flight, and the commit then
- * reconciles the rows out from under whatever the test does next. That is how a dialog
- * opened immediately afterwards swallowed the Escape meant to dismiss it. The form
- * marks its own button busy for exactly that window, so waiting on it closes the race
- * at the signal rather than by sleeping past it.
+ * reconciles the rows out from under whatever the test does next. The form marks its own
+ * button busy for exactly that window, so waiting on it closes the race at the signal
+ * rather than by sleeping past it.
+ *
+ * This was also once blamed for a dialog swallowing an Escape. It was not the cause —
+ * see dismissWithEscape below, which is — and both waits are kept because they close
+ * different windows.
  */
 export async function settled(page: Page) {
   await expect(containerList(page)).toHaveCount(1);
@@ -145,11 +148,37 @@ export async function signIn(page: Page) {
 }
 
 /**
+ * Waits until a Radix layer is listening for Escape, then presses it.
+ *
+ * Being on screen is not the same as being dismissable, and the gap is real: Radix's
+ * DismissableLayer only attaches its keydown handler once `isHighestLayer` is true, and
+ * that needs a *second* render — the content ref sets state, an effect adds the node to
+ * the layer set, and a CONTEXT_UPDATE event forces the re-render that finally computes
+ * the index. `toBeVisible()` resolves after the first commit, several milliseconds early.
+ *
+ * Measured: an Escape sent 2-8ms after the node appeared was swallowed; 10ms and later
+ * always landed. A person cannot type into that window, but Playwright can, and does —
+ * keyboard input has no actionability check, which is why only the Escape presses ever
+ * saw this and every click-driven dismissal was always fine.
+ *
+ * `pointer-events: auto` is the signal rather than a delay because Radix computes it from
+ * the same layer index on the same render: the style flipping IS the handler attaching.
+ * (It is inline `auto` from the start on a layer that does not disable outside pointer
+ * events, so this gates modal layers — Select, AlertDialog — and is merely harmless on
+ * the combobox popover, whose Escape is the app's own handler and live at commit.)
+ */
+export async function dismissWithEscape(page: Page, layer: Locator) {
+  await expect(layer).toHaveCSS("pointer-events", "auto");
+  await page.keyboard.press("Escape");
+}
+
+/**
  * Opens the destroy confirmation and waits until it is actually usable.
  *
- * The dialog shell renders immediately, but its body is a dynamic import — so a spec
- * that acts as soon as `alertdialog` appears races the chunk. Waiting for the confirm
- * field is the honest "the dialog is ready" signal.
+ * Two separate readiness signals, both earned: the confirm field, because the dialog
+ * shell renders before its body settles and a spec that acts on `alertdialog` alone
+ * proves nothing about the form; and the layer gate above, because the dialog handles
+ * Escape a render later than it appears.
  */
 export async function openDestroyDialog(page: Page, name: string) {
   await onlyVisible(
@@ -158,6 +187,7 @@ export async function openDestroyDialog(page: Page, name: string) {
   const dialog = onlyVisible(page.getByRole("alertdialog"));
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel(/to confirm/i)).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
   return dialog;
 }
 

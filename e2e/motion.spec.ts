@@ -1,5 +1,6 @@
 import {
   button,
+  dismissWithEscape,
   expect,
   onlyVisible,
   openDestroyDialog,
@@ -118,25 +119,24 @@ test.describe("popup motion", () => {
     page,
   }) => {
     /*
-     * The regression that adding exit animations introduced, caught by security.spec
-     * and pinned here.
+     * One dismissal must not consume the next one's Escape. Two layers, opened and
+     * closed in sequence, with a spin-up in between.
      *
-     * Radix Presence keeps a closing node mounted for as long as an animation runs on
-     * it, and a mounted Select holds a focus scope, a scroll lock and `aria-hidden` on
-     * the rest of the document. An animated exit therefore kept that layer alive past
-     * its own close — and every Escape after it went there instead of to whatever the
-     * user was actually looking at. Dismissing the project dropdown left the destroy
-     * dialog impossible to dismiss.
+     * This began as a suspected animation bug — animating the Select was blamed for the
+     * destroy dialog refusing to close — and that was wrong. The cause was a race in the
+     * pressing, not in the closing: Radix attaches a layer's Escape handler one render
+     * after the layer appears, and `toBeVisible()` returns inside that window. See
+     * dismissWithEscape in support.ts, which is what both dismissals below go through.
      */
     await onlyVisible(page.getByRole("combobox", { name: "Project" })).click();
     await expect(
       onlyVisible(page.getByRole("option", { name: "Demo Project" })),
     ).toBeVisible();
-    await page.keyboard.press("Escape");
+    await dismissWithEscape(page, onlyVisible(page.getByRole("listbox")));
 
     await spinUp(page, "cache");
     const dialog = await openDestroyDialog(page, "cache");
-    await page.keyboard.press("Escape");
+    await dismissWithEscape(page, dialog);
 
     await expect(dialog).toHaveCount(0);
   });

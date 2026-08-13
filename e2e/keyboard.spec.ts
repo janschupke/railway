@@ -1,5 +1,6 @@
 import {
   button,
+  dismissWithEscape,
   expect,
   field,
   onlyVisible,
@@ -53,7 +54,7 @@ test.describe("keyboard operation", () => {
       expect(inside, `focus escaped the dialog on tab ${i + 1}`).toBe(true);
     }
 
-    await page.keyboard.press("Escape");
+    await dismissWithEscape(page, dialog);
     await expect(dialog).toBeHidden();
 
     // Focus returns to what opened the dialog, not to the top of the document.
@@ -113,7 +114,7 @@ test.describe("keyboard operation", () => {
       onlyVisible(page.getByRole("option", { name: "Second Project" })),
     ).toBeVisible();
 
-    await page.keyboard.press("Escape");
+    await dismissWithEscape(page, onlyVisible(page.getByRole("listbox")));
 
     await expect(
       onlyVisible(page.getByRole("option", { name: "Second Project" })),

@@ -1,4 +1,5 @@
 import {
+  dismissWithEscape,
   expect,
   onlyVisible,
   openDestroyDialog,
@@ -54,13 +55,14 @@ test("the policy blocks nothing the app actually does", async ({ page }) => {
   await expect(
     onlyVisible(page.getByRole("option", { name: "Demo Project" })),
   ).toBeVisible();
-  await page.keyboard.press("Escape");
+  await dismissWithEscape(page, onlyVisible(page.getByRole("listbox")));
 
   // Opening a dialog makes react-remove-scroll inject a <style> element at runtime.
   await spinUp(page, "cache");
   await settled(page);
-  await openDestroyDialog(page, "cache");
+  const dialog = await openDestroyDialog(page, "cache");
   await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 
   // connect-src 'self' has to allow the same-origin EventSource.
   await row(page, "cache")
