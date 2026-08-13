@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   ContainerSectionSkeleton,
-  DashboardHeaderSkeleton,
   ProjectPickerSkeleton,
   SpinUpFormSkeleton,
 } from "./dashboard-skeletons";
@@ -60,18 +59,7 @@ describe("ContainerSectionSkeleton", () => {
     expect(ContainerSectionSkeleton({ heading: "Containers" })).not.toBeInstanceOf(
       Promise,
     );
-    expect(
-      DashboardHeaderSkeleton({ appName: "Container Console" }),
-    ).not.toBeInstanceOf(Promise);
     expect(ProjectPickerSkeleton()).not.toBeInstanceOf(Promise);
     expect(SpinUpFormSkeleton()).not.toBeInstanceOf(Promise);
-  });
-});
-
-describe("DashboardHeaderSkeleton", () => {
-  it("renders the product name for real, since it needs no data", () => {
-    // This is the fix for the header shifting when the session lands.
-    render(<DashboardHeaderSkeleton appName="Container Console" />);
-    expect(screen.getByText("Container Console")).toBeInTheDocument();
   });
 });

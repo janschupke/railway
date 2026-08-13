@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { ContainerSectionSkeleton } from "@/components/dashboard-skeletons";
-import { DashboardHeader } from "@/components/dashboard-header";
 import { ProjectPicker } from "@/components/project-picker";
 import { ProjectWatcher } from "@/components/project-watcher";
 import { RefreshButton } from "@/components/refresh-button";
@@ -84,120 +83,112 @@ export default async function DashboardPage({
   );
 
   return (
-    <>
-      <DashboardHeader {...shell.user} />
+    <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
+      {error ? (
+        <ErrorBlock
+          message={error}
+          actions={
+            reauthorizable ? (
+              <>
+                <SignInButton
+                  label={t("reauthorize")}
+                  consent
+                  variant="danger"
+                  size="sm"
+                />
+                {openRailwayInError}
+              </>
+            ) : (
+              <>
+                <RefreshButton
+                  label={tCommon("retry")}
+                  pendingLabel={t("retryPending")}
+                  variant="danger"
+                  size="sm"
+                />
+                {openRailwayInError}
+              </>
+            )
+          }
+        />
+      ) : (
+        <>
+          {shell.partialError && <Banner tone="warning">{shell.partialError}</Banner>}
 
-      <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
-        {error ? (
-          <ErrorBlock
-            message={error}
-            actions={
-              reauthorizable ? (
-                <>
-                  <SignInButton
-                    label={t("reauthorize")}
-                    consent
-                    variant="danger"
-                    size="sm"
-                  />
-                  {openRailwayInError}
-                </>
-              ) : (
-                <>
-                  <RefreshButton
-                    label={tCommon("retry")}
-                    pendingLabel={t("retryPending")}
-                    variant="danger"
-                    size="sm"
-                  />
-                  {openRailwayInError}
-                </>
-              )
-            }
-          />
-        ) : (
-          <>
-            {shell.partialError && <Banner tone="warning">{shell.partialError}</Banner>}
+          {shell.droppedSelection && (
+            <Banner tone="warning">{t("droppedSelection")}</Banner>
+          )}
 
-            {shell.droppedSelection && (
-              <Banner tone="warning">{t("droppedSelection")}</Banner>
-            )}
-
-            {projects.length === 0 ? (
-              <Card>
-                <EmptyState
-                  title={
-                    deniedProjectAccess
-                      ? t("noProjectsScopeTitle")
-                      : t("noProjectsTitle")
-                  }
-                  description={
-                    deniedProjectAccess
-                      ? t("noProjectsScopeDescription", {
-                          scopes: missingScopes.join(", "),
-                        })
-                      : t("noProjectsDescription")
-                  }
-                  action={
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      {deniedProjectAccess ? (
-                        <SignInButton
-                          label={t("chooseProjects")}
-                          consent
+          {projects.length === 0 ? (
+            <Card>
+              <EmptyState
+                title={
+                  deniedProjectAccess ? t("noProjectsScopeTitle") : t("noProjectsTitle")
+                }
+                description={
+                  deniedProjectAccess
+                    ? t("noProjectsScopeDescription", {
+                        scopes: missingScopes.join(", "),
+                      })
+                    : t("noProjectsDescription")
+                }
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {deniedProjectAccess ? (
+                      <SignInButton
+                        label={t("chooseProjects")}
+                        consent
+                        variant="primary"
+                        size="sm"
+                      />
+                    ) : (
+                      <>
+                        {/* Asking Railway again is both cheaper and likelier to help
+                              than a consent screen that already granted everything. */}
+                        <RefreshButton
+                          label={t("noProjectsRetry")}
+                          pendingLabel={t("noProjectsRetryPending")}
                           variant="primary"
                           size="sm"
                         />
-                      ) : (
-                        <>
-                          {/* Asking Railway again is both cheaper and likelier to help
-                              than a consent screen that already granted everything. */}
-                          <RefreshButton
-                            label={t("noProjectsRetry")}
-                            pendingLabel={t("noProjectsRetryPending")}
-                            variant="primary"
-                            size="sm"
-                          />
-                          <SignInButton
-                            label={t("chooseProjects")}
-                            consent
-                            variant="secondary"
-                            size="sm"
-                          />
-                        </>
-                      )}
-                      {openRailway}
-                    </div>
-                  }
-                />
-              </Card>
-            ) : (
-              <>
-                <ProjectPicker
-                  projects={projects}
-                  projectId={project?.id ?? null}
-                  environmentId={environment?.id ?? null}
-                />
+                        <SignInButton
+                          label={t("chooseProjects")}
+                          consent
+                          variant="secondary"
+                          size="sm"
+                        />
+                      </>
+                    )}
+                    {openRailway}
+                  </div>
+                }
+              />
+            </Card>
+          ) : (
+            <>
+              <ProjectPicker
+                projects={projects}
+                projectId={project?.id ?? null}
+                environmentId={environment?.id ?? null}
+              />
 
-                {/*
+              {/*
                   Renders nothing. Holds the connection that notices a container created,
                   redeployed or destroyed in Railway's own dashboard — which this app used
                   to learn about only when the user pressed Refresh. Mounted here so a
                   project switch remounts it, and absent when there is nothing to watch.
                 */}
-                {project && environment && (
-                  <ProjectWatcher
-                    projectId={project.id}
-                    environmentId={environment.id}
-                  />
-                )}
+              {project && environment && (
+                <ProjectWatcher projectId={project.id} environmentId={environment.id} />
+              )}
 
-                <SpinUpForm
-                  projectId={project?.id ?? ""}
-                  environmentId={environment?.id ?? ""}
-                  disabled={!project || !environment}
-                />
+              <SpinUpForm
+                projectId={project?.id ?? ""}
+                environmentId={environment?.id ?? ""}
+                disabled={!project || !environment}
+              />
 
-                {/*
+              {/*
               Keyed on the selection, not merely wrapped. React only reveals a fallback
               for a boundary it is mounting fresh; an update to a boundary that is
               already showing content suspends without committing, which is why
@@ -212,22 +203,19 @@ export default async function DashboardPage({
               A router.refresh() keeps the same key, so it deliberately does NOT blank
               the list; those call sites surface their own pending state instead.
             */}
-                <Suspense
-                  key={`${project?.id ?? ""}:${environment?.id ?? ""}`}
-                  fallback={
-                    <ContainerSectionSkeleton heading={t("containersHeading")} />
-                  }
-                >
-                  <ContainerSection
-                    projectId={project?.id ?? null}
-                    environmentId={environment?.id ?? null}
-                  />
-                </Suspense>
-              </>
-            )}
-          </>
-        )}
-      </main>
-    </>
+              <Suspense
+                key={`${project?.id ?? ""}:${environment?.id ?? ""}`}
+                fallback={<ContainerSectionSkeleton heading={t("containersHeading")} />}
+              >
+                <ContainerSection
+                  projectId={project?.id ?? null}
+                  environmentId={environment?.id ?? null}
+                />
+              </Suspense>
+            </>
+          )}
+        </>
+      )}
+    </main>
   );
 }

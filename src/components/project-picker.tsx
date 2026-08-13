@@ -44,42 +44,53 @@ export function ProjectPicker({
     // items-end, because each Select now carries a visible label above its trigger and
     // an optional reason below it — centring would stagger the triggers themselves.
     <div className="flex flex-wrap items-end gap-3" aria-busy={pending || undefined}>
-      <Select
-        label={t("projectLabel")}
-        value={projectId ?? undefined}
-        disabledReason={t("noProjectsAvailable")}
-        options={projects.map((p) => ({
-          value: p.id,
-          label: p.name,
-          // Only projects reached through a workspace carry one, so an account whose
-          // projects are all personal gets an ungrouped list exactly as before.
-          ...(p.workspaceName ? { group: p.workspaceName } : {}),
-        }))}
-        onValueChange={(id) => {
-          const next = new URLSearchParams(params);
-          next.set(PARAM.project, id);
-          // The old environment belongs to the old project; let the server default it.
-          next.delete(PARAM.environment);
-          navigate(next);
-        }}
-      />
+      {/*
+        A fixed column rather than `grow`. The triggers used to size to their content, so
+        the row rearranged itself whenever the selection changed — and `grow` would keep
+        it moving, since the pending status beside them appears and disappears. w-64 is
+        wide enough for a real project name and narrow enough that two of them still read
+        as a control row rather than a form.
+      */}
+      <div className="w-64">
+        <Select
+          label={t("projectLabel")}
+          value={projectId ?? undefined}
+          disabledReason={t("noProjectsAvailable")}
+          options={projects.map((p) => ({
+            value: p.id,
+            label: p.name,
+            // Only projects reached through a workspace carry one, so an account whose
+            // projects are all personal gets an ungrouped list exactly as before.
+            ...(p.workspaceName ? { group: p.workspaceName } : {}),
+          }))}
+          onValueChange={(id) => {
+            const next = new URLSearchParams(params);
+            next.set(PARAM.project, id);
+            // The old environment belongs to the old project; let the server default it.
+            next.delete(PARAM.environment);
+            navigate(next);
+          }}
+        />
+      </div>
 
-      <Select
-        label={t("environmentLabel")}
-        value={environmentId ?? undefined}
-        disabled={!selected}
-        /* Two different reasons for the same greyed-out control, and the user can act on
-           one of them. Saying neither is what made this look broken rather than empty. */
-        disabledReason={selected ? t("noEnvironments") : t("selectProjectFirst")}
-        options={
-          selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
-        }
-        onValueChange={(id) => {
-          const next = new URLSearchParams(params);
-          next.set(PARAM.environment, id);
-          navigate(next);
-        }}
-      />
+      <div className="w-64">
+        <Select
+          label={t("environmentLabel")}
+          value={environmentId ?? undefined}
+          disabled={!selected}
+          /* Two different reasons for the same greyed-out control, and the user can act
+             on one of them. Saying neither made this look broken rather than empty. */
+          disabledReason={selected ? t("noEnvironments") : t("selectProjectFirst")}
+          options={
+            selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
+          }
+          onValueChange={(id) => {
+            const next = new URLSearchParams(params);
+            next.set(PARAM.environment, id);
+            navigate(next);
+          }}
+        />
+      </div>
 
       <PendingStatus label={pending ? t("switchingProject") : undefined} />
     </div>

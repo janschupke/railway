@@ -162,7 +162,11 @@ test("the header does not move when the dashboard finishes loading", async ({
   await settled(page);
   const settledBox = await header.boundingBox();
 
-  // The loading header renders the icon and product name for real, so only the
-  // session-dependent controls are placeholders and nothing reflows.
+  /*
+   * The header lives in the root layout, above this route's loading boundary, so this is
+   * literally the same element before and after — not a placeholder kept pixel-identical
+   * to a real bar by hand, which is what it used to be. The assertion now guards the
+   * placement decision rather than a copied class string.
+   */
   expect(settledBox).toEqual(loadingBox);
 });

@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { Container, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Heading, Text } from "@/components/ui/text";
 
 /*
@@ -41,27 +40,27 @@ export default async function LandingPage({
     : null;
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 p-6">
-      <div className="flex justify-end">
-        <ThemeToggle />
-      </div>
+    /*
+     * The column stays narrow while the bars above and below run the full width — a
+     * sign-in form stretched to 56rem reads as an empty page. The theme toggle used to
+     * float here in a bare right-aligned div because there was no bar to put it in;
+     * it lives in the app header now, and the hero has moved into the card so the page
+     * is one object instead of three blocks adrift on the canvas.
+     */
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-4 p-6">
+      {message && <Banner tone="error">{message}</Banner>}
 
-      <div className="space-y-3">
-        <span className="bg-accent-bg text-accent inline-flex size-10 items-center justify-center rounded-lg">
-          <Container aria-hidden className="size-5" />
-        </span>
+      <Card className="space-y-4 p-6">
+        {/* The mark is in the header two inches above; repeating it here was noise. */}
         <Heading level={1} variant="display">
           {t("app.name")}
         </Heading>
         <Text asChild variant="body" tone="muted">
           <p>{t("landing.intro")}</p>
         </Text>
-      </div>
 
-      {message && <Banner tone="error">{message}</Banner>}
-
-      <Card className="space-y-4 p-5">
         <SignInButton variant="primary" size="lg" className="w-full" />
+
         <Text asChild variant="caption" tone="subtle">
           <p className="flex items-start gap-2">
             <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />

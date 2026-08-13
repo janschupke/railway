@@ -3,6 +3,8 @@ import { headers } from "next/headers";
 import { Inter, Inter_Tight } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
+import { getSession } from "@/lib/auth/server";
+import { AppHeader } from "@/components/app-header";
 import { Footer } from "@/components/footer";
 import "./globals.css";
 
@@ -34,6 +36,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
    */
   const nonce = (await headers()).get("x-nonce") ?? undefined;
 
+  /*
+   * Read here rather than in AppHeader so the component stays a pure function of its
+   * props — the same reason the ESLint boundary rule keeps lib/auth out of
+   * src/components. One extra JWE open per render: local crypto, no network, and the
+   * cookie read is request-cached.
+   */
+  const session = await getSession();
+
   return (
     <html
       lang={locale}
@@ -53,13 +63,22 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           landing page and the 404 ~12 kB gzip they could never use.
         */}
         <NextIntlClientProvider>
+          {/*
+            Both bars live here rather than in the pages, so a route declares only its
+            own content column. Inside the provider because ThemeToggle and
+            SignOutButton both call useTranslations.
+          */}
+          <AppHeader
+            user={
+              session ? { name: session.user.name, email: session.user.email } : null
+            }
+          />
           {children}
           {/*
-            Outside {children} so every route gets it — including the 404, which has no
-            file of its own. <body> is already a min-height flex column and every page's
-            <main> carries flex-1, so this sits at the bottom of a short page without
-            any layout change. It stays a Server Component: anything client-side here
-            would ship on every route at once.
+            <body> is already a min-height flex column and every page's <main> carries
+            flex-1, so this sits at the bottom of a short page without any layout change.
+            It stays a Server Component: anything client-side here would ship on every
+            route at once.
           */}
           <Footer />
         </NextIntlClientProvider>

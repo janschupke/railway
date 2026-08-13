@@ -86,42 +86,68 @@ export function SpinUpForm({
         <input type="hidden" name="environmentId" value={environmentId} />
 
         {/*
-          One control, not two. The chip row and the text field were the same value shown
-          twice — typing a reference that matched no chip silently deselected all of them,
-          which is combobox behaviour built out of two controls that could disagree.
+          One row where both fit, stacked where they do not. `flex-wrap` rather than a
+          `md:` grid because that is how the whole app adapts — there is no other `md:`
+          in src/ — and the row stacks on its own below roughly 464px of card interior.
 
-          The list is the catalog; free text is still the contract. Anything the server's
-          IMAGE_PATTERN accepts can be typed here, and anything it rejects still reaches
-          the server so that rule stays the only definition of what is valid.
+          The widths live on wrappers because neither Field nor Combobox takes a
+          className, and `min-w-0` is load-bearing: a flex item's default minimum is its
+          content, so the long image hint would otherwise refuse to let the column shrink
+          to its share. `grow basis-*` rather than `flex-1 basis-*` — `flex-1` sets
+          flex-basis itself, so the two would be a same-property conflict resolved by
+          Tailwind's ordering rather than by what is written here.
+
+          Image is the wider of the two: its value is a registry reference, and the preset
+          popup is sized to this trigger and shows a label and a full ref side by side.
         */}
-        <Combobox
-          label={t("imageLabel")}
-          hint={t("imageHint")}
-          error={fieldError("image")}
-          name="image"
-          value={image}
-          onValueChange={setImage}
-          options={presetOptions}
-          placeholder={t("imagePlaceholder")}
-          noMatchesLabel={t("imageNoMatches")}
-          toggleLabel={t("imageToggle")}
-          listLabel={t("imageListLabel")}
-          inputClassName="font-mono"
-        />
+        <div className="flex flex-wrap gap-4">
+          <div className="min-w-0 grow basis-64">
+            {/*
+              One control, not two. The chip row and the text field were the same value
+              shown twice — typing a reference that matched no chip silently deselected
+              all of them, which is combobox behaviour built out of two controls that
+              could disagree.
 
-        <Field label={t("nameLabel")} hint={t("nameHint")} error={fieldError("name")}>
-          {(field) => (
-            <Input
-              {...field}
-              ref={nameRef}
-              name="name"
-              defaultValue=""
-              placeholder={t("namePlaceholder")}
-              autoComplete="off"
-              required
+              The list is the catalog; free text is still the contract. Anything the
+              server's IMAGE_PATTERN accepts can be typed here, and anything it rejects
+              still reaches the server so that rule stays the only definition of valid.
+            */}
+            <Combobox
+              label={t("imageLabel")}
+              hint={t("imageHint")}
+              error={fieldError("image")}
+              name="image"
+              value={image}
+              onValueChange={setImage}
+              options={presetOptions}
+              placeholder={t("imagePlaceholder")}
+              noMatchesLabel={t("imageNoMatches")}
+              toggleLabel={t("imageToggle")}
+              listLabel={t("imageListLabel")}
+              inputClassName="font-mono"
             />
-          )}
-        </Field>
+          </div>
+
+          <div className="min-w-0 grow basis-48">
+            <Field
+              label={t("nameLabel")}
+              hint={t("nameHint")}
+              error={fieldError("name")}
+            >
+              {(field) => (
+                <Input
+                  {...field}
+                  ref={nameRef}
+                  name="name"
+                  defaultValue=""
+                  placeholder={t("namePlaceholder")}
+                  autoComplete="off"
+                  required
+                />
+              )}
+            </Field>
+          </div>
+        </div>
 
         <div className="flex items-center gap-3">
           {/*

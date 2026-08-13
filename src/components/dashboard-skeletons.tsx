@@ -1,7 +1,6 @@
-import { Container } from "lucide-react";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
-import { Heading, Text } from "./ui/text";
+import { Heading } from "./ui/text";
 
 /*
  * Placeholder compositions for the dashboard.
@@ -26,35 +25,33 @@ const PLACEHOLDER_ROWS = 3;
  * below stand in for *text*, not controls, and are sized from the type scale instead.
  */
 
-/**
- * The icon and product name need no data, so they render for real: the header is the
- * one part of the page that must not move when the session lands.
+/*
+ * There is deliberately no header placeholder here.
+ *
+ * There used to be one, and keeping it pixel-identical to the real bar was a standing
+ * obligation that e2e/skeleton.spec.ts enforced with an exact boundingBox comparison. The
+ * header now renders in the root layout, above this route's loading boundary, so the same
+ * element survives the transition and there is nothing left to stand in for. The test
+ * still guards that placement — it just passes by construction now.
  */
-export function DashboardHeaderSkeleton({ appName }: { appName: string }) {
-  return (
-    <header className="border-border bg-surface border-b">
-      <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
-        <span className="flex items-center gap-2">
-          <Container aria-hidden className="text-accent size-4" />
-          <Text variant="title">{appName}</Text>
-        </span>
-
-        <div className="flex items-center gap-3">
-          {/* The signed-in name is hidden below sm, exactly as in DashboardHeader. */}
-          <Skeleton className="hidden h-4 w-24 sm:block" />
-          <Skeleton shape="control" className="h-control-sm w-21" />
-          <Skeleton shape="control" className="h-control-sm w-18" />
-        </div>
-      </div>
-    </header>
-  );
-}
 
 export function ProjectPickerSkeleton() {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Skeleton shape="control" className="h-control-md w-48" />
-      <Skeleton shape="control" className="h-control-md w-48" />
+    /*
+     * `items-end` and `w-64` per column, matching ProjectPicker exactly. This used to be
+     * `items-center` with a bare `w-48` control and no label placeholder at all — three
+     * ways of standing in for a row it did not actually resemble.
+     */
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="flex w-64 flex-col gap-1.5">
+        <Skeleton className="h-5 w-16" />
+        <Skeleton shape="control" className="h-control-md w-full" />
+      </div>
+
+      <div className="flex w-64 flex-col gap-1.5">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton shape="control" className="h-control-md w-full" />
+      </div>
     </div>
   );
 }
@@ -62,16 +59,19 @@ export function ProjectPickerSkeleton() {
 export function SpinUpFormSkeleton() {
   return (
     <Card className="space-y-4 p-4">
-      {/* One control where there used to be a chip row and a field: the image is a
-          single editable combobox now. */}
-      <div className="flex flex-col gap-1.5">
-        <Skeleton className="h-5 w-28" />
-        <Skeleton shape="control" className="h-control-md w-full" />
-      </div>
+      {/* The same two-up row as the real form: image and name share a line, and the
+          wrappers carry Field's own `flex flex-col gap-1.5` because that is what they
+          stand in for. */}
+      <div className="flex flex-wrap gap-4">
+        <div className="flex min-w-0 grow basis-64 flex-col gap-1.5">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton shape="control" className="h-control-md w-full" />
+        </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Skeleton className="h-5 w-16" />
-        <Skeleton shape="control" className="h-control-md w-full" />
+        <div className="flex min-w-0 grow basis-48 flex-col gap-1.5">
+          <Skeleton className="h-5 w-16" />
+          <Skeleton shape="control" className="h-control-md w-full" />
+        </div>
       </div>
 
       <Skeleton shape="control" className="h-control-md w-40" />

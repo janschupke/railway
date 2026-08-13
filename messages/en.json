@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Container Console",
+    "name": "Railway Homework",
     "description": "Spin containers up and down on Railway."
   },
   "common": {
@@ -27,6 +27,12 @@
   "landing": {
     "intro": "Spin containers up and down in your own Railway projects. Sign in with Railway and pick which projects this app may touch.",
     "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy containers it created itself."
+  },
+  "notFound": {
+    "title": "That page does not exist",
+    "description": "The address may have a typo, or the link that brought you here may be out of date. Nothing was moved or deleted.",
+    "backToDashboard": "Back to the dashboard",
+    "backToStart": "Back to the start"
   },
   "dashboard": {
     "loading": "Loading dashboard",

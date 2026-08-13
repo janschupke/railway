@@ -10,11 +10,20 @@
     "however many components stop using the wrapper. Popover is therefore purely additive",
     "(~1.5 kB; its popper, portal, presence and dismissable-layer are already in via Select),",
     "alongside the combobox's own keyboard and ARIA state machine and the project watcher.",
-    "Measured at 209.1 kB, set at actual + ~3% as above."
+    "Measured at 209.1 kB, set at actual + ~3% as above.",
+    "",
+    "/_not-found 146 -> 167: the top bar moved into the root layout, so the landing page,",
+    "the dashboard, its loading state, its error boundary and the 404 stop each declaring",
+    "their own — which is what left the login page with a floating theme toggle and the 404",
+    "with no chrome, no <main> and no width at all. ThemeToggle is a client component, so",
+    "every route now carries Radix ToggleGroup and the shared Slot core (~20 kB gzip) that",
+    "only / and /dashboard used to. Measured 161.8 kB, up from 142.1. Deliberate: a 404",
+    "that cannot say which app it belongs to was the thing being fixed. /dashboard fell",
+    "209.1 -> 207.5 in the same change, because its header skeleton is now dead code."
   ],
   "routes": {
     "/": 166,
     "/dashboard": 215,
-    "/_not-found": 146
+    "/_not-found": 167
   }
 }

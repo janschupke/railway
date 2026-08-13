@@ -1,4 +1,4 @@
-# Container Console
+# Railway Homework
 
 Spin containers up and down in **your own** Railway projects, from a browser.
 
@@ -23,20 +23,21 @@ Browser ──── SSE ────► Next.js (single Railway service)
 One process, one deployment. Server Components read, Server Actions write, and a single
 SSE route multiplexes deployment status and log output into the open tab.
 
-| Path                                    | Role                                                             |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| `src/proxy.ts`                          | Refreshes the Railway access token before the render (see ADR-2) |
-| `src/lib/auth/`                         | OIDC flow, encrypted session cookie, refresh rotation            |
-| `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker          |
-| `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream   |
-| `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling              |
-| `src/lib/logger.ts`                     | Structured logs: request-scoped fields, the error serializer     |
-| `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it          |
-| `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses  |
-| `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class    |
-| `src/app/dashboard/`                    | Page, data loader, Server Actions                                |
-| `e2e/fixtures/fake-railway/`            | Stand-in Railway: OIDC + GraphQL + graphql-ws                    |
-| `scripts/verify-schema.ts`              | Checks every operation against the live Railway API              |
+| Path                                    | Role                                                                   |
+| --------------------------------------- | ---------------------------------------------------------------------- |
+| `src/proxy.ts`                          | Refreshes the Railway access token before the render (see ADR-2)       |
+| `src/lib/auth/`                         | OIDC flow, encrypted session cookie, refresh rotation                  |
+| `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker                |
+| `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream         |
+| `src/app/layout.tsx`                    | The shell: one top bar and one footer, so a route owns only its column |
+| `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling                    |
+| `src/lib/logger.ts`                     | Structured logs: request-scoped fields, the error serializer           |
+| `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it                |
+| `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses        |
+| `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class          |
+| `src/app/dashboard/`                    | Page, data loader, Server Actions                                      |
+| `e2e/fixtures/fake-railway/`            | Stand-in Railway: OIDC + GraphQL + graphql-ws                          |
+| `scripts/verify-schema.ts`              | Checks every operation against the live Railway API                    |
 
 ---
 
@@ -576,7 +577,9 @@ compares against `bundle-budgets.json`. Per route, no browser, ~2 seconds. (size
 cannot express this: Turbopack hashes every chunk name, so its config could only hold
 globs, and a glob sums a directory instead of answering "what does /dashboard cost".)
 
-Current: **/dashboard 203.5 kB**, **/ 161.5 kB**, **/\_not-found 142.1 kB** gzipped.
+Current: **/dashboard 207.6 kB**, **/ 162.3 kB**, **/\_not-found 161.9 kB** gzipped. The
+404 pays for the shared top bar — `ThemeToggle` is a client component, so every route
+now carries Radix ToggleGroup — which is the trade recorded in `bundle-budgets.json`.
 
 Two changes moved those numbers, and one that looked obvious did not:
 
@@ -664,6 +667,13 @@ Two rules there are load-bearing and have tests:
   own boundary and blank the whole route instead of one section.
 - **The container fallback renders no `<ul>`.** The e2e helpers find the list by
   `getByRole("list", { name: "Containers" })` and assert there is exactly one.
+
+**The one thing that no longer needs a skeleton is the top bar.** It used to have one,
+and keeping it pixel-identical to the real header was a standing obligation enforced by
+an exact `boundingBox` comparison. `AppHeader` now renders in the root layout, above
+every route's loading boundary, so the same element survives the transition and there is
+nothing to stand in for. That test is still there — it guards the placement decision
+instead, and passes by construction rather than by two class strings agreeing.
 
 **The container list sits behind a keyed Suspense boundary.** `page.tsx` awaits only the
 shell — identity, projects, the resolved selection — and `ContainerSection` awaits the

@@ -32,7 +32,12 @@ export default function DashboardError({
   }, [error]);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 items-center p-6">
+    /*
+     * The dashboard's own column width, not a narrower one. This replaces the dashboard's
+     * content, and the header above it is unchanged — so snapping from 56rem to 28rem
+     * read as landing on a different page rather than as one page reporting a failure.
+     */
+    <main className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
       <Card className="w-full space-y-3 p-6">
         {/* A page's only heading, at the same rank and role as the landing page's.
             It used to render at body size in a lighter weight than any other h1. */}

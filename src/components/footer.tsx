@@ -10,7 +10,7 @@ import { Text } from "./ui/text";
  * layout is the one place where a client component would add its bundle to every route
  * at once — the same reasoning that keeps ToastProvider down in the dashboard layout.
  *
- * Geometry mirrors DashboardHeader's bar (`max-w-4xl`, `px-6 py-3`, a border on the
+ * Geometry mirrors AppHeader's bar (`max-w-4xl`, `px-6 py-3`, a border on the
  * facing edge) so the two read as one frame. That is deliberately wider than the
  * landing page's `max-w-md` card: the footer is app chrome, like the header, not part
  * of the page's content column.

@@ -75,6 +75,7 @@ export default defineConfig({
         "src/app/**/page.tsx",
         "src/app/**/loading.tsx",
         "src/app/**/error.tsx",
+        "src/app/**/not-found.tsx",
       ],
       thresholds: {
         lines: 80,

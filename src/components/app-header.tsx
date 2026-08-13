@@ -4,12 +4,25 @@ import { SignOutButton } from "./sign-out-button";
 import { Text } from "./ui/text";
 import { ThemeToggle } from "./ui/theme-toggle";
 
-export async function DashboardHeader({
-  name,
-  email,
+/**
+ * The one top bar, rendered from the root layout so every route gets it.
+ *
+ * It used to be a dashboard component, which left the landing page with a theme toggle
+ * floating on bare canvas, the dashboard's error boundary with no bar at all, and the
+ * 404 with neither. Three copies of the same markup existed — this one, the loading
+ * skeleton's, and nothing on the routes that needed it most.
+ *
+ * The bar's contents are a function of *session presence*, not of route, which is what
+ * makes a single render site possible: `/` redirects to `/dashboard` when a session
+ * exists, and the proxy redirects `/dashboard` to `/` when one does not, so a signed-in
+ * bar never paints on the landing page or the reverse. The 404 gets whichever is right
+ * for free.
+ */
+export async function AppHeader({
+  user,
 }: {
-  name?: string;
-  email?: string;
+  /** The signed-in user, or null on the landing page and on a 404 while signed out. */
+  user: { name?: string; email?: string } | null;
 }) {
   const t = await getTranslations();
 
@@ -18,10 +31,20 @@ export async function DashboardHeader({
    * rather than falling back to the words "Signed in". That label told the user
    * something the presence of a Sign out button already says, and it occupied the slot
    * where their name belongs — so an account with no profile looked like it had one.
+   *
+   * Note `user: {}` and `user: null` are different: the first is signed in with no
+   * profile and still gets a Sign out button, the second is not signed in at all.
    */
-  const identity = name ?? email;
+  const identity = user ? (user.name ?? user.email) : undefined;
 
   return (
+    /*
+     * A <header>, not a <nav>. The footer already has an unnamed navigation landmark,
+     * and a second one would be ambiguous to a screen-reader's landmark list — and this
+     * bar holds controls rather than links anyway. The brand stays a <span> for the same
+     * class of reason: making it a link inserts a focus stop ahead of the theme toggle
+     * for a destination that is one press of Home away.
+     */
     <header className="border-border bg-surface border-b">
       <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
         <span className="flex items-center gap-2">
@@ -44,7 +67,7 @@ export async function DashboardHeader({
             </Text>
           )}
           <ThemeToggle />
-          <SignOutButton />
+          {user && <SignOutButton />}
         </div>
       </div>
     </header>

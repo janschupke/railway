@@ -215,7 +215,12 @@ export const config = {
     /*
      * Everything except static assets and the auth routes themselves — the auth
      * routes mint the session and must not be gated by it.
+     *
+     * icon.svg sits beside favicon.ico for the reason next.config.ts already gives for
+     * the two _next paths: a matched request pays an HKDF derive and a JWE decrypt, and
+     * a favicon is fetched on every cold tab. The static security headers still reach it,
+     * because next.config.ts sets those on /:path* independently of this matcher.
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/auth).*)",
   ],
 };

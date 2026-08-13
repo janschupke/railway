@@ -40,6 +40,15 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `landing-error/${theme}`);
     });
 
+    test(`the 404 has no violations (${theme})`, async ({ page }) => {
+      // The surface with no scan until now, and the one that had no landmark at all:
+      // Next's built-in 404 renders bare text with no <main> to skip to.
+      await page.goto("/definitely-not-a-route");
+      await setTheme(page, theme);
+      await expect(onlyVisible(page.getByRole("main"))).toBeVisible();
+      await expectNoA11yViolations(page, `not-found/${theme}`);
+    });
+
     test(`populated dashboard has no violations (${theme})`, async ({ page }) => {
       await signIn(page);
       await setTheme(page, theme);

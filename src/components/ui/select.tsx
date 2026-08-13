@@ -57,15 +57,27 @@ export function Select({
           <Primitive.Trigger
             id={id}
             aria-describedby={describedBy}
+            /*
+             * `w-full`, not `inline-flex`. A content-sized trigger resizes as the
+             * selection changes, so the row shuffled under the cursor every time someone
+             * picked a project with a longer name. Filling the slot is this component's
+             * business; how wide the slot is belongs to the caller, which is why there is
+             * still no className prop here.
+             */
             className={cn(
-              "focus-ring border-border bg-surface text-text inline-flex items-center gap-2",
+              "focus-ring border-border bg-surface text-text flex w-full items-center justify-between gap-2",
               "text-body h-control-md px-control-md rounded-md border",
               "hover:bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
             )}
           >
-            <Primitive.Value placeholder={placeholder ?? t("selectPlaceholder")} />
+            {/* truncate + shrink-0, so a long project name cannot squeeze out the
+                affordance that says this is a menu. */}
+            <Primitive.Value
+              className="truncate"
+              placeholder={placeholder ?? t("selectPlaceholder")}
+            />
             <Primitive.Icon>
-              <ChevronDown aria-hidden className="text-text-subtle size-4" />
+              <ChevronDown aria-hidden className="text-text-subtle size-4 shrink-0" />
             </Primitive.Icon>
           </Primitive.Trigger>
 
