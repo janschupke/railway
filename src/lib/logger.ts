@@ -188,6 +188,8 @@ export type LogEvent =
   | "auth.callback.failed"
   | "auth.callback.token_exchange_failed"
   | "auth.login.started"
+  | "boot"
+  | "boot.env_invalid"
   | "auth.logout.rejected"
   | "auth.redirect.anonymous"
   | "auth.session.cleared"

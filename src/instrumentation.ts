@@ -1,4 +1,5 @@
 import type { Instrumentation } from "next";
+import { env } from "@/env";
 import { log } from "@/lib/logger";
 
 /**
@@ -13,10 +14,61 @@ import { log } from "@/lib/logger";
  * the reference on screen a query, which is the same contract `incident` already has for
  * everything that fails outside a render.
  *
- * No `register()` yet. That is where an OTel SDK goes, and an empty one now would be
- * noise; the point of this file existing already is that the OTel step adds one export
- * here and changes nothing else.
+ * `register()` is Next's other hook here — it runs once, before the first request — and it
+ * is where an OTel SDK would go. What it does today is say what the deployment is, because
+ * the alternative was reading a platform's word for it.
  */
+
+/**
+ * One line, at boot, naming what this process is and whether it can work.
+ *
+ * A Railway healthcheck failure is a single line in a dashboard that says a request did
+ * not succeed. It cannot distinguish a container that never started, one listening on an
+ * address the platform does not route to, and one that started perfectly and is answering
+ * 503 because `SESSION_SECRET` was never set — and /api/health returns exactly that 503 by
+ * design, so the healthiest possible deployment of a misconfigured service looks identical
+ * to a broken one.
+ *
+ * `port` is here and the bind address is not, which is the honest split. `next start`
+ * reads PORT and ignores HOSTNAME — measured, by setting HOSTNAME=127.0.0.1 and watching
+ * the container carry on listening on `:::3000` — so the port is a value this process
+ * genuinely chose and the address is not one it can report without inventing it. It always
+ * binds the IPv6 wildcard dual-stack, which needs saying once here rather than logging per
+ * boot.
+ *
+ * Failure is logged, not thrown. Throwing here kills the boot, which loses the log to the
+ * crash and leaves the operator with a restart loop instead of a sentence; serving is also
+ * what lets /api/health report `misconfigured` rather than refusing the connection.
+ */
+export function register(): void {
+  /*
+   * The edge runtime gets its own instance of this module and has no stdout to write to —
+   * the same reason logger.ts is careful about `process.stdout`. The node runtime is the
+   * one that binds the port, so it is the only one with anything to report.
+   */
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  // Next's own fallback when PORT is unset, so the line is never blank about it.
+  const listening = { port: process.env.PORT ?? "3000" };
+
+  try {
+    env();
+  } catch (error) {
+    /*
+     * The issue list names every variable that is missing or malformed — the same detail
+     * /api/health writes when it answers 503, moved to the moment it becomes true rather
+     * than repeated once per healthcheck attempt. It names variables, never values.
+     */
+    log.error("boot.env_invalid", {
+      ...listening,
+      issues: (error as Error).message,
+    });
+    return;
+  }
+
+  log.info("boot", listening);
+}
+
 /**
  * A render that stopped because the browser navigated away, which is not a failure.
  *

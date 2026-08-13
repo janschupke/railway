@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecords, rawLogLines } from "@/test/log-capture";
-import { onRequestError } from "./instrumentation";
+import { __resetEnv } from "./env";
+import { onRequestError, register } from "./instrumentation";
 
 /** The two Next supplies beyond the error itself; only their shape matters here. */
 const request = (path: string) => ({ path, method: "GET", headers: {} });
@@ -66,5 +67,77 @@ describe("onRequestError", () => {
 
     expect(groups).toEqual(["other", "/api", "/"]);
     expect(rawLogLines().join("")).not.toContain("CANARY");
+  });
+});
+
+describe("register", () => {
+  const restore = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = { ...restore, NEXT_RUNTIME: "nodejs" };
+    // env() memoises its first successful parse, so without this the second case in
+    // this block reads the first case's environment rather than its own.
+    __resetEnv();
+  });
+
+  afterEach(() => {
+    process.env = restore;
+  });
+
+  const validEnv = () => {
+    process.env.RAILWAY_CLIENT_ID = "id";
+    process.env.RAILWAY_CLIENT_SECRET = "secret";
+    process.env.SESSION_SECRET = "a-session-secret-of-at-least-32-chars";
+    process.env.APP_URL = "https://example.test";
+  };
+
+  it("says the port it came up on, so a healthcheck aimed elsewhere is visible", () => {
+    /*
+     * A healthcheck failure cannot tell an app that never started from one that came up
+     * on a port nothing is asking about. The bind ADDRESS is deliberately not reported:
+     * `next start` ignores HOSTNAME and always takes the dual-stack IPv6 wildcard, so a
+     * field for it would be echoing an environment variable nothing read.
+     */
+    validEnv();
+    process.env.PORT = "8080";
+
+    register();
+
+    const record = logRecords().find((r) => r.msg === "boot");
+    expect(record).toMatchObject({ port: "8080" });
+    expect(record).not.toHaveProperty("hostname");
+  });
+
+  it("names the variables a misconfigured deployment is missing", () => {
+    // /api/health answers 503 for this, which is correct and indistinguishable from a
+    // dead container in a platform dashboard. This is the line that tells them apart.
+    delete process.env.SESSION_SECRET;
+    process.env.RAILWAY_CLIENT_ID = "id";
+    process.env.RAILWAY_CLIENT_SECRET = "secret";
+    process.env.APP_URL = "https://example.test";
+
+    register();
+
+    const record = logRecords().find((r) => r.msg === "boot.env_invalid");
+    expect(record).toBeDefined();
+    expect(record).toMatchObject({ level: "error" });
+    expect(String(record!.issues)).toContain("SESSION_SECRET");
+  });
+
+  it("does not throw a misconfigured deployment into a restart loop", () => {
+    // Throwing here kills the boot, which loses this log to the crash and stops
+    // /api/health reporting `misconfigured` at all.
+    delete process.env.SESSION_SECRET;
+    expect(() => register()).not.toThrow();
+  });
+
+  it("stays silent off the node runtime, which has no stdout to write to", () => {
+    validEnv();
+    process.env.NEXT_RUNTIME = "edge";
+
+    register();
+
+    expect(rawLogLines()).toHaveLength(0);
   });
 });

@@ -106,10 +106,16 @@ COPY --from=build /app/messages ./messages
 USER node
 
 EXPOSE 3000
-# Railway sets PORT, which `next start` reads; 3000 is the fallback for a plain
-# `docker run`. HOSTNAME is set because next binds to it and the default is not reachable
-# from outside the container on every runtime.
-ENV PORT=3000 HOSTNAME=0.0.0.0
+
+# Railway sets PORT and `next start` reads it — measured, with PORT=8080 answering on
+# 8080. 3000 is the fallback for a plain `docker run`.
+#
+# Deliberately no HOSTNAME. The usual Next Docker recipe sets it, and `next start` does
+# not read it: with HOSTNAME=127.0.0.1 this container still listens on `:::3000`. Only
+# Next's standalone `server.js` consults it, and this image does not use standalone output.
+# `::` is the IPv6 wildcard bound dual-stack — `ipv6Only` is false by default — so it takes
+# IPv4 connections too, which is what a platform routing over either will find.
+ENV PORT=3000
 
 # `next start` directly rather than `pnpm start`. Going through pnpm would mean installing
 # a package manager into the runtime image to read one line of package.json, and it would
