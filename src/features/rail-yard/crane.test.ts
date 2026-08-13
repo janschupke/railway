@@ -225,7 +225,7 @@ describe("assignCrane and releaseCrane", () => {
   it("lets go of the train and of anything in its jaws", () => {
     const crane = createCrane(800, 240);
     assignCrane(crane, "train-1", "load");
-    crane.holding = 2;
+    crane.holding = { colour: 2, ribs: 6 };
     releaseCrane(crane);
     expect(crane.servingTrainId).toBeNull();
     expect(crane.holding).toBeNull();

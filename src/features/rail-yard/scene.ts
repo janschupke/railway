@@ -213,6 +213,19 @@ const ROADS: readonly Road[] = [
  */
 const LADDER_RUN = 410;
 
+/**
+ * What the express lines are worked at, as a multiple of `YARD.BASE_SPEED`.
+ *
+ * The whole of what an express is seen doing, so it is one number rather than four. At 3.2 it
+ * crossed the frame quickly enough to read as a streak rather than as a train; 2.8 is 207
+ * units a second, which is still three times what the yard's own traffic manages.
+ *
+ * The arrival and departure runs either side of it stay faster. They are the yard's own way
+ * on and off the network, they are almost entirely off camera, and they are a pacing number:
+ * a train dawdling out to the staging node is a train the frame is waiting on.
+ */
+const EXPRESS_SPEED = 2.8;
+
 export const RAIL_YARD_SCENE: RailScene = {
   extent: { width: 1120, height: P * 4 },
   focusX: 940,
@@ -352,9 +365,21 @@ export const RAIL_YARD_SCENE: RailScene = {
     // through run past `xe-w` is what makes this a main line rather than a dead end into a
     // turnout: an express uses the whole of it without touching the yard.
     { id: "xe-in", from: "stage-west", to: "xe-far-w", kind: "run", speed: 3.4 },
-    { id: "xe-run", from: "xe-far-w", to: "xe-enter", kind: "run", speed: 3.2 },
-    { id: "xe-mid", from: "xe-enter", to: "xe-w", kind: "run", speed: 3.2 },
-    { id: "xe-through", from: "xe-w", to: "x-express-e", kind: "run", speed: 3.2 },
+    {
+      id: "xe-run",
+      from: "xe-far-w",
+      to: "xe-enter",
+      kind: "run",
+      speed: EXPRESS_SPEED,
+    },
+    { id: "xe-mid", from: "xe-enter", to: "xe-w", kind: "run", speed: EXPRESS_SPEED },
+    {
+      id: "xe-through",
+      from: "xe-w",
+      to: "x-express-e",
+      kind: "run",
+      speed: EXPRESS_SPEED,
+    },
     { id: "xe-to-la", from: "xe-w", to: "la-w", kind: "crossover", speed: 0.5 },
     { id: "la-to-unload", from: "la-w", to: "la-unload", kind: "run", speed: 0.36 },
     { id: "la-unload-out", from: "la-unload", to: "la-e", kind: "run", speed: 0.42 },
@@ -368,7 +393,7 @@ export const RAIL_YARD_SCENE: RailScene = {
      * all — two circuits sharing hidden track in opposite senses is a head-on conflict
      * nobody can see, and an invisible deadlock is still a deadlock.
      */
-    { id: "xw-run", from: "xw-east", to: "xw-west", kind: "run", speed: 3.2 },
+    { id: "xw-run", from: "xw-east", to: "xw-west", kind: "run", speed: EXPRESS_SPEED },
     { id: "xw-drop", from: "xw-west", to: "xw-back", kind: "hidden", speed: 5 },
     { id: "xw-round", from: "xw-back", to: "xw-hold", kind: "hidden", speed: 5 },
     { id: "xw-launch", from: "xw-hold", to: "xw-east", kind: "hidden", speed: 5 },

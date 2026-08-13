@@ -46,6 +46,7 @@ import { poseAlong } from "./graph";
 import type { YardPalette } from "./palette";
 import type { RailScene, SceneStructure } from "./scene";
 import type { TrainState, WorldState } from "./simulation";
+import type { Freight } from "./conveyor";
 import { spreaderZ } from "./crane";
 import { aspectOf } from "./traffic";
 import { toScreenX, toScreenY, viewDepth, type ViewTransform } from "./view";
@@ -155,6 +156,39 @@ export function boxDepth(pose: Pose, box: Box, nose: number = 0): number {
   return key;
 }
 
+/** What a container is painted in: its own livery, and its own corrugation. */
+const liveryOf = (palette: YardPalette, freight: Freight): Cargo => ({
+  colour: palette.freight[freight.colour] ?? palette.metal,
+  ribs: freight.ribs,
+});
+
+/**
+ * A container standing somewhere that is not a wagon: the belt, or the crane's spreader.
+ *
+ * Ribbed like the ones on the flats, which they were not — `conveyorDrawables` and the
+ * carried box both passed no corrugation at all, so freight acquired its panels on being set
+ * down and lost them again on being picked up. They travel with the box now.
+ */
+function containerAt(
+  x: number,
+  y: number,
+  z: number,
+  freight: Freight,
+  palette: YardPalette,
+): Drawable {
+  const box: Box = {
+    at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, z],
+    size: CONTAINER.size,
+    fill: "cargo",
+  };
+  return {
+    ...standing(x, y, [box]),
+    cargo: liveryOf(palette, freight),
+    ribbed: box,
+    ribs: freight.ribs,
+  };
+}
+
 /**
  * Where a train's vehicles are this frame.
  *
@@ -181,10 +215,7 @@ function placeTrain(
     const pose = poseAlong(world.graph, train.path, at);
     if (!pose) continue;
 
-    const loaded = wagon.cargo !== null;
-    const cargo: Cargo | null = loaded
-      ? { colour: palette.freight[wagon.cargo!] ?? palette.metal, ribs: wagon.ribs }
-      : null;
+    const { cargo } = wagon;
     const container: Box = {
       at: CONTAINER.at,
       size: CONTAINER.size,
@@ -194,12 +225,12 @@ function placeTrain(
     out.push(
       vehicle(
         pose,
-        loaded ? [...WAGON.boxes, container] : WAGON.boxes,
+        cargo ? [...WAGON.boxes, container] : WAGON.boxes,
         WAGON.length,
         [WAGON.length, WAGON.width],
-        cargo,
-        wagon.ribs,
-        loaded ? container : null,
+        cargo && liveryOf(palette, cargo),
+        cargo?.ribs ?? 0,
+        cargo ? container : null,
       ),
     );
   }
@@ -337,16 +368,9 @@ function gantryDrawables(
   ];
 
   if (crane.holding !== null) {
-    out.push({
-      ...standing(crane.portalX, crane.trolleyY, [
-        {
-          at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, crane.hoistZ],
-          size: CONTAINER.size,
-          fill: "cargo",
-        },
-      ]),
-      cargo: { colour: palette.freight[crane.holding] ?? palette.metal, ribs: 0 },
-    });
+    out.push(
+      containerAt(crane.portalX, crane.trolleyY, crane.hoistZ, crane.holding, palette),
+    );
   }
   return out;
 }
@@ -386,17 +410,10 @@ function conveyorDrawables(
 
   return [
     deck,
-    ...world.conveyor.boxes.map((box) => ({
-      // Centred on the box's own x, which is the point the crane reaches for.
-      ...standing(box.at, y, [
-        {
-          at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, CONVEYOR.DECK_Z],
-          size: CONTAINER.size,
-          fill: "cargo" as const,
-        },
-      ]),
-      cargo: { colour: palette.freight[box.colour] ?? palette.metal, ribs: 0 },
-    })),
+    // Centred on each box's own x, which is the point the crane reaches for.
+    ...world.conveyor.boxes.map((box) =>
+      containerAt(box.at, y, CONVEYOR.DECK_Z, box.freight, palette),
+    ),
   ];
 }
 

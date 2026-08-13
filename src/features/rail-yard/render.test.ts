@@ -275,6 +275,25 @@ describe("drawFrame", () => {
     return recorder;
   };
 
+  it("corrugates the freight on the belt, not only the freight on wagons", () => {
+    /*
+     * The panels are what make a container read as a container rather than as a coloured
+     * brick, and the belt's were never drawn — `conveyorDrawables` passed no corrugation at
+     * all, so a box acquired its panels on being set down on a wagon and lost them again on
+     * being picked up.
+     *
+     * Counted by emptying the belt and drawing the same world twice: one rib pass sets the
+     * trim colour once, so the drop is exactly the freight that was standing on the belt.
+     */
+    const world = yard(600);
+    const ribbed = (state: WorldState) =>
+      frame(state).styles.filter((style) => style === PALETTE.locoTrim).length;
+
+    const withFreight = ribbed(world);
+    world.conveyor.boxes = [];
+    expect(withFreight).toBeGreaterThan(ribbed(world));
+  });
+
   it("clears and blits the static layer before anything moves", () => {
     const recorder = frame(yard());
     expect(recorder.indexOf("clearRect")).toBe(0);

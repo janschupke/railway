@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONVEYOR } from "./config";
+import { CONTAINER, CONVEYOR } from "./config";
 import {
   capacityOf,
   createConveyor,
@@ -127,8 +127,9 @@ describe("stepConveyor while clearing", () => {
   it("takes a box from the crane into the slot it just opened", () => {
     const conveyor = belt("out");
     run(conveyor, 2_000);
-    putOnBelt(conveyor, 3);
-    expect(conveyor.boxes[0]).toEqual({ colour: 3, at: HEAD });
+    const freight = { colour: 3, ribs: 6 };
+    putOnBelt(conveyor, freight);
+    expect(conveyor.boxes[0]).toEqual({ freight, at: HEAD });
   });
 
   it("refuses a box when the head slot is still occupied", () => {
@@ -136,7 +137,7 @@ describe("stepConveyor while clearing", () => {
     const conveyor = belt();
     run(conveyor, 60_000);
     const before = conveyor.boxes.length;
-    putOnBelt(conveyor, 3);
+    putOnBelt(conveyor, { colour: 3, ribs: 6 });
     expect(conveyor.boxes.length).toBe(before);
   });
 });
@@ -149,8 +150,11 @@ describe("createConveyor", () => {
     expect(headLoaded(conveyor)).toBe(true);
     conveyor.boxes.forEach((box, index) => {
       expect(box.at).toBe(HEAD + index * CONVEYOR.PITCH);
-      expect(box.colour).toBeGreaterThanOrEqual(0);
-      expect(box.colour).toBeLessThan(FREIGHT_TOKENS.length);
+      expect(box.freight.colour).toBeGreaterThanOrEqual(0);
+      expect(box.freight.colour).toBeLessThan(FREIGHT_TOKENS.length);
+      // Corrugation travels with the box, so it has one before it is ever set down.
+      expect(box.freight.ribs).toBeGreaterThanOrEqual(CONTAINER.ribs[0]);
+      expect(box.freight.ribs).toBeLessThanOrEqual(CONTAINER.ribs[1]);
     });
   });
 

@@ -73,13 +73,18 @@ export const YARD = {
    * for a visitor arriving on the page and for the single frozen frame a reduced-motion
    * visitor gets in place of the animation.
    *
-   * This lands on two yard trains working east under the gantry with the westbound express
-   * crossing the frame behind them, which is the opening frame simulation.test.ts asserts. It
-   * was found by probing rather than chosen: the warm-up runs the real simulation, so the
-   * frame is one the rules actually produce, and retuning them cannot quietly leave the
-   * page opening on a still yard.
+   * This lands on two yard trains working east under the gantry with an express crossing the
+   * frame behind them, which is the opening frame simulation.test.ts asserts. It was found by
+   * probing rather than chosen: the warm-up runs the real simulation, so the frame is one the
+   * rules actually produce, and retuning them cannot quietly leave the page opening on a
+   * still yard.
+   *
+   * Taken from the **middle** of a run of frames that all satisfy it — 2.9 seconds wide here
+   * — rather than from the first one that does. There are single qualifying frames earlier,
+   * and landing the page's first impression on one of those makes the assertion a knife edge
+   * that any retune tips off.
    */
-  WARMUP_MS: 100_000,
+  WARMUP_MS: 115_000,
   /** Added per train to the opening dwell, so the yard does not start with a convoy. */
   STAGGER_MS: 7_000,
   /**

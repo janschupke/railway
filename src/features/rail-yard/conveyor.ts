@@ -29,12 +29,33 @@
  * chatter and no hysteresis to tune.
  */
 
-import { CONVEYOR } from "./config";
+import { CONTAINER, CONVEYOR } from "./config";
 import { FREIGHT_TOKENS } from "./palette";
-import type { Rng } from "./rng";
+import { rangeInt, type Rng } from "./rng";
 
-/** One container riding the belt. `at` is a world x; the colour is an index, never a hex. */
-type BeltBox = { readonly colour: number; at: number };
+/**
+ * A container, as the yard tracks it: a livery and a panel count.
+ *
+ * Both belong to the **box**, which is the point. `ribs` used to be a property of the flat
+ * wagon, so a container arrived on the belt with one corrugation and acquired another the
+ * moment the crane set it down. The belt exists so that freight is something that travels
+ * rather than something invented at each end, and a box that changes shape in transit is the
+ * same defect a layer up.
+ *
+ * The colour is an index into `FREIGHT_TOKENS`, never a hex — this feature may not write a
+ * colour any more than it may compute one.
+ */
+export type Freight = { readonly colour: number; readonly ribs: number };
+
+export function createFreight(rng: Rng): Freight {
+  return {
+    colour: Math.floor(rng() * FREIGHT_TOKENS.length),
+    ribs: rangeInt(rng, CONTAINER.ribs),
+  };
+}
+
+/** One container riding the belt. `at` is a world x. */
+type BeltBox = { readonly freight: Freight; at: number };
 
 export type Conveyor = {
   /** Where the crane works the belt, and where the leading box comes to rest. */
@@ -86,15 +107,15 @@ export function headClear(conveyor: Conveyor): boolean {
 }
 
 /** Lifts the leading box off the belt. Null when there is nothing settled to lift. */
-export function takeFromBelt(conveyor: Conveyor): number | null {
+export function takeFromBelt(conveyor: Conveyor): Freight | null {
   if (!headLoaded(conveyor)) return null;
-  return conveyor.boxes.shift()?.colour ?? null;
+  return conveyor.boxes.shift()?.freight ?? null;
 }
 
 /** Sets a box into the head slot. Ignored when the slot is not clear, never stacked. */
-export function putOnBelt(conveyor: Conveyor, colour: number): void {
+export function putOnBelt(conveyor: Conveyor, freight: Freight): void {
   if (!headClear(conveyor)) return;
-  conveyor.boxes.unshift({ colour, at: conveyor.headX });
+  conveyor.boxes.unshift({ freight, at: conveyor.headX });
 }
 
 /**
@@ -124,10 +145,7 @@ export function stepConveyor(conveyor: Conveyor, dtMs: number, rng: Rng): void {
     const last = conveyor.boxes[conveyor.boxes.length - 1];
     const room = conveyor.boxes.length < capacityOf(conveyor);
     if (room && (last === undefined || last.at <= conveyor.tailX - CONVEYOR.PITCH)) {
-      conveyor.boxes.push({
-        colour: Math.floor(rng() * FREIGHT_TOKENS.length),
-        at: conveyor.tailX,
-      });
+      conveyor.boxes.push({ freight: createFreight(rng), at: conveyor.tailX });
     }
     return;
   }
@@ -152,10 +170,7 @@ export function createConveyor(
   const conveyor: Conveyor = { headX, tailX, y, boxes: [], running: "in" };
   const opening = Math.min(CONVEYOR.FLOOR, capacityOf(conveyor));
   for (let index = 0; index < opening; index++) {
-    conveyor.boxes.push({
-      colour: Math.floor(rng() * FREIGHT_TOKENS.length),
-      at: slotFor(conveyor, index),
-    });
+    conveyor.boxes.push({ freight: createFreight(rng), at: slotFor(conveyor, index) });
   }
   return conveyor;
 }

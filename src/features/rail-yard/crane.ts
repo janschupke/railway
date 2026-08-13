@@ -20,6 +20,7 @@
  */
 
 import { CONTAINER, CONVEYOR, CRANE, LOCOMOTIVE, WAGON, YARD } from "./config";
+import type { Freight } from "./conveyor";
 
 type Place = "source" | "sink";
 
@@ -63,8 +64,8 @@ export type CraneState = {
    * asymmetry read as the bug it was rather than as a subtlety.
    */
   hoistZ: number;
-  /** The freight colour index in the spreader, between the two latches and never else. */
-  holding: number | null;
+  /** What is in the spreader, between the two latches and never else. */
+  holding: Freight | null;
   legIndex: number;
   timer: number;
   /** The train being served, and which of its wagons. Null when the crane is idle. */

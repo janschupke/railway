@@ -32,7 +32,6 @@ import {
   type Path,
   type RailGraph,
 } from "./graph";
-import { FREIGHT_TOKENS } from "./palette";
 import { pick, range, rangeInt, weightedPick, type Rng } from "./rng";
 import { RAIL_YARD_SCENE, type Duty, type RailScene } from "./scene";
 import {
@@ -45,12 +44,14 @@ import {
 } from "./crane";
 import {
   createConveyor,
+  createFreight,
   headClear,
   headLoaded,
   putOnBelt,
   stepConveyor,
   takeFromBelt,
   type Conveyor,
+  type Freight,
 } from "./conveyor";
 import { limitFor, occupancyOf, type Occupancy } from "./traffic";
 
@@ -111,9 +112,8 @@ const PHASE_KIND: Readonly<Record<TrainPhase, "timed" | "working" | "moving">> =
 };
 
 type Wagon = {
-  /** Index into FREIGHT_TOKENS, or null for an empty flat. Never a colour string. */
-  cargo: number | null;
-  readonly ribs: number;
+  /** What is standing on the flat, or null for an empty one. */
+  cargo: Freight | null;
 };
 
 type Itinerary = {
@@ -696,7 +696,7 @@ export function createWorld(rng: Rng, scene: RailScene = RAIL_YARD_SCENE): World
       // Empty, because a rake standing in a shed is empty. The warm-up runs the real
       // simulation, so by the time anyone sees the yard the crane has filled the ones that
       // ought to be full.
-      wagons.push({ cargo: null, ribs: rangeInt(rng, [5, 8]) });
+      wagons.push({ cargo: null });
     }
 
     // Every train opens standing in the shed, on the path it will leave by, so its first
@@ -735,10 +735,7 @@ export function createWorld(rng: Rng, scene: RailScene = RAIL_YARD_SCENE): World
 
     const wagons: Wagon[] = [];
     for (let wagon = 0; wagon < rangeInt(rng, YARD.RAKE_SIZE); wagon++) {
-      wagons.push({
-        cargo: Math.floor(rng() * FREIGHT_TOKENS.length),
-        ribs: rangeInt(rng, [5, 8]),
-      });
+      wagons.push({ cargo: createFreight(rng) });
     }
 
     trains.push({

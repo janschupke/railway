@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CRANE, SIM, YARD } from "./config";
+import { CONTAINER, CRANE, SIM, YARD } from "./config";
 import { CRANE_CYCLE } from "./crane";
 import { capacityOf, headClear, headLoaded } from "./conveyor";
 import { poseAlong } from "./graph";
@@ -249,7 +249,7 @@ describe("rolling stock", () => {
     }
   });
 
-  it("gives a loaded wagon a colour the palette can resolve", () => {
+  it("gives a loaded wagon freight the palette can resolve", () => {
     const { world, rng } = yard();
     const bad: unknown[] = [];
     for (let index = 0; index < 12_000; index++) {
@@ -257,10 +257,20 @@ describe("rolling stock", () => {
       for (const train of world.trains) {
         for (const wagon of train.wagons) {
           if (wagon.cargo === null) continue;
+          const { colour, ribs } = wagon.cargo;
           if (
-            !Number.isInteger(wagon.cargo) ||
-            wagon.cargo < 0 ||
-            wagon.cargo >= FREIGHT_TOKENS.length
+            !Number.isInteger(colour) ||
+            colour < 0 ||
+            colour >= FREIGHT_TOKENS.length
+          ) {
+            bad.push(wagon.cargo);
+          }
+          // And a panel count, which used to belong to the flat rather than to the box on it
+          // — so a container changed its corrugation the moment the crane set it down.
+          if (
+            !Number.isInteger(ribs) ||
+            ribs < CONTAINER.ribs[0] ||
+            ribs > CONTAINER.ribs[1]
           ) {
             bad.push(wagon.cargo);
           }
