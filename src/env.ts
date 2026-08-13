@@ -47,7 +47,14 @@ export const RAILWAY_DEFAULTS = {
   WS_URL: "wss://backboard.railway.com/graphql/v2",
 } as const;
 
-const schema = z.object({
+/**
+ * Exported for src/env.test.ts, which asserts .env.example declares every field.
+ *
+ * architecture.md says a new variable means a schema field AND an entry in the example
+ * file; nothing checked the second half, so the two could drift and the only symptom
+ * would be an operator missing a variable they were never told about.
+ */
+export const schema = z.object({
   RAILWAY_CLIENT_ID: z.string().min(1, "RAILWAY_CLIENT_ID is required"),
   RAILWAY_CLIENT_SECRET: z.string().min(1, "RAILWAY_CLIENT_SECRET is required"),
   /** Any high-entropy string; the AES key is derived from it via HKDF. */

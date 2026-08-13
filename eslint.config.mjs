@@ -5,6 +5,72 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 import i18next from "eslint-plugin-i18next";
 import prettier from "eslint-config-prettier";
 
+/**
+ * The four appearance bans, as (pattern, message) pairs.
+ *
+ * Defined once and expanded into two selectors each, because the node type matters:
+ * `Literal` covers `className="text-sm"` and `TemplateElement` covers
+ * `` className={`text-sm ${x}`} ``. Only Literal was matched, so a template literal
+ * escaped all four — the one in the tree today is benign, which is exactly how this
+ * would have gone unnoticed until it was not.
+ */
+const APPEARANCE_BANS = [
+  {
+    /*
+     * Tailwind's own type steps. The scale roles (text-body, text-caption…) are
+     * deliberately not matched: those come from the tokens and are what a caller
+     * should reach for on the rare element a primitive cannot wrap.
+     */
+    pattern: `(^|\\s)(text-(xs|sm|base|lg|xl|[2-9]xl)|font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)|tracking-(tighter|tight|normal|wide|wider|widest)|leading-\\S+)(\\s|$)`,
+    message:
+      "Raw type step in a feature component. Use <Text variant=…> or <Heading> from src/components/ui/text.tsx; the scale lives in src/app/tokens.css.",
+  },
+  {
+    pattern: `(^|[^a-z-])(bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|placeholder|caret|accent|shadow)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|grey|zinc|neutral|stone|white|black)(\\/|-[0-9]|\\b)`,
+    message:
+      "Raw palette colour in a feature component. Use a semantic token (bg-surface, text-text-muted, border-danger-border…); palette ramps live in src/app/tokens.css and literals only in src/components/ui.",
+  },
+  {
+    pattern: `#[0-9a-fA-F]{3,8}\\b`,
+    message:
+      "Hex colour in markup. Add a semantic token in src/app/tokens.css and map it in globals.css instead.",
+  },
+  {
+    pattern: `-\\[var\\(--`,
+    message:
+      "Arbitrary value reaching past the Tailwind theme at a CSS variable. Map the token in globals.css and use the generated utility (fill-raised, not fill-[var(--rc-raised)]).",
+  },
+];
+
+/**
+ * security.md: "no NEXT_PUBLIC_* exists, and none should."
+ *
+ * NEXT_PUBLIC_ is Next's opt-in for inlining a value into the browser bundle — the one
+ * mechanism in this app capable of turning a server-side secret into a public one by
+ * rename alone. There are none today; this is what keeps that true. Both spellings are
+ * covered, because banning only the dot form is an instruction on how to evade it.
+ */
+const PUBLIC_ENV_MESSAGE =
+  "NEXT_PUBLIC_* inlines a value into the browser bundle. This app has no client-side configuration by design — see security.md. Pass what a component needs as a prop.";
+
+const publicEnvBans = [
+  {
+    selector: `MemberExpression[object.object.name="process"][object.property.name="env"][property.name=/^NEXT_PUBLIC_/]`,
+    message: PUBLIC_ENV_MESSAGE,
+  },
+  {
+    selector: `MemberExpression[object.object.name="process"][object.property.name="env"] > Literal[value=/^NEXT_PUBLIC_/]`,
+    message: PUBLIC_ENV_MESSAGE,
+  },
+];
+
+const appearanceBans = APPEARANCE_BANS.flatMap(({ pattern, message }) =>
+  ["Literal[value=", "TemplateElement[value.raw="].map((node) => ({
+    selector: `JSXAttribute[name.name="className"] ${node}/${pattern}/]`,
+    message,
+  })),
+);
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -44,37 +110,31 @@ const eslintConfig = defineConfig([
    * five files, and the two page-level h1s were ten pixels and a weight apart.
    */
   {
+    /*
+     * The publicEnvBans are repeated here rather than left to the block below.
+     *
+     * Flat config REPLACES a rule's options when a later block names the same rule for
+     * the same file, so a second `no-restricted-syntax` matching *.tsx would silently
+     * switch the appearance bans off — a config change that turns four ratchets into
+     * nothing while lint still passes.
+     */
     files: ["src/**/*.tsx"],
     ignores: ["src/components/ui/**"],
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          /*
-           * Tailwind's own type steps. The scale roles (text-body, text-caption…) are
-           * deliberately not matched: those come from the tokens and are what a caller
-           * should reach for on the rare element a primitive cannot wrap.
-           */
-          selector: `JSXAttribute[name.name="className"] Literal[value=/(^|\\s)(text-(xs|sm|base|lg|xl|[2-9]xl)|font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)|tracking-(tighter|tight|normal|wide|wider|widest)|leading-\\S+)(\\s|$)/]`,
-          message:
-            "Raw type step in a feature component. Use <Text variant=…> or <Heading> from src/components/ui/text.tsx; the scale lives in src/app/tokens.css.",
-        },
-        {
-          selector: `JSXAttribute[name.name="className"] Literal[value=/(^|[^a-z-])(bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|placeholder|caret|accent|shadow)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|grey|zinc|neutral|stone|white|black)(\\/|-[0-9]|\\b)/]`,
-          message:
-            "Raw palette colour in a feature component. Use a semantic token (bg-surface, text-text-muted, border-danger-border…); palette ramps live in src/app/tokens.css and literals only in src/components/ui.",
-        },
-        {
-          selector: `JSXAttribute[name.name="className"] Literal[value=/#[0-9a-fA-F]{3,8}\\b/]`,
-          message:
-            "Hex colour in markup. Add a semantic token in src/app/tokens.css and map it in globals.css instead.",
-        },
-        {
-          selector: `JSXAttribute[name.name="className"] Literal[value=/-\\[var\\(--/]`,
-          message:
-            "Arbitrary value reaching past the Tailwind theme at a CSS variable. Map the token in globals.css and use the generated utility (fill-raised, not fill-[var(--rc-raised)]).",
-        },
-      ],
+      "no-restricted-syntax": ["error", ...appearanceBans, ...publicEnvBans],
+    },
+  },
+
+  {
+    // Everything the block above does not cover: .ts files, and src/components/ui.
+    files: [
+      "src/**/*.ts",
+      "src/components/ui/**/*.tsx",
+      "scripts/**/*.ts",
+      "e2e/**/*.ts",
+    ],
+    rules: {
+      "no-restricted-syntax": ["error", ...publicEnvBans],
     },
   },
 
