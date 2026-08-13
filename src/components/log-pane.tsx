@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { UI } from "@/lib/constants";
 import type { StreamStatus } from "@/hooks/use-deployment-stream";
@@ -26,14 +26,42 @@ export function LogPane({
   emptyLabel?: string;
 }) {
   const t = useTranslations("containers");
-  const viewportRef = useRef<HTMLDivElement>(null);
+  /*
+   * A callback ref, not a plain ref object.
+   *
+   * The listener used to attach in a `[]` effect reading `viewportRef.current`. This
+   * component is loaded through next/dynamic and remounts behind the row's `mounted`
+   * gate, so the element is not reliably there on the commit that effect runs — and when
+   * it was not, the listener never attached at all. Nothing failed: `pinned` simply
+   * stayed true forever, so the pane kept scrolling itself while the reader was trying to
+   * read, and "Jump to latest" never appeared to say otherwise. A silent wrong answer.
+   *
+   * The callback-ref-into-state shape is the one use-incremental-list already uses for
+   * its sentinel, and for the same reason: the element arrives and departs, and only a
+   * callback ref hears about both.
+   */
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [attached, setAttached] = useState<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState(true);
+
+  /*
+   * Both a ref and a state, deliberately.
+   *
+   * The ref is what the effects read and mutate: `scrollTop` on a DOM node is not React
+   * state, and react-hooks/immutability correctly refuses a write to a value that came
+   * out of useState. The state exists only to be a dependency, so the effects re-run on
+   * the commit where the element actually arrives.
+   */
+  const setViewport = useCallback((node: HTMLDivElement | null) => {
+    viewportRef.current = node;
+    setAttached(node);
+  }, []);
 
   useLayoutEffect(() => {
     const el = viewportRef.current;
     if (!el || !pinned) return;
     el.scrollTop = el.scrollHeight;
-  }, [lines, pinned]);
+  }, [lines, pinned, attached]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -44,14 +72,14 @@ export function LogPane({
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [attached]);
 
   return (
     <div className="relative">
       <ScrollArea
         className="bg-subtle h-pane-log rounded-md"
         viewportClassName="p-3"
-        viewportRef={viewportRef}
+        viewportRef={setViewport}
         viewportProps={{
           /*
            * `role="log"` carries an implicit aria-live of polite, which is exactly what

@@ -1,6 +1,7 @@
 import {
   createServiceOutOfBand,
   expect,
+  fixtureStats,
   row,
   setTabVisibility,
   signIn,
@@ -59,11 +60,34 @@ test.describe("the project watcher", () => {
       if (request.url().includes("/api/watch/")) opened += 1;
     });
 
-    // Comfortably more than the suite's one-second poll interval.
-    await page.waitForTimeout(4_000);
+    /*
+     * Two assertions, and the server-side one is the real claim.
+     *
+     * The browser opening no connection is necessary but not sufficient: the cost this
+     * feature promises to avoid is *Railway requests*, and those are issued by the poll
+     * loop behind a connection that may already be open. Counting Project operations at
+     * the fixture is the only place that distinction is visible — a held SSE response
+     * never finishes, so nothing on the browser side reports the polling behind it.
+     *
+     * This replaced a flat four-second wait. The window is still bounded, because
+     * proving an absence needs one, but it is now derived from the interval being tested
+     * rather than picked to be comfortably larger than it, and a regression shows up as
+     * "the server answered N queries" instead of "a connection appeared".
+     */
+    const before = (await fixtureStats(page)).operations.Project ?? 0;
+    const pollMs = Number(process.env.WATCH_POLL_MS ?? 1_000);
+    await page.waitForTimeout(pollMs * 2);
+
     expect(opened, "a hidden tab opened a watch connection").toBe(0);
+    const during = (await fixtureStats(page)).operations.Project ?? 0;
+    expect(during, "a hidden tab polled Railway").toBe(before);
 
     await setTabVisibility(page, "visible");
     await expect.poll(() => opened).toBeGreaterThan(0);
+    // …and the polling resumes, which is what makes the assertion above meaningful
+    // rather than a test of a watcher that had simply died.
+    await expect
+      .poll(async () => (await fixtureStats(page)).operations.Project ?? 0)
+      .toBeGreaterThan(during);
   });
 });

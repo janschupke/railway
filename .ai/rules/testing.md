@@ -99,6 +99,14 @@ against it, so PKCE, token exchange and refresh rotation are all genuinely exerc
 **Prefer a fault or a stats assertion over a sleep.** A `slowMs` fault makes a pending state
 observable deterministically; a `waitForTimeout` makes it observable sometimes.
 
+The one exemption is asserting an **absence**, which has no event to await. `console.spec.ts`
+waits for the engine to emit an unused-preload warning that may never come; `watch.spec.ts`
+waits out a poll interval to show that nothing was polled. Both are bounded, and both are
+written as "quiet for N, ceiling at M" or "two intervals of the thing being tested" rather
+than as a round number chosen to feel safe. A window picked to be comfortably larger than
+the behaviour under test is how `watch.spec.ts` stayed green for the whole time
+`WATCH_POLL_MS` was being ignored.
+
 Never point a test at the real Railway API.
 
 ## Before you call this done

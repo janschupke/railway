@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { execute, operationNameOf } from "./graphql";
+import {
+  execute,
+  operationCounts,
+  operationNameOf,
+  resetOperationCounts,
+} from "./graphql";
 import {
   authorize,
   discoveryDocument,
@@ -111,11 +116,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (url.pathname === "/__test/reset" && req.method === "POST") {
     store.reset();
     resetOidc();
+    resetOperationCounts();
     return json(res, 200, { ok: true });
   }
 
   if (url.pathname === "/__test/stats") {
-    return json(res, 200, stats);
+    return json(res, 200, { ...stats, operations: operationCounts });
   }
 
   /*

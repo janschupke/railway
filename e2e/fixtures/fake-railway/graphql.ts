@@ -31,11 +31,27 @@ const notAuthorized = (path: string[]): Result => ({
   ],
 });
 
+/**
+ * Operations this fixture has answered, by name.
+ *
+ * The only way a spec can prove something about *server* traffic. The watch endpoint
+ * holds its SSE response open, so the browser issues one request and then nothing —
+ * a spec watching page.on("request") sees the connection but never the polling behind
+ * it, and could only ever assert on elapsed time instead.
+ */
+export const operationCounts: Record<string, number> = {};
+
+export function resetOperationCounts(): void {
+  for (const key of Object.keys(operationCounts)) delete operationCounts[key];
+}
+
 export function execute(
   operationName: string,
   variables: Record<string, unknown>,
   store: Store,
 ): Result {
+  operationCounts[operationName] = (operationCounts[operationName] ?? 0) + 1;
+
   switch (operationName) {
     /*
      * The project list is three independent documents. Each answers for itself, which

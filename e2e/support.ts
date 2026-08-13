@@ -37,6 +37,8 @@ export type FixtureStats = {
   authorizationCode: number;
   refreshToken: number;
   refreshRejected: number;
+  /** GraphQL operations the fixture has answered, by name. */
+  operations: Record<string, number>;
 };
 
 /**

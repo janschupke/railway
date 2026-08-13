@@ -59,8 +59,43 @@ function unexpected(entries: Entry[], declared: unknown[]): Entry[] {
   return survivors;
 }
 
-/** Long enough for "not used within a few seconds from the window's load event". */
-const SETTLE_MS = 4_000;
+/**
+ * Waits until the console has been quiet for a while, or the ceiling is reached.
+ *
+ * This spec asserts an ABSENCE, which has no event to await — the engine emits an unused
+ * preload warning "within a few seconds from the window's load event" and nothing signals
+ * that the window has passed. So a wait is unavoidable; what is avoidable is paying the
+ * worst case every time.
+ *
+ * Idle-based rather than fixed: a page that logs nothing settles in `idleMs` instead of
+ * the full ceiling, and one that logs something restarts the clock, so a late warning
+ * still lands inside the assertion. The ceiling is what the fixed wait used to be, which
+ * makes this strictly no weaker and usually several seconds faster across the three
+ * cases here.
+ *
+ * testing.md's "prefer a fault over a sleep" cannot be satisfied for an absence, and
+ * that exemption is written down there rather than left implied by this file.
+ */
+async function consoleQuiet(
+  page: Page,
+  seen: () => number,
+  { idleMs = 750, maxMs = 4_000 } = {},
+) {
+  const deadline = Date.now() + maxMs;
+  let last = seen();
+  let quietSince = Date.now();
+
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(100);
+    const now = seen();
+    if (now !== last) {
+      last = now;
+      quietSince = Date.now();
+      continue;
+    }
+    if (Date.now() - quietSince >= idleMs) return;
+  }
+}
 
 test.describe("the browser console", () => {
   test("/ logs no warnings or errors", async ({ page, context }) => {
@@ -68,7 +103,7 @@ test.describe("the browser console", () => {
 
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(SETTLE_MS);
+    await consoleQuiet(page, () => entries.length);
 
     expect(unexpected(entries, await preloads(page))).toEqual([]);
   });
@@ -77,8 +112,12 @@ test.describe("the browser console", () => {
     const entries = await collect(page, context);
 
     await signIn(page);
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(SETTLE_MS);
+    /*
+     * No networkidle here. /dashboard holds an SSE stream open for the life of the page,
+     * so the network never goes idle — signIn already waits for the content that matters,
+     * and the fixed sleep underneath was masking a wait that could only ever time out.
+     */
+    await consoleQuiet(page, () => entries.length);
 
     expect(unexpected(entries, await preloads(page))).toEqual([]);
   });
@@ -93,7 +132,7 @@ test.describe("the browser console", () => {
 
     await page.goto("/definitely-not-a-route");
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(SETTLE_MS);
+    await consoleQuiet(page, () => entries.length);
 
     const beyond = unexpected(entries, await preloads(page)).filter(
       (entry) => !/status of 404/.test(entry.text),
