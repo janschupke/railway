@@ -81,7 +81,7 @@ export async function* monitorDeployment(
   deps: MonitorDeps = defaultDeps,
 ): AsyncGenerator<MonitorEvent> {
   const { accessToken, deploymentId, phase, signal } = params;
-  const queue = new AsyncQueue<MonitorEvent>();
+  const queue = new AsyncQueue<MonitorEvent>(STREAM.MAX_QUEUED_EVENTS);
 
   // One holder so `stop` can clear timers that are created further down.
   const timers: {
@@ -312,6 +312,13 @@ export async function* monitorDeployment(
     phase === "build" ? BUILD_LOGS_SUBSCRIPTION : DEPLOYMENT_LOGS_SUBSCRIPTION;
   const field = phase === "build" ? "buildLogs" : "deploymentLogs";
 
+  /*
+   * Said once, on the transition to dropping, rather than per dropped line — the whole
+   * point is that the consumer is already behind, so a warning per drop would be the
+   * loudest possible way to make that worse.
+   */
+  let truncationReported = false;
+
   const logs = (async () => {
     try {
       for await (const line of deps.subscribeLogs(
@@ -323,6 +330,14 @@ export async function* monitorDeployment(
       )) {
         queue.push({ type: "log", line });
         linesEmitted += 1;
+        if (queue.dropped > 0 && !truncationReported) {
+          truncationReported = true;
+          log.warn("railway.logStream.truncated", {
+            deployment_id: deploymentId,
+            max_queued: STREAM.MAX_QUEUED_EVENTS,
+          });
+          queue.push({ type: "warning", message: { key: "errors.logsTruncated" } });
+        }
       }
     } catch (error) {
       if (!signal.aborted) {

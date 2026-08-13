@@ -167,6 +167,7 @@
     "deploymentNotFound": "That deployment no longer exists, so there is nothing to stream.",
     "streamInterrupted": "Log stream interrupted. Reference {incident}.",
     "streamLimit": "Too many log panels are open at once. Close one and expand this row again.",
+    "logsTruncated": "This container is logging faster than the panel can display. Older lines were dropped; what you see is the most recent output.",
     "api": {
       "auth": "Railway rejected your credentials, so the authorization is no longer valid. Signing in again will restore it. Reference {incident}.",
       "notAuthorized": "Railway refused this request for your account. The authorization is live but does not cover what the app asked for, so retrying will not help — authorize again and approve access. Reference {incident}.",

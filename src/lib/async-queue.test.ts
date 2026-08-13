@@ -81,4 +81,59 @@ describe("AsyncQueue", () => {
 
     expect(await collected).toEqual(["status", "log", "log"]);
   });
+
+  /*
+   * The bound is what stops "push never awaits" from also meaning "the buffer is
+   * unbounded". Without it a chatty container behind a stalled receiver grows this array
+   * in the server process, and the only cap in the system lives in the browser — on the
+   * far side of the socket that is not draining.
+   */
+  describe("when the consumer is not keeping up", () => {
+    it("is unbounded by default, so existing callers are unaffected", () => {
+      const queue = new AsyncQueue<number>();
+      for (let i = 0; i < 5_000; i++) queue.push(i);
+      expect(queue.dropped).toBe(0);
+    });
+
+    it("drops the oldest once full, keeping the tail", async () => {
+      const queue = new AsyncQueue<number>(3);
+      queue.push(1);
+      queue.push(2);
+      queue.push(3);
+      queue.push(4);
+      queue.push(5);
+      queue.end();
+
+      // The lines that say why a build failed are the ones that arrived last.
+      expect(await collect(queue)).toEqual([3, 4, 5]);
+    });
+
+    it("counts what it dropped", () => {
+      const queue = new AsyncQueue<number>(2);
+      queue.push(1);
+      queue.push(2);
+      expect(queue.dropped).toBe(0);
+
+      queue.push(3);
+      queue.push(4);
+      expect(queue.dropped).toBe(2);
+    });
+
+    it("does not count against the bound while a consumer is parked", async () => {
+      // A waiting consumer is handed the item directly; nothing is buffered, so a
+      // healthy reader never trips the ceiling however many lines pass through.
+      const queue = new AsyncQueue<number>(1);
+      const collected = collect(queue);
+
+      await Promise.resolve();
+      queue.push(1);
+      await Promise.resolve();
+      queue.push(2);
+      await Promise.resolve();
+      queue.end();
+
+      expect(await collected).toEqual([1, 2]);
+      expect(queue.dropped).toBe(0);
+    });
+  });
 });

@@ -75,6 +75,25 @@ export function sseResponse(
     reason ??= next;
   };
 
+  /*
+   * Checked before the listener, because `addEventListener` never fires for a signal that
+   * has already aborted — and by the time a route reaches this line it has awaited three
+   * times (the route params, requireSession, getTranslations). A browser that gave up
+   * during those awaits arrived here with an already-dead signal, nothing listening, and
+   * therefore no teardown until maxDurationMs: fifteen minutes holding a stream slot, an
+   * upstream Railway socket and a 2.5s status poll for a tab that had closed. Four of
+   * those and the user cannot open a log pane at all.
+   *
+   * Returning early rather than constructing the stream keeps `produce` from ever running,
+   * so there is no upstream socket to unwind.
+   */
+  if (clientSignal?.aborted) {
+    claim("client-abort");
+    controller.abort();
+    onClose?.({ reason: "client-abort", durationMs: 0 });
+    return new Response(null, { status: 204 });
+  }
+
   clientSignal?.addEventListener(
     "abort",
     () => {
@@ -100,10 +119,15 @@ export function sseResponse(
       const close = () => {
         if (closed) return;
         closed = true;
-        onClose?.({
-          reason: reason ?? "producer",
-          durationMs: Date.now() - startedAt,
-        });
+
+        /*
+         * Timers first, onClose second. It used to be the other way round, and both
+         * callers' onClose does real work — release() plus a pino write to stdout. A throw
+         * anywhere in there skipped every line below it: the keepalive kept firing on a
+         * dead socket for the life of the process, holding the event loop open, while
+         * enqueue silently no-op'd and the slot the callback was about to release stayed
+         * taken. Clearing first means the transport is inert before any caller code runs.
+         */
         clearTimeout(deadline);
         clearInterval(keepalive);
         controller.abort();
@@ -111,6 +135,19 @@ export function sseResponse(
           streamController.close();
         } catch {
           // Already closed by the runtime.
+        }
+
+        try {
+          onClose?.({
+            reason: reason ?? "producer",
+            durationMs: Date.now() - startedAt,
+          });
+        } catch {
+          /*
+           * Swallowed, not logged: this module is a transport with no logger import by
+           * design (see the SseCloseReason docblock). A caller whose teardown throws has
+           * a defect of its own, but it must not take the close path down with it.
+           */
         }
       };
 

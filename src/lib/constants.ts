@@ -31,6 +31,18 @@ export const STREAM = {
   /** Bound on the browser-side buffer; a chatty container must not grow the tab. */
   MAX_BUFFERED_LINES: 1000,
   /**
+   * Bound on the SERVER-side buffer, for the same reason one tick earlier.
+   *
+   * MAX_BUFFERED_LINES above caps the tab, which is no help when the reason the tab is
+   * not reading is that its socket has stalled — the frames pile up in the monitor's
+   * AsyncQueue on this side instead, and that array had no ceiling at all.
+   *
+   * Matched to MAX_BUFFERED_LINES deliberately rather than tuned separately: the browser
+   * discards past 1000 anyway, so anything buffered above that is memory held for lines
+   * no one will ever be shown.
+   */
+  MAX_QUEUED_EVENTS: 1000,
+  /**
    * Concurrent log streams one user may hold.
    *
    * Bounded by the BROWSER, not by this server. Chrome and Firefox allow six connections

@@ -330,6 +330,53 @@ describe("monitorDeployment", () => {
     });
   });
 
+  it("says so once when a chatty container outruns the reader", async () => {
+    /*
+     * Driven by hand rather than through drain(), which consumes as fast as the producer
+     * emits and so never buffers anything. The defect only exists when the reader is
+     * behind: the queue is what absorbs that, and until it was bounded it absorbed
+     * without limit in the server process.
+     */
+    const burst = STREAM.MAX_QUEUED_EVENTS + 50;
+    const controller = new AbortController();
+    const gen = monitorDeployment(
+      { ...params(), signal: controller.signal },
+      deps({
+        getDeployment: vi.fn(async () => ({
+          id: "dep_1",
+          status: "BUILDING",
+          updatedAt: null,
+        })),
+        subscribeLogs: async function* () {
+          for (let i = 0; i < burst; i++) yield line(`line ${i}`);
+        },
+      }),
+    );
+
+    // Start the body, then stop pulling so the producer runs ahead of the consumer.
+    await gen.next();
+    await vi.advanceTimersByTimeAsync(10);
+
+    /*
+     * Aborting ends the queue, which drains what is buffered and then finishes. Without
+     * it the consumer parks on an empty queue behind a BUILDING deployment that never
+     * settles, and fake timers mean nothing ever wakes it.
+     */
+    controller.abort();
+
+    const events: MonitorEvent[] = [];
+    for await (const event of gen) events.push(event);
+
+    const warnings = events.filter((e) => e.type === "warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ message: { key: "errors.logsTruncated" } });
+
+    // The tail survives; it is the head that is discarded.
+    const logs = events.filter((e) => e.type === "log");
+    expect(logs.at(-1)).toMatchObject({ line: { message: `line ${burst - 1}` } });
+    expect(logs.length).toBeLessThan(burst);
+  });
+
   it("stops when the caller aborts", async () => {
     const controller = new AbortController();
     const gen = monitorDeployment(

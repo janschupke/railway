@@ -21,6 +21,7 @@ export type MessageKey =
   | "errors.deploymentNotFound"
   | "errors.streamInterrupted"
   | "errors.streamLimit"
+  | "errors.logsTruncated"
   | "errors.api.auth"
   | "errors.api.notAuthorized"
   | "errors.api.missingScope"

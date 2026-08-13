@@ -204,6 +204,65 @@ describe("sseResponse", () => {
       expect(closes).toBe(1);
     });
 
+    it("runs when the client had already gone before the stream was built", async () => {
+      /*
+       * addEventListener never fires for a signal that has already aborted, and a route
+       * awaits three times before it gets here — params, requireSession, getTranslations.
+       * A browser that gave up during those arrived with a dead signal and nothing
+       * listening, so the only remaining teardown was maxDurationMs: fifteen minutes
+       * holding a slot, an upstream socket and a 2.5s poll for a tab that had closed.
+       */
+      const client = new AbortController();
+      client.abort();
+
+      let produced = false;
+      const seen: Array<{ reason: string; durationMs: number }> = [];
+      const response = sseResponse(
+        async () => {
+          produced = true;
+        },
+        {
+          clientSignal: client.signal,
+          keepaliveMs: 10_000,
+          onClose: (info) => void seen.push(info),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.reason).toBe("client-abort");
+      // Never started, so there is no upstream socket to unwind.
+      expect(produced).toBe(false);
+      expect(response.status).toBe(204);
+    });
+
+    it("clears its timers even when the caller's teardown throws", async () => {
+      /*
+       * onClose used to run before the clears. Both callers do real work in it —
+       * release() plus a pino write — and a throw skipped every line below: the keepalive
+       * kept firing on a dead socket for the life of the process while enqueue silently
+       * no-op'd, and the slot that callback was about to release stayed taken.
+       */
+      const response = sseResponse(async (emit) => emit.send("done", {}), {
+        keepaliveMs: 100,
+        maxDurationMs: 60_000,
+        onClose: () => {
+          throw new Error("release blew up");
+        },
+      });
+
+      await readAll(response).catch(() => {});
+
+      /*
+       * Asserted on the timer registry rather than on emitted bytes. `closed` is set
+       * before onClose either way, so enqueue no-ops on both versions and the keepalive
+       * leaks silently — the surviving handle IS the defect, and it is the only thing
+       * that shows it.
+       */
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("runs when the consumer cancels the stream", async () => {
       /*
        * The path Next takes when a browser tab vanishes, and the one the rest of this
