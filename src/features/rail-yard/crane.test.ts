@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CRANE, GANTRY } from "./config";
+import { CONTAINER, CRANE, GANTRY } from "./config";
 import {
   CRANE_CYCLE,
   assignCrane,
   createCrane,
   releaseCrane,
+  spreaderZ,
   stepCrane,
   wagonNoseDistance,
   type CraneState,
@@ -36,12 +37,36 @@ describe("createCrane", () => {
 });
 
 describe("stepCrane", () => {
-  it("does nothing at all when it has no train to serve", () => {
+  it("reports nothing and works no leg when it has no train to serve", () => {
     const crane = createCrane(createRng(1), 800, 240);
-    const before = { ...crane };
     expect(stepCrane(crane, 20, TARGET)).toBeNull();
-    expect(crane.portalX).toBe(before.portalX);
-    expect(crane.legIndex).toBe(before.legIndex);
+    expect(crane.legIndex).toBe(0);
+  });
+
+  it("hoists clear and goes home when it is released mid-cycle", () => {
+    /*
+     * The direct regression test for "the idle crane's magnet is on the ground — trains go
+     * through it". Release happens on the frame the last box lands, which is one leg before
+     * the lift, so an idle crane used to sit with its spreader at deck height straight
+     * across a running line. Idling is a movement now, not a `return`.
+     */
+    const crane = createCrane(createRng(1), 800, 240);
+    assignCrane(crane, "train-0", "unload");
+    until(crane, "closed");
+    expect(crane.hoistZ).toBeLessThan(CRANE.TRAVEL_Z);
+    releaseCrane(crane);
+
+    // The lift comes first: crossing the yard at deck height is how you take the top off a
+    // wagon, so the portal may not start moving until the hoist is up.
+    const startedAt = crane.portalX;
+    while (crane.hoistZ < CRANE.TRAVEL_Z) {
+      stepCrane(crane, 20, TARGET);
+      if (crane.hoistZ < CRANE.TRAVEL_Z) expect(crane.portalX).toBe(startedAt);
+    }
+    for (let index = 0; index < 2_000; index++) stepCrane(crane, 20, TARGET);
+    expect(crane.hoistZ).toBe(CRANE.TRAVEL_Z);
+    expect(crane.portalX).toBeCloseTo(crane.parkedX);
+    expect(crane.trolleyY).toBeCloseTo(crane.parkedY);
   });
 
   it("works its ten legs in order and comes back round", () => {
@@ -131,20 +156,44 @@ describe("stepCrane", () => {
     until(high, "closed");
 
     expect(high.hoistZ).toBeGreaterThan(low.hoistZ);
-    expect(low.hoistZ).toBeCloseTo(GANTRY.spreaderHeight);
+    // The bottom of the pile is the ground, because `hoistZ` measures the box, not the
+    // spreader — adding the spreader's own thickness here was half of the drop bug.
+    expect(low.hoistZ).toBe(0);
   });
 
-  it("reaches lower to set a box down than to pick one up", () => {
-    // Picking up means landing on the box already there; setting down means the bare deck.
-    const load = createCrane(createRng(1), 800, 240);
-    assignCrane(load, "train-0", "load");
-    until(load, "opened");
-    const placed = load.hoistZ;
+  it("grips at the same height it lets go at, on a wagon and on the stack", () => {
+    /*
+     * The regression test for "the crane drop moves past the wagon into the ground".
+     *
+     * `hoistZ` used to mean the spreader on some legs and the box on others: placing drove
+     * to the bare deck while the renderer drew the carried box sixteen units *below* that,
+     * which is z -6 — through the wagon and into the ballast. Taking a box off a wagon and
+     * putting one back on it are the same plane, and saying so is what makes that
+     * unexpressible rather than merely fixed.
+     */
+    const placing = createCrane(createRng(1), 800, 240);
+    assignCrane(placing, "train-0", "load");
+    until(placing, "opened");
 
-    const unload = createCrane(createRng(1), 800, 240);
-    assignCrane(unload, "train-0", "unload");
-    until(unload, "closed");
-    expect(unload.hoistZ).toBeGreaterThan(placed);
+    const taking = createCrane(createRng(1), 800, 240);
+    assignCrane(taking, "train-0", "unload");
+    until(taking, "closed");
+
+    expect(placing.hoistZ).toBe(CONTAINER.deck);
+    expect(taking.hoistZ).toBe(CONTAINER.deck);
+  });
+
+  it("keeps the spreader above the box it is carrying", () => {
+    const crane = createCrane(createRng(1), 800, 240);
+    assignCrane(crane, "train-0", "load");
+    for (let index = 0; index < 4_000; index++) {
+      stepCrane(crane, 20, TARGET);
+      expect(spreaderZ(crane)).toBe(crane.hoistZ + CONTAINER.size[2]);
+    }
+    // And the whole assembly stays under the trolley the rope comes off.
+    expect(spreaderZ(crane) + GANTRY.spreaderHeight).toBeLessThan(
+      GANTRY.height - GANTRY.trolleyHeight,
+    );
   });
 });
 

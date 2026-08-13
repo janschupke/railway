@@ -47,31 +47,46 @@ describe("visibleFaces", () => {
    * Tested directly rather than through a rendered frame. A face-visibility rule checked
    * only by "the picture came out" is checked by accident, and this is four branches that
    * a viewport sweep would take a dozen frames to reach.
+   *
+   * Named face sets rather than a count, which is the version that would have caught the
+   * defect this replaces: the old test asserted "no more than two and never an opposing
+   * pair", and one face plus a roof satisfies that perfectly while looking like a cardboard
+   * cut-out. The camera sits to the east and to the south, so an eastbound locomotive shows
+   * its nose and its near side — and that is what has to be written down.
    */
   const HEADINGS: ReadonlyArray<readonly [string, number, readonly Face[]]> = [
-    ["east", 0, ["right"]],
-    ["north-east", Math.PI / 4, ["right"]],
+    ["east", 0, ["front", "right"]],
+    ["north-east", Math.PI / 4, ["back", "right"]],
     ["north", Math.PI / 2, ["back", "right"]],
-    ["north-west", (3 * Math.PI) / 4, ["back"]],
-    ["west", Math.PI, ["back"]],
+    ["north-west", (3 * Math.PI) / 4, ["back", "left"]],
+    ["west", Math.PI, ["back", "left"]],
     ["south-west", -(3 * Math.PI) / 4, ["front", "left"]],
     ["south", -Math.PI / 2, ["front", "left"]],
-    ["south-east", -Math.PI / 4, ["front"]],
+    ["south-east", -Math.PI / 4, ["front", "right"]],
   ];
 
-  it.each(HEADINGS)("shows the camera the right faces heading %s", (_name, angle) => {
-    const faces = visibleFaces(angle);
-    // The camera looks along +y, so a face is visible exactly when its outward normal has a
-    // negative y component. Never more than two, and never a pair that face each other.
-    expect(faces.length).toBeLessThanOrEqual(2);
-    expect(faces.includes("front") && faces.includes("back")).toBe(false);
-    expect(faces.includes("left") && faces.includes("right")).toBe(false);
+  it.each(HEADINGS)(
+    "shows the camera the right faces heading %s",
+    (_name, angle, expected) => {
+      expect([...visibleFaces(angle)].sort()).toEqual([...expected].sort());
+    },
+  );
+
+  it("shows an end and a side at every heading, so nothing reads as a cut-out", () => {
+    // Two faces plus the roof is what makes a box look like a box. One face plus a roof is
+    // a cardboard cut-out, which is what the yard was full of.
+    for (let angle = -Math.PI; angle <= Math.PI; angle += 0.01) {
+      const faces = visibleFaces(angle);
+      expect(faces.length, `${angle}`).toBe(2);
+      expect(faces.includes("front") && faces.includes("back")).toBe(false);
+      expect(faces.includes("left") && faces.includes("right")).toBe(false);
+    }
   });
 
-  it("shows a face at every heading, so nothing is ever a wireframe", () => {
-    for (let angle = -Math.PI; angle <= Math.PI; angle += 0.1) {
-      expect(visibleFaces(angle).length, `${angle}`).toBeGreaterThan(0);
-    }
+  it("drops a pair that is exactly edge-on rather than drawing a zero-area quad", () => {
+    // The one heading at which an end faces exactly along the view ray. A sweep never lands
+    // on it — it is a single point — so it takes naming to reach at all.
+    expect(visibleFaces(Math.atan(VIEW.SHEAR))).toEqual(["right"]);
   });
 });
 

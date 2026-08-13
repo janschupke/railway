@@ -29,28 +29,51 @@ type Point = readonly [x: number, y: number];
 export const visible = (size: number, scale: number): boolean =>
   size * scale >= VIEW.MIN_FEATURE_PX;
 
+/** Each face's outward normal, as a rotation off the box's own heading. */
+const FACE_NORMAL: Readonly<Record<Face, number>> = {
+  front: 0,
+  back: Math.PI,
+  left: Math.PI / 2,
+  right: -Math.PI / 2,
+};
+
 /**
  * The vertical faces the camera can see at a heading.
  *
- * The camera looks along +y — from the near edge of the scene towards the back — so a
- * vertical face is visible exactly when its outward normal has a negative y component. For
- * a box at heading `a` the four outward normals are `a` (front), `a + pi` (back),
- * `a + pi/2` (left) and `a - pi/2` (right), so the test is one sine per face.
+ * A point moves along the **view ray** without moving on screen, and the projection gives
+ * it directly: `sx` is fixed by `x + y * SHEAR` and `sy` by `y * TILT + z`, so a step of
+ * `(-SHEAR, 1, -TILT)` changes neither. A face is turned towards the camera exactly when
+ * its outward normal `n` satisfies `n . v < 0`, which for a vertical face at world angle
+ * `t` is `sin t - cos t * SHEAR`.
  *
- * Exactly two qualify at a general heading: one end and one side. At the four axis-aligned
- * headings one face is edge-on and contributes nothing, and dropping it is correct rather
- * than a special case — a zero-area quad fills no pixels either way, and excluding it keeps
- * the count honest for the test.
+ * The shear in that expression is the whole of this fix. Without it the test reads
+ * `sin t < 0`, which is the camera as it stood *before* VIEW.SHEAR existed — square in
+ * front of the yard. Once depth started carrying the eye sideways the camera moved round to
+ * the east, and the stale test failed every east-facing face by exactly the amount it had
+ * moved: at heading 0 the nose of a locomotive measures `sin 0 = 0`, misses `< 0` by
+ * nothing at all, and is never drawn. That is one line, and it is why containers had no
+ * ends, engines had no noses, and every roof read as a plane hovering over its walls
+ * rather than as the lid of a box.
+ *
+ * Exactly two qualify at a general heading — one end and one side — so a box always reads
+ * as a solid. At the four headings where a pair is exactly edge-on that pair drops out and
+ * one face is left, which is correct rather than a special case: a zero-area quad fills no
+ * pixels either way, and excluding it keeps the count honest for the test.
+ *
+ * The result needs no depth ordering. Both faces are turned towards the camera on a convex
+ * solid under an orthographic projection, so they meet along their shared edge and cannot
+ * overlap — which matters here because each face takes a translucent shade pass, and an
+ * overlap would show up as a double-darkened seam.
  *
  * Exported because a face-visibility rule tested through a rendered frame is tested by
  * accident. Eight headings against this directly is what actually pins it.
  */
 export function visibleFaces(angle: number): readonly Face[] {
   const faces: Face[] = [];
-  if (Math.sin(angle) < 0) faces.push("front");
-  if (Math.sin(angle + Math.PI) < 0) faces.push("back");
-  if (Math.sin(angle + Math.PI / 2) < 0) faces.push("left");
-  if (Math.sin(angle - Math.PI / 2) < 0) faces.push("right");
+  for (const face of ["front", "back", "left", "right"] as const) {
+    const at = angle + FACE_NORMAL[face];
+    if (Math.sin(at) - Math.cos(at) * VIEW.SHEAR < 0) faces.push(face);
+  }
   return faces;
 }
 

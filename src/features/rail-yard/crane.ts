@@ -19,7 +19,7 @@
  * be nine functions each needing a test of its own.
  */
 
-import { CONTAINER, CRANE, GANTRY, LOCOMOTIVE, WAGON, YARD } from "./config";
+import { CONTAINER, CRANE, LOCOMOTIVE, WAGON, YARD } from "./config";
 import { FREIGHT_TOKENS } from "./palette";
 import type { Rng } from "./rng";
 
@@ -54,6 +54,16 @@ export const CRANE_CYCLE: readonly CraneLeg[] = [
 export type CraneState = {
   portalX: number;
   trolleyY: number;
+  /**
+   * The z of the **underside of the box the spreader is holding, or would hold**.
+   *
+   * One meaning, and it is the fix for "the crane drops a container through the wagon into
+   * the ground". This used to be the spreader's own height on some legs and the box's on
+   * others: `deckZ(false)` returned the wagon deck while the renderer drew the carried box
+   * from `hoistZ - 16`, so setting a box down drove it to z -6. Picking one up and putting
+   * it back in the same place are the same number now, which is what makes the old
+   * asymmetry read as the bug it was rather than as a subtlety.
+   */
   hoistZ: number;
   /** The freight colour index in the spreader, between the two latches and never else. */
   holding: number | null;
@@ -65,6 +75,9 @@ export type CraneState = {
   direction: "load" | "unload";
   /** The yard stack, oldest first. Containers come from here and go back to here. */
   stack: number[];
+  /** Where the portal and trolley stand when there is nothing to serve. */
+  readonly parkedX: number;
+  readonly parkedY: number;
 };
 
 /** Where the crane must be to work a wagon: told to it, because only the sim knows. */
@@ -102,7 +115,20 @@ export function createCrane(rng: Rng, parked: number, stackAt: number): CraneSta
     wagonIndex: 0,
     direction: "load",
     stack,
+    parkedX: parked,
+    parkedY: stackAt,
   };
+}
+
+/**
+ * The z the spreader itself sits at: one container above the grip plane.
+ *
+ * Exported so the renderer draws it in the place the crane reaches to, rather than deriving
+ * the same relationship a second time and letting the two drift — which is exactly how the
+ * spreader came to be drawn *below* the box it was carrying.
+ */
+export function spreaderZ(crane: CraneState): number {
+  return crane.hoistZ + CONTAINER.size[2];
 }
 
 /**
@@ -123,17 +149,16 @@ export function stackSlot(index: number): { column: number; level: number } {
 const handling = (crane: CraneState, taking: boolean): number =>
   taking ? crane.stack.length - 1 : crane.stack.length;
 
-/** The z the spreader stops at over the stack, allowing for what is already in that column. */
-function stackTopZ(crane: CraneState, taking: boolean): number {
-  return (
-    stackSlot(handling(crane, taking)).level * CRANE.STACK_STEP_Z +
-    GANTRY.spreaderHeight
-  );
-}
-
-/** The z the spreader stops at over a wagon: on the deck, or on top of the box on it. */
-function deckZ(taking: boolean): number {
-  return taking ? CONTAINER.deck + CONTAINER.size[2] : CONTAINER.deck;
+/**
+ * The grip plane over the stack: the underside of the box being handled.
+ *
+ * Taking is the box already on top of the pile, placing is the slot above it, and the level
+ * arithmetic is the renderer's — a stack box at level L is drawn from `L * STACK_STEP_Z`,
+ * so that is what the crane reaches to. The spreader's own thickness used to be added in
+ * here, which is what put the grip a spreader too high on every lift off the pile.
+ */
+function stackGripZ(crane: CraneState, taking: boolean): number {
+  return stackSlot(handling(crane, taking)).level * CRANE.STACK_STEP_Z;
 }
 
 function axisTarget(
@@ -154,8 +179,9 @@ function axisTarget(
   if (leg.move === "y") return atStack ? target.stackY : target.wagonY;
   if (leg.move === "z") {
     if (leg.to === "travel") return CRANE.TRAVEL_Z;
-    const taking = leg.to === "source";
-    return atStack ? stackTopZ(crane, taking) : deckZ(taking);
+    // A wagon's grip plane is its deck whichever way the box is going, which is the whole
+    // point of measuring the box's underside rather than the spreader's.
+    return atStack ? stackGripZ(crane, leg.to === "source") : CONTAINER.deck;
   }
   return null;
 }
@@ -184,15 +210,46 @@ function approach(
  */
 export type CraneEvent = "closed" | "opened" | null;
 
+/**
+ * Where the crane stands when it has nothing to serve: hoist up, then home.
+ *
+ * Not a no-op, which is what it used to be. A crane released mid-cycle simply kept whatever
+ * height the last leg left it at — and release happens on the frame the last box lands, one
+ * leg before the lift, so it sat with the spreader at deck height directly over a running
+ * line and trains drove through it. The lift comes first and the travel waits on it, for
+ * the same reason a real gantry hoists before it moves: crossing the yard at deck height is
+ * how you take the top off a wagon.
+ */
+function park(crane: CraneState, seconds: number): void {
+  const [lifted, clear] = approach(
+    crane.hoistZ,
+    CRANE.TRAVEL_Z,
+    CRANE.HOIST_SPEED,
+    seconds,
+  );
+  crane.hoistZ = lifted;
+  if (!clear) return;
+  [crane.portalX] = approach(crane.portalX, crane.parkedX, CRANE.PORTAL_SPEED, seconds);
+  [crane.trolleyY] = approach(
+    crane.trolleyY,
+    crane.parkedY,
+    CRANE.TROLLEY_SPEED,
+    seconds,
+  );
+}
+
 /** Advances the crane by one step along its cycle. */
 export function stepCrane(
   crane: CraneState,
   dtMs: number,
   target: CraneTarget,
 ): CraneEvent {
-  if (crane.servingTrainId === null) return null;
-
   const seconds = dtMs / 1000;
+  if (crane.servingTrainId === null) {
+    park(crane, seconds);
+    return null;
+  }
+
   const leg = CRANE_CYCLE[crane.legIndex] ?? CRANE_CYCLE[0]!;
   let done = false;
   let event: CraneEvent = null;

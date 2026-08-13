@@ -122,13 +122,15 @@ export const CRANE = {
   /** Time for the spreader to lock on or let go. Short, but not instant. */
   LATCH_MS: 320,
   /**
-   * Height the hoist carries a box at.
+   * Height a box is carried at, measured to its **underside** — the same convention
+   * `CraneState.hoistZ` uses everywhere else.
    *
-   * Has to clear the top of a full stack *plus* the box hanging under the spreader, because
-   * the portal travels over the stack on its way to it. Three boxes at 17 is 51, plus a 16
-   * tall container underneath, is 67.
+   * Bounded from both ends. It has to clear the top of a full stack, because the portal
+   * travels over the stack on its way to it: three boxes at 17 is 51. And the spreader
+   * hangs a container's height above it, so it must stay under the trolley the rope comes
+   * off at 78 — 54 puts the spreader at 70 and the top of it at 73.
    */
-  TRAVEL_Z: 70,
+  TRAVEL_Z: 54,
   STACK_STEP_Z: 17,
   /**
    * The stack is two columns of three, not one pile of six.

@@ -37,7 +37,7 @@ import { poseAlong } from "./graph";
 import type { YardPalette } from "./palette";
 import type { RailScene, SceneStructure } from "./scene";
 import type { TrainState, WorldState } from "./simulation";
-import { stackSlot } from "./crane";
+import { spreaderZ, stackSlot } from "./crane";
 import { aspectOf } from "./traffic";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";
 import { YARD } from "./config";
@@ -243,7 +243,9 @@ function gantryDrawables(
         fill: "depot",
       },
       {
-        at: [-GANTRY.spreaderLength / 2, -GANTRY.spreaderDepth / 2, crane.hoistZ],
+        // `hoistZ` is the underside of the box in the jaws, so the spreader sits one
+        // container above it — never below the thing it is carrying.
+        at: [-GANTRY.spreaderLength / 2, -GANTRY.spreaderDepth / 2, spreaderZ(crane)],
         size: [GANTRY.spreaderLength, GANTRY.spreaderDepth, GANTRY.spreaderHeight],
         fill: "metal",
       },
@@ -255,11 +257,7 @@ function gantryDrawables(
     out.push({
       ...standing(crane.portalX, crane.trolleyY, [
         {
-          at: [
-            -CONTAINER.size[0] / 2,
-            -CONTAINER.size[1] / 2,
-            crane.hoistZ - CONTAINER.size[2],
-          ],
+          at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, crane.hoistZ],
           size: CONTAINER.size,
           fill: "cargo",
         },
@@ -455,7 +453,7 @@ export function drawFrame(
       view,
       [world.crane.portalX, world.crane.trolleyY],
       GANTRY.height - GANTRY.trolleyHeight,
-      world.crane.hoistZ,
+      spreaderZ(world.crane) + GANTRY.spreaderHeight,
       palette,
     );
   }
