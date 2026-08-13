@@ -1,11 +1,13 @@
 import {
   button,
+  disclosure,
   expect,
   field,
   fixtureServices,
   injectFaults,
   onlyVisible,
   openDestroyDialog,
+  railwayLink,
   row,
   setTabVisibility,
   settled,
@@ -34,7 +36,7 @@ test.describe("container lifecycle", () => {
     await spinUp(page, "cache");
 
     const cache = row(page, "cache");
-    await onlyVisible(cache.getByRole("button", { name: /^cache/ })).click();
+    await disclosure(page, "cache").click();
 
     const log = cache.getByRole("log");
     await expect(log).toBeVisible();
@@ -52,7 +54,7 @@ test.describe("container lifecycle", () => {
      * panel, and a spinner that resolved to nothing.
      */
     const postgres = row(page, "postgres");
-    await onlyVisible(postgres.getByRole("button", { name: /^postgres/ })).click();
+    await disclosure(page, "postgres").click();
 
     const log = postgres.getByRole("log");
     await expect(log).toContainText("No log output for this deployment.");
@@ -68,6 +70,22 @@ test.describe("container lifecycle", () => {
     await expect(cache).toContainText("nginx:alpine");
     // Displayed as "cache"; stored in Railway as "spun-cache".
     await expect(cache).not.toContainText("spun-cache");
+  });
+
+  test("points every container at its own page on Railway", async ({ page }) => {
+    /*
+     * Not only the failed ones. The app shows a status and a log stream; everything else
+     * a service has — variables, domains, metrics, the deploy history — lives on Railway,
+     * and the name is the obvious thing to click to get there.
+     */
+    await spinUp(page, "cache");
+
+    await expect(railwayLink(page, "cache")).toHaveAttribute(
+      "href",
+      /railway\.com\/project\/proj_demo\/service\/svc_\d+\?environmentId=env_prod/,
+    );
+    await expect(railwayLink(page, "cache")).toHaveAttribute("rel", "noreferrer");
+    await expect(railwayLink(page, "cache")).toHaveAttribute("target", "_blank");
   });
 
   test("destroys a container after typed confirmation", async ({ page }) => {
@@ -212,7 +230,7 @@ test.describe("container lifecycle", () => {
     await settled(page);
 
     const reloaded = row(page, "broken");
-    await onlyVisible(reloaded.getByRole("button", { name: /^broken/ })).click();
+    await disclosure(page, "broken").click();
     await expect(reloaded.getByRole("log")).toContainText("[fake-railway]", {
       timeout: 20_000,
     });
@@ -231,7 +249,7 @@ test.describe("container lifecycle", () => {
     const broken = row(page, "broken");
     await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
 
-    await onlyVisible(broken.getByRole("button", { name: /^broken/ })).click();
+    await disclosure(page, "broken").click();
 
     await expect(broken.getByRole("log")).toContainText(
       "No log output for this deployment.",

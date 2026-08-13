@@ -2,6 +2,7 @@ import {
   alerts,
   button,
   containerRows,
+  disclosure,
   expect,
   expectNoA11yViolations,
   field,
@@ -157,7 +158,7 @@ test.describe("accessibility", () => {
       await setTheme(page, theme);
 
       const cache = row(page, "cache");
-      await onlyVisible(cache.getByRole("button", { name: /^cache/ })).click();
+      await disclosure(page, "cache").click();
       await expect(cache.getByRole("log")).toBeVisible();
 
       await expectNoA11yViolations(page, `log-panel/${theme}`);
@@ -178,7 +179,7 @@ test.describe("accessibility", () => {
 
       const broken = row(page, "broken");
       await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
-      await onlyVisible(broken.getByRole("button", { name: /^broken/ })).click();
+      await disclosure(page, "broken").click();
       await expect(
         broken.getByRole("link", { name: /open in railway/i }),
       ).toBeVisible();

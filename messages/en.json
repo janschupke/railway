@@ -82,6 +82,7 @@
   },
   "containers": {
     "noSource": "no source",
+    "toggleLogs": "Logs for {name}",
     "notManaged": "Not managed here",
     "notManagedTooltip": "Only services created in this app can be destroyed here.",
     "noDeployment": "This service has no deployment yet, so there is nothing to stream.",

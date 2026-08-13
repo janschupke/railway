@@ -1,6 +1,7 @@
 import {
   button,
   containerRows,
+  disclosure,
   dismissWithEscape,
   expect,
   field,
@@ -182,11 +183,11 @@ test.describe("keyboard operation", () => {
     await signIn(page);
 
     const postgres = row(page, "postgres");
-    const disclosure = onlyVisible(postgres.getByRole("button", { name: /^postgres/ }));
-    await disclosure.focus();
+    const toggle = disclosure(page, "postgres");
+    await toggle.focus();
     await page.keyboard.press("Enter");
 
-    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(postgres.getByRole("log")).toBeVisible();
   });
 
@@ -197,7 +198,7 @@ test.describe("keyboard operation", () => {
     await spinUp(page, "cache");
 
     const cache = row(page, "cache");
-    await onlyVisible(cache.getByRole("button", { name: /^cache/ })).click();
+    await disclosure(page, "cache").click();
 
     await expect(cache.getByRole("log")).toHaveAttribute("aria-live", "polite");
   });

@@ -154,32 +154,79 @@ export function ContainerRow({
   return (
     <li className="border-border border-b last:border-b-0">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          className="focus-ring hover:bg-subtle -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left"
-        >
-          <ChevronDown
-            aria-hidden
-            className={cn(
-              // Same duration as the panel, so the two read as one gesture.
-              "text-text-subtle duration-base size-4 shrink-0 transition-transform",
-              expanded && "rotate-180",
-            )}
-          />
+        {/*
+          Two controls, not one.
+
+          The name used to be the label of the disclosure button, which made it the one
+          thing on a row that could not also be a link — and Railway's own page for the
+          service was reachable only from a failed row's expanded panel. An anchor cannot
+          nest inside a button, so the disclosure gave the name up and kept the chevron.
+
+          What that costs: the expand target shrinks from the whole name block to the
+          chevron, and each row gains a tab stop. What it buys: every container, not just
+          the broken ones, has a route to the page that can answer questions this app's
+          single-enum view of a deployment cannot.
+        */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            // p-1.5 around a 16px icon is a 28px target; p-1 would sit exactly on the
+            // 24px floor, with nothing left for the next person who nudges the icon.
+            className="focus-ring hover:bg-subtle -ml-1 shrink-0 rounded-md p-1.5"
+          >
+            <ChevronDown
+              aria-hidden
+              className={cn(
+                // Same duration as the panel, so the two read as one gesture.
+                "text-text-subtle duration-base size-4 shrink-0 transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
+            {/*
+              The whole accessible name, since the chevron carries no visible text. No
+              WCAG 2.5.3 conflict of the kind the Info button below documents: there is
+              no visible label here for this wording to contradict.
+            */}
+            <span className="sr-only">
+              {t("toggleLogs", { name: container.displayName })}
+            </span>
+          </button>
+
           <span className="min-w-0">
             {/* The name used to carry no size class at all, so it inherited 16px and
                 sat four steps above the 12px source line directly under it. */}
-            <Text variant="label" className="block truncate">
-              {container.displayName}
+            <Text asChild variant="label">
+              {/*
+                `link`, not `Button asChild` — this is navigation, and the utility's
+                docblock in globals.css is explicit that underlining a control would make
+                the two read as the same thing. Truncation lives on the inner span so the
+                ellipsis eats the name rather than the icon that explains where it goes.
+              */}
+              <a
+                href={railwayServiceUrl({
+                  projectId,
+                  serviceId: container.serviceId,
+                  environmentId,
+                })}
+                target="_blank"
+                rel="noreferrer"
+                className="focus-ring link inline-flex max-w-full items-center gap-1"
+              >
+                <span className="truncate">{container.displayName}</span>
+                <ExternalLink
+                  aria-hidden
+                  className="text-text-subtle size-3.5 shrink-0"
+                />
+              </a>
             </Text>
             <Text variant="mono" tone="subtle" className="block truncate">
               {container.image ?? container.repo ?? t("noSource")}
             </Text>
           </span>
-        </button>
+        </div>
 
         <StatusBadge
           state={state}

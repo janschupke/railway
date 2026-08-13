@@ -1,6 +1,7 @@
 import {
   button,
   containerRows,
+  disclosure,
   dismissWithEscape,
   expect,
   onlyVisible,
@@ -186,7 +187,7 @@ test.describe("popup motion", () => {
     // The panel was a hard `hidden` toggle: the chevron rotated and 256px of log pane
     // appeared on the same frame.
     await spinUp(page, "cache");
-    await button(page, /^cache/).click();
+    await disclosure(page, "cache").click();
 
     const panel = onlyVisible(page.locator("[data-panel-open]"));
     await expect(panel).toHaveAttribute("data-panel-open", "true");

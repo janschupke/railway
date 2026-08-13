@@ -817,9 +817,12 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
    rotates transparently.
 5. **Ownership:** create a service in the Railway dashboard directly. It appears here as
    _Not managed here_, with no destroy control.
-6. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
+6. **The way out:** click any container's name — every row, not only the broken ones —
+   and confirm it opens that service on Railway in a new tab. The chevron beside it is
+   the log panel's disclosure; check it still expands from the keyboard.
+7. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
    **Failed** rather than spinning forever, and that expanding the row explains the
-   failure and offers **Open in Railway**. Do not expect build logs here: an image source
+   failure and repeats **Open in Railway**. Do not expect build logs here: an image source
    performs no build, and a pull that never resolves may write nothing to either log
    phase — which is exactly why the row carries an explanation and a deep link. Reload the
    page and expand the row again; if Railway did write output to the other phase, the

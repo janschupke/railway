@@ -123,6 +123,22 @@ export function row(page: Page, name: string) {
 }
 
 /**
+ * A row's log disclosure.
+ *
+ * The chevron alone, and its accessible name is sr-only: the container name next to it
+ * is a link to Railway now, so a `{ name: /^cache/ }` button query would find nothing.
+ * A helper rather than nine inline queries, because that spelling is exactly what broke.
+ */
+export function disclosure(page: Page, name: string) {
+  return onlyVisible(row(page, name).getByRole("button", { name: `Logs for ${name}` }));
+}
+
+/** A row's link out to Railway's own page for the service — the container name. */
+export function railwayLink(page: Page, name: string) {
+  return onlyVisible(row(page, name).getByRole("link", { name }));
+}
+
+/**
  * Waits for a re-render to finish.
  *
  * A Server Action followed by router.refresh() streams a fresh tree the same way the

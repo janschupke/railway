@@ -40,9 +40,14 @@ const container = (over: Partial<Container> = {}): Container => ({
   ...over,
 });
 
-/** The row's disclosure control; its accessible name starts with the container name. */
+/**
+ * The row's disclosure control.
+ *
+ * The chevron alone, named by sr-only text: the container name beside it is a link to
+ * Railway, and an anchor cannot live inside a button.
+ */
 const disclosure = (name = "cache") =>
-  screen.getByRole("button", { name: new RegExp(`^${name}`) });
+  screen.getByRole("button", { name: `Logs for ${name}` });
 
 /**
  * Opens the panel and waits for it to actually be open.
@@ -228,6 +233,21 @@ describe("ContainerRow", () => {
     const { container: dom } = renderRow();
     const time = dom.querySelector("time")!;
     expect(time).toHaveClass("min-w-24", "whitespace-nowrap");
+  });
+
+  it("makes the name a link to the service on Railway", async () => {
+    // On every row, not only the failed ones: the deep link is built from ids the row
+    // already holds, so it costs nothing, and everything this app does not show —
+    // variables, domains, metrics — is on the other end of it.
+    renderRow({ state: "running" });
+
+    const link = screen.getByRole("link", { name: "cache" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://railway.com/project/p1/service/svc_1?environmentId=e1",
+    );
+    expect(link).toHaveAttribute("rel", "noreferrer");
+    expect(link).toHaveAttribute("target", "_blank");
   });
 
   it("points a failed deployment at the page that has the reason", async () => {

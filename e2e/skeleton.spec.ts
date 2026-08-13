@@ -1,5 +1,6 @@
 import {
   button,
+  disclosure,
   expect,
   injectFaults,
   onlyVisible,
@@ -137,7 +138,7 @@ test("expanding a row never shows an empty panel", async ({ page }) => {
   await spinUp(page, "logs");
   await settled(page);
 
-  await row(page, "logs").getByRole("button", { name: /^logs/ }).click();
+  await disclosure(page, "logs").click();
 
   await expect(onlyVisible(page.getByRole("log"))).toBeVisible();
 });

@@ -1,9 +1,9 @@
 import {
+  disclosure,
   dismissWithEscape,
   expect,
   onlyVisible,
   openDestroyDialog,
-  row,
   setTheme,
   signIn,
   spinUp,
@@ -65,9 +65,7 @@ test("the policy blocks nothing the app actually does", async ({ page }) => {
   await expect(dialog).toHaveCount(0);
 
   // connect-src 'self' has to allow the same-origin EventSource.
-  await row(page, "cache")
-    .getByRole("button", { name: /^cache/ })
-    .click();
+  await disclosure(page, "cache").click();
   await expect(onlyVisible(page.getByRole("log"))).toBeVisible();
 
   expect(await violations(page)).toEqual([]);

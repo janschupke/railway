@@ -161,9 +161,10 @@ export const LINKS = {
  * One service on Railway's own dashboard.
  *
  * Built entirely from ids a container row already holds, so this escape hatch costs no
- * API call — which is the only reason it can sit on every failed row.
+ * API call — which is the only reason it can sit on every row, as the container name.
  *
- * It exists because the app's whole knowledge of a failed deployment is the enum FAILED:
+ * It is repeated inside a failed row's panel because the app's whole knowledge of a
+ * failed deployment is the enum FAILED:
  * the deployment query returns a status and nothing else, a service created from an image
  * performs no build, and a pull that fails may write no deployment logs either. The badge
  * says "Failed" over a legitimately empty pane, and Railway's own page is the only place
