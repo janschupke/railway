@@ -156,7 +156,8 @@
     "imageInvalid": "That does not look like a valid image reference",
     "projectRequired": "Select a project before continuing",
     "environmentRequired": "Select an environment before continuing",
-    "serviceRequired": "Missing container reference."
+    "serviceRequired": "Missing container reference.",
+    "referenceInvalid": "That reference is not one Railway could have issued. Reload the page and try again."
   },
   "errors": {
     "generic": "Something went wrong. Please try again. Reference {incident}.",

@@ -241,6 +241,41 @@ describe("spinUp", () => {
     });
   });
 
+  it("shows real copy when a field is missing from the form entirely", async () => {
+    /*
+     * The defect this exists for: formData.get returns null for a field the browser
+     * never sent, null fails zod's implicit string check BEFORE the .min(1) that
+     * carries the catalog key, and the action then handed zod's own English to the
+     * translator as a key. next-intl echoes an unknown key back verbatim, so the toast
+     * read "Invalid input: expected string, received null".
+     */
+    const data = new FormData();
+    data.append("projectId", "p1");
+    data.append("environmentId", "e1");
+    data.append("image", "redis:7-alpine");
+    // `name` deliberately absent.
+
+    const result = await spinUp(null, data);
+
+    expect(result).toMatchObject({ ok: false, field: "name" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("Give the container a name");
+    expect(result.error).not.toMatch(/Invalid input/);
+  });
+
+  it("refuses a reference Railway could not have issued, before any network call", async () => {
+    // No MSW handler is registered: a request here would fail the suite. Previously
+    // these fields were .min(1) only, so this reached a full project query.
+    const result = await spinUp(null, spinUpForm({ projectId: "p1/../admin" }));
+
+    expect(result).toMatchObject({ ok: false });
+    if (result.ok) return;
+    expect(result.error).toBe(
+      "That reference is not one Railway could have issued. Reload the page and try again.",
+    );
+  });
+
   it("reports a missing project reference without attributing it to a field", async () => {
     const result = await spinUp(null, spinUpForm({ projectId: "" }));
     expect(result.ok).toBe(false);

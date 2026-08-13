@@ -14,7 +14,12 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import { toManagedName } from "@/lib/railway/managed";
 import { presetFor } from "@/lib/presets";
 import { resolveVariables } from "@/lib/railway/secrets";
-import { VALIDATION_VALUES, spinDownSchema, spinUpSchema } from "@/lib/validation";
+import {
+  VALIDATION_KEYS,
+  VALIDATION_VALUES,
+  spinDownSchema,
+  spinUpSchema,
+} from "@/lib/validation";
 import type { MessageKey, Translate } from "@/lib/messages";
 
 /**
@@ -31,11 +36,35 @@ const asTranslate =
   (key, values) =>
     t(key as Parameters<Translator>[0], values as never);
 
-/** Zod issues carry catalog keys as their `message`; some also interpolate a limit. */
+/**
+ * Zod issues carry catalog keys as their `message`; some also interpolate a limit.
+ *
+ * Guarded, because "the message is a key" holds only for rules that actually fired. A
+ * field missing from the FormData entirely fails the implicit string check *before* any
+ * `.min()` runs, so `issue.message` is zod's own English — and next-intl echoes an
+ * unknown key back verbatim, which is how "Invalid input: expected string, received
+ * null" ended up in a toast. The boundary coercion below stops that arising; this stops
+ * the next rule added without a message doing it again.
+ */
 function messageForIssue(t: Translator, key: string): string {
+  // Same cast as every other call through the `Translator` alias, which resolves to the
+  // namespaced overload and so is narrower than the value `getTranslations()` returns.
+  if (!VALIDATION_KEYS.has(key)) {
+    return t("actions.invalidForm" as Parameters<Translator>[0]);
+  }
   const values = VALIDATION_VALUES[key];
   return t(key as Parameters<Translator>[0], values as never);
 }
+
+/**
+ * A FormData field as a string.
+ *
+ * `formData.get` returns null for a field the browser never sent, and null fails zod's
+ * type check ahead of the rule that carries the catalog key. Coercing here means the
+ * `.min(1)` message is the one that fires, which is the message written for this case.
+ */
+const formField = (formData: FormData, name: string): string =>
+  String(formData.get(name) ?? "");
 
 export async function spinUp(
   _prev: ActionResult | null,
@@ -48,10 +77,10 @@ async function create(formData: FormData): Promise<ActionResult> {
   const t = await getTranslations();
 
   const parsed = spinUpSchema.safeParse({
-    projectId: formData.get("projectId"),
-    environmentId: formData.get("environmentId"),
-    name: formData.get("name"),
-    image: formData.get("image"),
+    projectId: formField(formData, "projectId"),
+    environmentId: formField(formData, "environmentId"),
+    name: formField(formData, "name"),
+    image: formField(formData, "image"),
   });
 
   if (!parsed.success) {
@@ -170,9 +199,9 @@ async function destroy(formData: FormData): Promise<ActionResult> {
   const t = await getTranslations();
 
   const parsed = spinDownSchema.safeParse({
-    projectId: formData.get("projectId"),
-    environmentId: formData.get("environmentId"),
-    serviceId: formData.get("serviceId"),
+    projectId: formField(formData, "projectId"),
+    environmentId: formField(formData, "environmentId"),
+    serviceId: formField(formData, "serviceId"),
   });
   if (!parsed.success) {
     return { ok: false, error: t("actions.missingReference") };
