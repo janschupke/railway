@@ -45,10 +45,30 @@
     "renders the root layout, so it pays for the same shared graph the dashboard does —",
     "the page primitive and the skip link — plus the layout re-splitting its chunks. It",
     "was already the route with the least of its own code and the most inherited, which",
-    "is why a change to shared chrome shows up here most clearly."
+    "is why a change to shared chrome shows up here most clearly.",
+    "",
+    "/ 171 -> 179: the landing page became a freight yard with the sign-in card floating",
+    "in it — src/features/rail-yard, a canvas simulation of about 1,300 lines. Measured",
+    "166.2 -> 173.3, so the whole feature costs 7.1 kB gzip: the simulation, the routing",
+    "graph, the arc-length geometry, the renderer and the scene literal, with no new",
+    "dependency. Set at actual + ~3% as this file's rule intends.",
+    "",
+    "Worth recording because it was the thing checked rather than assumed: /dashboard",
+    "moved 215.0 -> 215.2 and /_not-found 165.8 -> 165.6, both noise. The feature is",
+    "imported only from /'s page and RailYard is its own client boundary, so it lands in",
+    "that route's chunk and not in the shared layout graph — which is the failure mode a",
+    "client component on the landing page would otherwise have, and what the /_not-found",
+    "entry above is the worked example of. If those two numbers ever move for this",
+    "feature, that is a defect and not a budget question.",
+    "",
+    "Rejected: next/dynamic with ssr:false, which would keep / under the old number by",
+    "splitting the yard into a second request. The canvas is absolutely positioned and",
+    "contributes no layout, so it would cost nothing in stability — but it would make the",
+    "scene arrive a beat after the page, and a dynamic boundary is machinery this repo",
+    "has nowhere else. Paying the 7 kB honestly was preferred."
   ],
   "routes": {
-    "/": 171,
+    "/": 179,
     "/dashboard": 222,
     "/_not-found": 171
   }

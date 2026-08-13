@@ -295,7 +295,18 @@ const eslintConfig = defineConfig([
    * could pull it into the browser.
    */
   {
-    files: ["src/components/**/*.{ts,tsx}", "src/hooks/**/*.{ts,tsx}"],
+    /*
+     * src/features/** is here for the same reason as the other two: it holds client
+     * components and their hooks, so it is one of the places an import could put the
+     * session or pino into a browser bundle. A new top-level directory does not inherit
+     * this by being under src/ — the rule selects by path, and adding the directory
+     * without adding it here would have opened exactly the hole the rule exists to shut.
+     */
+    files: [
+      "src/components/**/*.{ts,tsx}",
+      "src/hooks/**/*.{ts,tsx}",
+      "src/features/**/*.{ts,tsx}",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",

@@ -90,9 +90,9 @@ export default defineConfig({
        * as raising a bundle budget: allowed, and it should be argued for in the commit.
        */
       thresholds: {
-        lines: 96,
+        lines: 97,
         branches: 89,
-        functions: 95,
+        functions: 96,
         statements: 95,
 
         /*
@@ -110,6 +110,18 @@ export default defineConfig({
          */
         "src/lib/**": { lines: 95, branches: 89, functions: 95, statements: 94 },
         "src/hooks/**": { lines: 95, branches: 87, functions: 95, statements: 95 },
+        /*
+         * The rail yard. It gets a floor of its own for the same reason lib and hooks do:
+         * it is the largest body of logic in the app outside those two, and a global
+         * aggregate cannot see one of its ten modules fall to nothing.
+         *
+         * Branches sits lower than elsewhere on purpose. Most of the misses are the
+         * legibility guards in the renderer — "skip this part if it would be under a
+         * pixel" — which need a viewport scale per branch to reach, and the assertion
+         * that actually matters there is the measured one in render.test.ts rather than
+         * having visited both sides of every size check.
+         */
+        "src/features/**": { lines: 98, branches: 85, functions: 98, statements: 95 },
       },
     },
   },

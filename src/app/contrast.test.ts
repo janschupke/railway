@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { FREIGHT_TOKENS, RAIL_YARD_TOKENS } from "@/features/rail-yard/palette";
 
 /**
  * WCAG AA contrast, asserted against the token file itself.
@@ -21,6 +22,11 @@ const AA_NORMAL = 4.5;
 const AA_LARGE = 3;
 /** Not WCAG: the floor at which a frozen, textless placeholder still reads as a shape. */
 const AA_PLACEHOLDER = 1.4;
+/**
+ * Not WCAG either: Euclidean RGB distance below which two freight containers stop
+ * reading as two colours. See the rail-yard block near the end of this file.
+ */
+const FREIGHT_SEPARATION = 60;
 
 type Rgb = [number, number, number];
 
@@ -314,6 +320,126 @@ describe("token parsing", () => {
         ).toBeDefined();
       }
     }
+  });
+});
+
+/**
+ * The rail yard on the landing page.
+ *
+ * The scene is decoration, so almost nothing here is a WCAG number — a container is not
+ * text and carries none. What it has instead is a set of *bounded* claims, and the bounds
+ * matter in both directions: this canvas sits behind the sign-in card, so its failure
+ * mode is not "invisible", it is "shouty". A skyline that reads as loudly as the
+ * foreground, or a sky whose gradient banding competes with the card, is the regression
+ * worth catching, and neither is expressible as a minimum.
+ *
+ * The token lists are imported from the feature rather than restated. That is the whole
+ * point: a colour the renderer asks for and tokens.css does not declare would otherwise
+ * be an invisible black rectangle on a page nobody scans in both themes.
+ */
+describe.each(THEMES)("%s rail yard", (themeName, theme) => {
+  const surface = (token: string) => resolve(token, theme, [0, 0, 0]);
+  const ratio = (fg: string, bg: string) => {
+    const background = surface(bg);
+    return Number(contrast(resolve(fg, theme, background), background).toFixed(2));
+  };
+
+  const YARD_TOKENS = [...Object.values(RAIL_YARD_TOKENS), ...FREIGHT_TOKENS];
+
+  it.each(YARD_TOKENS)("declares %s", (token) => {
+    expect(theme.get(token), `${token} in ${themeName}`).toBeDefined();
+  });
+
+  it.each(FREIGHT_TOKENS)("%s reads as a box on the yard floor", (token) => {
+    // AA_PLACEHOLDER: the same "still reads as a shape" floor the skeleton is held to.
+    expect(
+      ratio(token, "--rc-yard-ground"),
+      `${token} on the ground in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
+  });
+
+  it("keeps the container colours apart from one another", () => {
+    /*
+     * Not a contrast question. Two containers side by side have to read as two colours,
+     * and a ratio cannot see that — violet-200 against violet-300 clears every contrast
+     * floor in this file and is one badly printed box. Euclidean RGB distance is crude
+     * and is the right kind of crude here, and it is what rejected the adjacent-rung
+     * version of the freight ramp.
+     */
+    const colours = FREIGHT_TOKENS.map((token) => surface(token));
+    for (let a = 0; a < colours.length; a++) {
+      for (let b = a + 1; b < colours.length; b++) {
+        const [first, second] = [colours[a]!, colours[b]!];
+        const gap = Math.hypot(
+          first[0] - second[0],
+          first[1] - second[1],
+          first[2] - second[2],
+        );
+        expect(
+          Math.round(gap),
+          `${FREIGHT_TOKENS[a]} vs ${FREIGHT_TOKENS[b]} in ${themeName}`,
+        ).toBeGreaterThanOrEqual(FREIGHT_SEPARATION);
+      }
+    }
+  });
+
+  it("puts the rails on the ballast and the ties under them", () => {
+    const rail = ratio("--rc-yard-rail", "--rc-yard-ballast");
+    const tie = ratio("--rc-yard-tie", "--rc-yard-ballast");
+    expect(rail, `rail in ${themeName}`).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
+    // Ties are texture, not structure: present, and never louder than the rail above.
+    expect(tie, `tie in ${themeName}`).toBeGreaterThanOrEqual(1.2);
+    expect(tie, `tie vs rail in ${themeName}`).toBeLessThan(rail);
+  });
+
+  it("makes the locomotive the focal object on the yard floor", () => {
+    // 1.4.11's non-text floor. It is the one thing on this canvas the eye must find.
+    expect(
+      ratio("--rc-yard-loco", "--rc-yard-ground"),
+      `locomotive in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_LARGE);
+  });
+
+  it("keeps the sheds readable without making them shout", () => {
+    const shed = ratio("--rc-yard-structure", "--rc-yard-ground");
+    expect(shed, `shed in ${themeName}`).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
+    expect(shed, `shed in ${themeName}`).toBeLessThan(AA_NORMAL);
+  });
+
+  it("keeps the sky a gradient rather than a band", () => {
+    expect(
+      ratio("--rc-yard-sky-high", "--rc-yard-sky-low"),
+      `sky in ${themeName}`,
+    ).toBeLessThanOrEqual(2.5);
+  });
+
+  it("holds the skyline back", () => {
+    const skyline = ratio("--rc-yard-skyline", "--rc-yard-sky-low");
+    expect(skyline, `skyline in ${themeName}`).toBeGreaterThanOrEqual(1.1);
+    expect(skyline, `skyline in ${themeName}`).toBeLessThanOrEqual(2.2);
+  });
+
+  it("shows the signal aspects against the sky, and the post against the ground", () => {
+    /*
+     * The lamp is wider than the post it stands on, so what is behind it is the sky —
+     * asserting it against the post was the first version of this and it measured the
+     * one background the lamp barely touches. The post is the thing that has to read
+     * against the ground, and they are two different claims.
+     *
+     * Red against green carries no information a colour-blind visitor would miss: the
+     * lamp is decoration, and every state it reports is already visible as a train
+     * standing still.
+     */
+    for (const aspect of ["--rc-yard-signal-go", "--rc-yard-signal-stop"]) {
+      expect(
+        ratio(aspect, "--rc-yard-sky-low"),
+        `${aspect} in ${themeName}`,
+      ).toBeGreaterThanOrEqual(AA_LARGE);
+    }
+    expect(
+      ratio("--rc-yard-structure-trim", "--rc-yard-ground"),
+      `signal post in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
   });
 });
 

@@ -41,11 +41,33 @@ describe("PageMain", () => {
     for (const element of [
       <PageMain key="a" />,
       <PageMain key="b" width="narrow" layout="centre" />,
+      <PageMain key="c" width="wide" layout="stage" pad="none" />,
     ]) {
       const { container, unmount } = render(element);
       expect(container.firstElementChild).toHaveClass("flex-1");
       unmount();
     }
+  });
+
+  it("positions the stage, so what it holds can be pinned behind", () => {
+    /*
+     * The landing page's canvas is `absolute inset-0` and positions against this. The
+     * recipe lives here rather than in that component for the same reason every other
+     * appearance does — a feature may not write its own layout any more than its own
+     * colours — and `relative` is the half of it that would fail silently, by pinning the
+     * canvas to the viewport instead of to the content column.
+     */
+    const { container } = render(
+      <PageMain width="wide" layout="stage" pad="none">
+        content
+      </PageMain>,
+    );
+    const main = container.firstElementChild;
+
+    expect(main).toHaveClass("relative", "flex", "items-center", "justify-center");
+    expect(main).toHaveClass("max-w-4xl");
+    // `pad="none"` leaves the padding to the column in front, which sets its own.
+    expect(main).not.toHaveClass("p-6");
   });
 });
 

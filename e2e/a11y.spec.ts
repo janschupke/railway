@@ -36,6 +36,24 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `landing/${theme}`);
     });
 
+    test(`the freight yard is decoration, not content (${theme})`, async ({ page }) => {
+      /*
+       * The canvas carries the page's whole picture and none of its meaning, so it must
+       * be absent from the accessibility tree entirely. The way this breaks later is
+       * someone adding a `tabindex` or a `role` to it — the first is an
+       * aria-hidden-focus violation the scan above would catch, the second is not, and
+       * neither is a `role="img"` with a wordless animation behind it.
+       */
+      await page.goto("/");
+      await setTheme(page, theme);
+
+      const canvas = page.locator("main canvas");
+      await expect(canvas).toHaveAttribute("aria-hidden", "true");
+      await expect(canvas).not.toHaveAttribute("role", /.*/);
+      await expect(canvas).not.toHaveAttribute("tabindex", /.*/);
+      await expect(page.getByRole("img")).toHaveCount(0);
+    });
+
     test(`landing page with an error banner has no violations (${theme})`, async ({
       page,
     }) => {

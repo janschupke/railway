@@ -198,3 +198,81 @@ test.describe("popup motion", () => {
     expect(running).toContain("running");
   });
 });
+
+/**
+ * The rail yard on the landing page.
+ *
+ * Its own describe because it needs no session, and because it is the one motion in the
+ * app that `globals.css` cannot reach: the reduced-motion block clamps animations and
+ * transitions, and requestAnimationFrame is neither. Every other suite either forces
+ * reduced motion or does not care, so a loop that ignored the preference entirely would
+ * be caught nowhere but here.
+ */
+test.describe("the freight yard", () => {
+  /** Two frames of the canvas, a beat apart. */
+  const sample = async (page: import("@playwright/test").Page, apartMs: number) => {
+    const canvas = page.locator("main canvas");
+    await expect(canvas).toBeAttached();
+    const read = () =>
+      canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+    const first = await read();
+    await page.waitForTimeout(apartMs);
+    return [first, await read()] as const;
+  };
+
+  test("runs by default", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.goto("/");
+
+    const [first, second] = await sample(page, 400);
+    // Something has to have moved. A blank canvas would also differ from nothing, so the
+    // frames are checked for content as well as for change.
+    expect(first.length).toBeGreaterThan(1_000);
+    expect(second).not.toBe(first);
+  });
+
+  test("holds a single frame under reduced motion", async ({ page }) => {
+    /*
+     * Not "it slowed down" — it must not schedule a frame at all. The simulation is warmed
+     * up before anyone sees it precisely so the one frame a reduced-motion visitor gets is
+     * a yard at work rather than three locomotives asleep in sheds.
+     */
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+
+    const [first, second] = await sample(page, 400);
+    expect(first.length).toBeGreaterThan(1_000);
+    expect(second).toBe(first);
+  });
+
+  test("stops the loop while the tab is hidden", async ({ page }) => {
+    // A backgrounded tab paints nothing; rAF is throttled but not stopped, and a yard
+    // stepping on in a tab nobody is looking at is CPU spent on no one.
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.goto("/");
+    await expect(page.locator("main canvas")).toBeAttached();
+
+    const frames = await page.evaluate(async () => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      let count = 0;
+      const tick = () => {
+        count += 1;
+        handle = requestAnimationFrame(tick);
+      };
+      let handle = requestAnimationFrame(tick);
+      await new Promise((done) => setTimeout(done, 300));
+      cancelAnimationFrame(handle);
+      return count;
+    });
+
+    // The probe's own frames still run; the point is the page did not throw or wedge.
+    expect(frames).toBeGreaterThan(0);
+    const [first, second] = await sample(page, 300);
+    expect(second).toBe(first);
+  });
+});

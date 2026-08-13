@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { managedPrefix } from "@/lib/railway/managed";
+import { RailYard } from "@/features/rail-yard/rail-yard";
 import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
@@ -43,46 +44,62 @@ export default async function LandingPage({
 
   return (
     /*
-     * The column stays narrow while the bars above and below run the full width — a
-     * sign-in form stretched to 56rem reads as an empty page. The theme toggle used to
-     * float here in a bare right-aligned div because there was no bar to put it in;
-     * it lives in the app header now, and the hero has moved into the card so the page
-     * is one object instead of three blocks adrift on the canvas.
+     * A full-height stage the width of the bars above and below, with the freight yard
+     * running behind the card.
+     *
+     * The <main> is wide and the card is not. That split is the point: the page used to
+     * be a 28rem column between two 56rem bars, which read as three unrelated blocks
+     * rather than as one page, while a sign-in form actually stretched to 56rem reads as
+     * an empty page. Widening the region and keeping the reading column narrow is what
+     * lines the page up with its own chrome without touching the form.
      */
-    <PageMain width="narrow" layout="hero">
-      {message && <Banner tone="error">{message}</Banner>}
+    <PageMain width="wide" layout="stage" pad="none">
+      <RailYard />
 
-      <Card className="space-y-4 p-6">
-        {/* The mark is in the header two inches above; repeating it here was noise. */}
-        <Heading level={1} variant="display">
-          {t("app.name")}
-        </Heading>
-        <Text asChild variant="body" tone="muted">
-          <p>{t("landing.intro")}</p>
-        </Text>
+      {/*
+        `relative` puts this in front of the absolutely-positioned canvas without
+        reaching for a z-index token: both elements are positioned, so DOM order decides,
+        and DOM order is already the painting order.
 
-        <SignInButton variant="primary" size="lg" className="w-full" />
+        The error banner belongs inside this column rather than above the stage. Out
+        there it would push the card down off centre; in here the group re-centres around
+        it, which is also why the canvas cannot contribute to layout shift.
+      */}
+      <div className="relative w-full max-w-md space-y-4 p-6">
+        {message && <Banner tone="error">{message}</Banner>}
 
-        <Text asChild variant="caption" tone="subtle">
-          <p className="flex items-start gap-2">
-            <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
-            {/*
-              The note names the mechanism rather than promising more than it can keep.
-              Ownership is the service-name prefix and nothing else — see ADR-5 — so a
-              flat "only destroys what it created" would overstate it. The prefix is
-              interpolated because it is configurable, and rich text rather than
-              concatenation so the <code> span can move when the sentence is translated;
-              the dashboard's prefixNote does the same thing.
-            */}
-            <span>
-              {t.rich("landing.consentNote", {
-                prefix: managedPrefix(),
-                code: (chunks) => <code className="font-mono">{chunks}</code>,
-              })}
-            </span>
-          </p>
-        </Text>
-      </Card>
+        <Card className="space-y-4 p-6">
+          {/* The mark is in the header two inches above; repeating it here was noise. */}
+          <Heading level={1} variant="display">
+            {t("app.name")}
+          </Heading>
+          <Text asChild variant="body" tone="muted">
+            <p>{t("landing.intro")}</p>
+          </Text>
+
+          <SignInButton variant="primary" size="lg" className="w-full" />
+
+          <Text asChild variant="caption" tone="subtle">
+            <p className="flex items-start gap-2">
+              <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
+              {/*
+                The note names the mechanism rather than promising more than it can keep.
+                Ownership is the service-name prefix and nothing else — see ADR-5 — so a
+                flat "only destroys what it created" would overstate it. The prefix is
+                interpolated because it is configurable, and rich text rather than
+                concatenation so the <code> span can move when the sentence is
+                translated; the dashboard's prefixNote does the same thing.
+              */}
+              <span>
+                {t.rich("landing.consentNote", {
+                  prefix: managedPrefix(),
+                  code: (chunks) => <code className="font-mono">{chunks}</code>,
+                })}
+              </span>
+            </p>
+          </Text>
+        </Card>
+      </div>
     </PageMain>
   );
 }

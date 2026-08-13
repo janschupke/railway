@@ -158,3 +158,46 @@ test.describe("the dashboard at phone width", () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * The landing page at phone width, signed out.
+ *
+ * Its own describe because it needs no session and no seeding, and because the yard is
+ * the first thing in this app whose width is decided in JavaScript rather than by
+ * wrapping — the canvas is sized from a ResizeObserver, so it is the one element that
+ * could overflow its column without any CSS saying so.
+ */
+test.describe("the landing page at phone width", () => {
+  test("never scrolls sideways", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("main canvas")).toBeAttached();
+
+    const overflow = await page.evaluate(() => {
+      const root = document.scrollingElement!;
+      return root.scrollWidth - root.clientWidth;
+    });
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  test("keeps the canvas inside the content column", async ({ page }) => {
+    // Same width as the chrome above and below it, which is the whole layout claim.
+    await page.goto("/");
+    const canvas = (await page.locator("main canvas").boundingBox())!;
+    const main = (await page.getByRole("main").boundingBox())!;
+
+    expect(canvas.x).toBeGreaterThanOrEqual(main.x - 1);
+    expect(canvas.x + canvas.width).toBeLessThanOrEqual(main.x + main.width + 1);
+  });
+
+  test("keeps the sign-in card usable over the scene", async ({ page }) => {
+    await page.goto("/");
+
+    const signIn = page.getByRole("link", { name: /sign in with railway/i });
+    await expect(signIn).toBeInViewport();
+    // The canvas is pointer-events:none, so the control under it is still tappable.
+    await expect(signIn).toBeEnabled();
+
+    const box = (await signIn.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(28);
+  });
+});

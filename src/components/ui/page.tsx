@@ -29,8 +29,18 @@ const column = cva("mx-auto w-full", {
       hero: "flex flex-col justify-center gap-4",
       /** A horizontal bar. */
       bar: "flex items-center justify-between gap-4",
+      /**
+       * A full-height stage: something pinned behind, one centred column in front.
+       *
+       * `relative` is what the landing page's canvas positions against, and it belongs
+       * here rather than in that component for the same reason every other appearance
+       * does — a feature may not write its own layout recipe any more than its own
+       * colours. The column in front carries its own width and padding, which is why
+       * this recipe pairs with `pad="none"`.
+       */
+      stage: "relative flex items-center justify-center",
     },
-    pad: { page: "p-6", bar: "px-6 py-3" },
+    pad: { page: "p-6", bar: "px-6 py-3", none: "" },
   },
   defaultVariants: { width: "wide", layout: "stack", pad: "page" },
 });
