@@ -33,6 +33,19 @@ describe("ownership", () => {
     expect(isManagedName("my-spun-thing")).toBe(false);
   });
 
+  it("claims any prefixed name, whoever created it", () => {
+    /*
+     * The documented limit of the marker, pinned so it cannot be "fixed" quietly.
+     *
+     * The prefix is cosmetic: a service renamed to `spun-…` in Railway's own dashboard
+     * is indistinguishable from one this app created, and becomes destroyable here.
+     * ADR-5 accepts that — the blast radius is bounded by the scopes the user granted,
+     * and the marker is visible in Railway's UI rather than hidden in metadata. What
+     * would not be acceptable is the copy or a future reader believing otherwise.
+     */
+    expect(isManagedName("spun-someone-elses-database")).toBe(true);
+  });
+
   it("strips the prefix for display, and leaves unmanaged names alone", () => {
     expect(stripPrefix("spun-cache")).toBe("cache");
     expect(stripPrefix("postgres")).toBe("postgres");

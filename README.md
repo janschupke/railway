@@ -1,4 +1,4 @@
-# Railway Homework
+# Railway Freight Loader
 
 Spin containers up and down in **your own** Railway projects, from a browser.
 
@@ -156,6 +156,15 @@ visible in Railway's own dashboard rather than hidden.
 Services created elsewhere are listed for context but render as _Not managed here_ with
 no destroy control — and `spinDown` re-derives ownership **server-side** before deleting,
 so a forged request fails even though the user's own token would happily perform it.
+
+The marker is cosmetic, so the claim has limits and the copy states them: a service
+renamed to `spun-…` in Railway's dashboard is indistinguishable from one this app
+created. `managed.test.ts` pins that as deliberate rather than leaving it to be
+"fixed" silently.
+
+`destroyContainer` itself checks nothing — the guard lives in its one caller, which is a
+property of the call graph that no type defends. `destroy-callsites.test.ts` asserts it:
+one caller, and the ownership check above the delete inside it.
 
 ### ADR-6 — Docker images only; GitHub sources are a stated limitation
 

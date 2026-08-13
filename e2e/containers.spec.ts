@@ -88,8 +88,17 @@ test.describe("container lifecycle", () => {
     await expect(row(page, "cache")).toHaveCount(0);
   });
 
-  test("refuses to destroy a service it did not create", async ({ page }) => {
-    // The fixture seeds `postgres`, which carries no ownership prefix.
+  test("offers no destroy control for a service it did not create", async ({
+    page,
+  }) => {
+    /*
+     * The UI half of the ownership rule, and only that half — this asserts the control
+     * is absent, not that the server would refuse a request made without it. The
+     * refusal itself is proven in actions.integration.test.ts, which asserts zero
+     * ServiceDelete calls for a forged serviceId.
+     *
+     * The fixture seeds `postgres`, which carries no ownership prefix.
+     */
     const postgres = row(page, "postgres");
     await expect(postgres).toBeVisible();
 

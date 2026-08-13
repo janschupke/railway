@@ -348,6 +348,33 @@ describe("spinDown", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("refuses an owned service posted against another environment", async () => {
+    /*
+     * Ownership is derived per environment — a service with no instance in the one
+     * submitted does not appear in the list at all — while `serviceDelete` removes the
+     * service from every environment at once. The check is therefore narrower than the
+     * effect, and this is the case where that shows: `svc_managed` is genuinely ours,
+     * but posted against `e2` it is unknown, and the action refuses rather than
+     * reaching for the wider delete.
+     */
+    let deleteCalls = 0;
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+      api.mutation("ServiceDelete", () => {
+        deleteCalls += 1;
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const result = await spinDown(
+      null,
+      form({ projectId: "p1", environmentId: "e2", serviceId: "svc_managed" }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "That container no longer exists." });
+    expect(deleteCalls).toBe(0);
+  });
+
   it("rejects a request with no service reference", async () => {
     const result = await spinDown(null, form({ projectId: "p1" }));
     expect(result).toEqual({ ok: false, error: "Missing container reference." });

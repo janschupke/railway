@@ -28,7 +28,7 @@ test.describe("the app shell", () => {
       await expect(onlyVisible(page.getByRole("main"))).toHaveCount(1);
       await expect(onlyVisible(page.getByRole("contentinfo"))).toHaveCount(1);
       await expect(onlyVisible(page.getByRole("banner"))).toContainText(
-        "Railway Homework",
+        "Railway Freight Loader",
       );
     });
 
@@ -59,6 +59,23 @@ test.describe("the app shell", () => {
     await expect(onlyVisible(page.getByRole("banner"))).toHaveCount(1);
     await expect(onlyVisible(page.getByRole("banner"))).toContainText("Ada Lovelace");
     await expect(page.getByRole("button", { name: /sign out/i })).toHaveCount(1);
+  });
+
+  test("the brand takes a signed-in visitor home from a 404", async ({ page }) => {
+    /*
+     * The reason the mark is a link at all. `/` is the href in both session states —
+     * the landing page redirects to the dashboard when a session exists — so this
+     * asserts the redirect too, not just the anchor.
+     */
+    await signIn(page);
+    await page.goto("/definitely-not-a-route");
+
+    await onlyVisible(
+      page.getByRole("banner").getByRole("link", { name: /railway freight loader/i }),
+    ).click();
+
+    await page.waitForURL("**/dashboard**");
+    await expect(onlyVisible(page.getByRole("banner"))).toContainText("Ada Lovelace");
   });
 
   test("a signed-in visitor's 404 points back at the dashboard", async ({ page }) => {

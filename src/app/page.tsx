@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
+import { managedPrefix } from "@/lib/railway/managed";
 import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
@@ -64,7 +65,20 @@ export default async function LandingPage({
         <Text asChild variant="caption" tone="subtle">
           <p className="flex items-start gap-2">
             <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
-            <span>{t("landing.consentNote")}</span>
+            {/*
+              The note names the mechanism rather than promising more than it can keep.
+              Ownership is the service-name prefix and nothing else — see ADR-5 — so a
+              flat "only destroys what it created" would overstate it. The prefix is
+              interpolated because it is configurable, and rich text rather than
+              concatenation so the <code> span can move when the sentence is translated;
+              the dashboard's prefixNote does the same thing.
+            */}
+            <span>
+              {t.rich("landing.consentNote", {
+                prefix: managedPrefix(),
+                code: (chunks) => <code className="font-mono">{chunks}</code>,
+              })}
+            </span>
           </p>
         </Text>
       </Card>

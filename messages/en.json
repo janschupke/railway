@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Railway Homework",
+    "name": "Railway Freight Loader",
     "description": "Spin containers up and down on Railway."
   },
   "common": {
@@ -26,7 +26,7 @@
   },
   "landing": {
     "intro": "Spin containers up and down in your own Railway projects. Sign in with Railway and pick which projects this app may touch.",
-    "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy containers it created itself."
+    "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy the services it created — the ones it names <code>{prefix}…</code>. Everything else in your projects is read-only here."
   },
   "notFound": {
     "title": "That page does not exist",

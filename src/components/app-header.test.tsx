@@ -43,6 +43,24 @@ describe("AppHeader", () => {
     ).toBeInTheDocument();
   });
 
+  it("takes the brand home from either session state", async () => {
+    /*
+     * The top-left mark is what a visitor reaches for on the 404 and on the dashboard's
+     * error boundary, which are the two screens with nothing else to click. One href
+     * serves both states: `/` redirects to the dashboard when a session exists, and the
+     * proxy redirects the dashboard back to `/` when one does not.
+     */
+    for (const user of [null, { name: "Ada Lovelace" }]) {
+      const { unmount } = render(await AppHeader({ user }));
+
+      expect(
+        screen.getByRole("link", { name: /railway freight loader/i }),
+      ).toHaveAttribute("href", "/");
+
+      unmount();
+    }
+  });
+
   it("sizes the identity and the sign-out label to the same step", async () => {
     // The reported complaint: these two sit side by side and disagreed, because
     // neither had chosen a size — they had each reached for a different Tailwind step.

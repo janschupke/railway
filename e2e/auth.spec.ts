@@ -5,7 +5,9 @@ test.describe("authentication", () => {
     page,
   }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Railway Homework" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Railway Freight Loader" }),
+    ).toBeVisible();
 
     await page.getByRole("link", { name: /sign in with railway/i }).click();
 

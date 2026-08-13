@@ -23,7 +23,7 @@ test.describe("keyboard operation", () => {
   test("signs in without a mouse", async ({ page }) => {
     await page.goto("/");
 
-    await page.keyboard.press("Tab"); // theme toggle
+    await page.keyboard.press("Tab"); // the brand link, which the header puts first
     await page.getByRole("link", { name: /sign in with railway/i }).focus();
     await page.keyboard.press("Enter");
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Container } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { SignOutButton } from "./sign-out-button";
@@ -40,17 +41,35 @@ export async function AppHeader({
   return (
     /*
      * A <header>, not a <nav>. The footer already has an unnamed navigation landmark,
-     * and a second one would be ambiguous to a screen-reader's landmark list — and this
-     * bar holds controls rather than links anyway. The brand stays a <span> for the same
-     * class of reason: making it a link inserts a focus stop ahead of the theme toggle
-     * for a destination that is one press of Home away.
+     * and a second one would be ambiguous to a screen-reader's landmark list — one link
+     * in a bar of controls does not earn one.
+     *
+     * The brand is that link. It costs a focus stop ahead of the theme toggle, which is
+     * worth paying: the routes that most need a way out — the 404 and the dashboard's
+     * error boundary — are exactly the ones where the top-left mark is the only thing a
+     * visitor already knows how to click. `/` is the right target signed in or out,
+     * because the landing page redirects to the dashboard when a session exists and the
+     * proxy sends the dashboard back here when one does not.
+     *
+     * `focus-ring` but not `link`: an underline on hover would make the wordmark read as
+     * body copy rather than as the app's mark.
+     *
+     * `next/link`, unlike every other anchor here, because those all point off-site. This
+     * one is an internal route, and a plain <a> would throw away the whole client render
+     * to move between two pages of the same app. It is not prefetched, though: `/`
+     * redirects for a signed-in visitor, so prefetching it buys a discarded render of a
+     * page nobody will see.
      */
     <header className="border-border bg-surface border-b">
       <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
-        <span className="flex items-center gap-2">
+        <Link
+          href="/"
+          prefetch={false}
+          className="focus-ring flex items-center gap-2 rounded-sm"
+        >
           <Container aria-hidden className="text-accent size-4" />
           <Text variant="title">{t("app.name")}</Text>
-        </span>
+        </Link>
 
         <div className="flex items-center gap-3">
           {/*
