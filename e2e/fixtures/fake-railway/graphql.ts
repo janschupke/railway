@@ -37,15 +37,6 @@ export function execute(
   store: Store,
 ): Result {
   switch (operationName) {
-    case "Viewer": {
-      if (store.faults.rejectViewer) return notAuthorized(["me"]);
-      return {
-        data: {
-          me: { id: "user_e2e", name: "Ada Lovelace", email: "ada@example.com" },
-        },
-      };
-    }
-
     /*
      * The project list is three independent documents. Each answers for itself, which
      * is the whole point: one source being refused must cost only that source.
@@ -63,7 +54,17 @@ export function execute(
             }))
           : [];
 
-      return { data: { me: { id: "user_e2e", projects: edges(projects) } } };
+      // Identity rides on this document; there is no separate Viewer query.
+      return {
+        data: {
+          me: {
+            id: "user_e2e",
+            name: "Ada Lovelace",
+            email: "ada@example.com",
+            projects: edges(projects),
+          },
+        },
+      };
     }
 
     case "ProjectsWorkspace": {

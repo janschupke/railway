@@ -102,7 +102,6 @@ export type Faults = {
    */
   rejectWorkspaces: boolean;
   rejectPersonal: boolean;
-  rejectViewer: boolean;
   /**
    * Hold every GraphQL response for this many ms.
    *
@@ -124,7 +123,6 @@ const DEFAULT_FAULTS: Faults = {
   variablesFail: false,
   rejectWorkspaces: false,
   rejectPersonal: false,
-  rejectViewer: false,
   slowMs: 0,
 };
 

@@ -102,7 +102,6 @@ test.describe("the empty project list", () => {
 test.describe("a project list that could not be read at all", () => {
   test.beforeEach(async ({ page }) => {
     await injectFaults(page, {
-      rejectViewer: true,
       rejectPersonal: true,
       rejectWorkspaces: true,
     });

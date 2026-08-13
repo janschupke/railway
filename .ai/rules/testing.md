@@ -92,7 +92,7 @@ against it, so PKCE, token exchange and refresh rotation are all genuinely exerc
 - Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
   and supports `rateLimit`, `unauthorized`, `refreshFails`, `accessTokenTtl`,
   `deploymentsFail`, `logPhase`, `variablesFail`, `projectsSource`, `rejectWorkspaces`,
-  `rejectPersonal`, `rejectViewer` and `slowMs`.
+  `rejectPersonal` and `slowMs`.
 - `fixtureStats(page)` exposes grant counters, because refresh happens server-side and
   Playwright cannot observe it with `waitForRequest`.
 

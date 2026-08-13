@@ -29,17 +29,19 @@ const node = (id: string, name: string) => ({
 });
 
 describe("listProjects", () => {
-  /** The three documents the project list is assembled from, with usable defaults. */
+  /** The two documents the project list is assembled from, with usable defaults. */
   const sources = ({
     viewer = { id: "u1", name: "Ada", email: "ada@example.com" },
     personal = [] as ReturnType<typeof node>[],
     workspaces = [] as Array<{ id: string; name: string; projects: unknown[] }>,
   } = {}) => [
-    api.query("Viewer", () => HttpResponse.json({ data: { me: viewer } })),
     api.query("ProjectsPersonal", () =>
       HttpResponse.json({
         data: {
-          me: { id: "u1", projects: { edges: personal.map((n) => ({ node: n })) } },
+          me: {
+            ...viewer,
+            projects: { edges: personal.map((n) => ({ node: n })) },
+          },
         },
       }),
     ),
@@ -145,7 +147,8 @@ describe("listProjects", () => {
      * dashboard showed "Railway rejected the operation" on every single load.
      */
     server.use(
-      ...sources({ personal: [node("p1", "Demo")] }).slice(0, 2),
+      // Personal only — the workspace handler is the refusal below, not the default.
+      ...sources({ personal: [node("p1", "Demo")] }).slice(0, 1),
       api.query("ProjectsWorkspace", () =>
         HttpResponse.json(notAuthorized(["me", "workspaces"])),
       ),
@@ -161,9 +164,40 @@ describe("listProjects", () => {
     expect(failures[0]?.missingScope).toBe("workspace:viewer");
   });
 
+  it("takes identity from the personal document rather than a request of its own", async () => {
+    // The whole reason the separate Viewer query could go: these three scalars were one
+    // selection away from a document already being issued.
+    server.use(...sources({ personal: [node("p1", "Demo")] }));
+
+    const { viewer } = await listProjects(TOKEN);
+
+    expect(viewer).toEqual({ id: "u1", name: "Ada", email: "ada@example.com" });
+  });
+
+  it("degrades to a nameless viewer when only the workspace source answers", async () => {
+    /*
+     * name and email now ride on the personal document, so a token refused it loses
+     * them. That is a nameless header, not an empty dashboard: both fields are optional
+     * on ViewerNode and the workspace source still carries the id.
+     */
+    server.use(
+      api.query("ProjectsPersonal", () =>
+        HttpResponse.json(notAuthorized(["me", "projects"])),
+      ),
+      ...sources({
+        workspaces: [{ id: "w1", name: "Acme", projects: [node("p2", "Team")] }],
+      }).slice(1),
+    );
+
+    const { viewer, projects } = await listProjects(TOKEN);
+
+    expect(viewer.id).toBe("u1");
+    expect(viewer.name).toBeUndefined();
+    expect(projects.map((p) => p.id)).toEqual(["p2"]);
+  });
+
   it("fails with the authorization cause when every source is refused", async () => {
     server.use(
-      api.query("Viewer", () => HttpResponse.json(notAuthorized(["me"]))),
       api.query("ProjectsPersonal", () =>
         HttpResponse.json(notAuthorized(["me", "projects"])),
       ),

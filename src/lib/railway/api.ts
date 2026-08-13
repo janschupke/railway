@@ -15,7 +15,6 @@ import {
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
   VARIABLE_COLLECTION_UPSERT_MUTATION,
-  VIEWER_QUERY,
 } from "./operations";
 import {
   nodes,
@@ -81,15 +80,7 @@ export async function listProjects(
     }
   };
 
-  const [viewerResult, ...sources] = await Promise.all([
-    gql<{ me: ViewerNode }>(
-      VIEWER_QUERY,
-      {},
-      { accessToken, operationName: "Viewer", signal },
-    ).catch((error: unknown) => {
-      if (error instanceof RailwayApiError) return null;
-      throw error;
-    }),
+  const sources = await Promise.all([
     read("personal", PROJECTS_PERSONAL_QUERY, "ProjectsPersonal"),
     read("workspace", PROJECTS_WORKSPACE_QUERY, "ProjectsWorkspace"),
   ]);
@@ -130,15 +121,33 @@ export async function listProjects(
     );
   }
 
+  /*
+   * Identity comes from whichever source answered, preferring the personal one because
+   * that is the document carrying `name` and `email`.
+   *
+   * `answered[0]` is narrowed rather than asserted. It cannot be undefined — the branch
+   * above returns when the list is empty — but that was expressed only by the throw
+   * four lines up, and noUncheckedIndexedAccess exists precisely so the type system
+   * does not have to take that on trust. This was the one `!` in src/, doubled.
+   */
+  const personal = answered.find((s) => s.name === "personal")?.viewer;
+  const workspace = answered.find((s) => s.name === "workspace")?.viewer;
+  const identity = personal ?? workspace;
+  if (!identity) {
+    throw new RailwayApiError("Railway returned no viewer", {
+      kind: "graphql",
+      operation: "ProjectsPersonal",
+    });
+  }
+
   // De-duplication is toProjects' job, so it is fed one merged viewer rather than being
   // called per source and re-merged here.
   const merged: ViewerNode = {
-    id: viewerResult?.me.id ?? answered[0]!.viewer!.id,
-    ...(viewerResult?.me.name ? { name: viewerResult.me.name } : {}),
-    ...(viewerResult?.me.email ? { email: viewerResult.me.email } : {}),
-    projects: answered.find((s) => s.name === "personal")?.viewer?.projects ?? null,
-    workspaces:
-      answered.find((s) => s.name === "workspace")?.viewer?.workspaces ?? null,
+    id: identity.id,
+    ...(identity.name ? { name: identity.name } : {}),
+    ...(identity.email ? { email: identity.email } : {}),
+    projects: personal?.projects ?? null,
+    workspaces: workspace?.workspaces ?? null,
   };
 
   return {

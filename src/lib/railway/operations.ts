@@ -38,22 +38,24 @@ const PROJECT_FIELDS = /* GraphQL */ `
  * run that before editing these, rather than reasoning about which one "should" work.
  */
 
-/** Identity only. Cheap, and it answers "is this token usable at all?" on its own. */
-export const VIEWER_QUERY = /* GraphQL */ `
-  query Viewer {
-    me {
-      id
-      name
-      email
-    }
-  }
-`;
-
+/**
+ * The personal project source, which also carries identity.
+ *
+ * `name` and `email` used to come from a third document of their own, issued in
+ * parallel purely to read `me { id name email }` — fields this query was already one
+ * selection away from. Railway's rate limit is the binding constraint on this app
+ * (1000/hour on Hobby), so a whole request per dashboard load for three scalars is the
+ * expensive kind of tidy. A token refused these two fields degrades to a nameless
+ * header rather than an empty dashboard: they are optional on ViewerNode, and gqlPartial
+ * keeps whatever `me` did return.
+ */
 export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
   ${PROJECT_FIELDS}
   query ProjectsPersonal {
     me {
       id
+      name
+      email
       projects {
         edges {
           node {

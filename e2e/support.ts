@@ -27,7 +27,6 @@ export async function injectFaults(
     projectsSource: ProjectsSource;
     rejectWorkspaces: boolean;
     rejectPersonal: boolean;
-    rejectViewer: boolean;
     slowMs: number;
   }>,
 ) {
