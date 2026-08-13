@@ -180,16 +180,20 @@ const eslintConfig = defineConfig([
 
   {
     files: ["e2e/**/*.ts", "scripts/**/*.ts"],
-    rules: {
-      // Fixtures and CLI scripts legitimately log and use Node globals.
-      "no-console": "off",
-      /*
-       * No React here. Playwright's fixture signature is `async ({ page }, use)`,
-       * and the rule reads that `use(...)` call as React 19's `use` hook being
-       * invoked from a function named `page`.
-       */
-      "react-hooks/rules-of-hooks": "off",
-    },
+    // Fixtures and CLI scripts legitimately log and use Node globals.
+    rules: { "no-console": "off" },
+  },
+
+  {
+    /*
+     * e2e only. The exemption exists for Playwright's fixture signature — `async ({
+     * page }, use)`, where the rule reads that `use(...)` call as React 19's `use` hook
+     * being invoked from a function named `page` — and no script has one. It used to
+     * cover scripts/ as well, which turned off a real rule across five files for a
+     * reason none of them could ever hit.
+     */
+    files: ["e2e/**/*.ts"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
   },
 
   /*
