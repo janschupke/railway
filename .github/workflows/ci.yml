@@ -11,6 +11,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Declared at workflow level rather than per job, so a job added later inherits the floor
+# instead of silently taking the repository default. Nothing here writes: no job comments on
+# a PR, pushes a tag or uploads a release. A check that needs a write scope belongs in its
+# own workflow, where the wider grant is visible, rather than widening this one.
+permissions:
+  contents: read
+
 env:
   # Placeholders. The build and the E2E fixture must not need real credentials —
   # if the env schema starts demanding them, that is a legitimate CI failure.
@@ -23,6 +30,10 @@ jobs:
   quality:
     name: Format, lint, types, coverage
     runs-on: ubuntu-latest
+    # Every job carries one. The default is six hours, and the jobs that can wedge rather
+    # than fail — anything driving a browser at a stream that never closes — would sit
+    # there for all of it while `required` waits on them.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -72,6 +83,7 @@ jobs:
   build:
     name: Production build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -90,6 +102,8 @@ jobs:
   e2e:
     name: End-to-end and accessibility
     runs-on: ubuntu-latest
+    # workers:1 by design, so this is the longest job and the ceiling is generous.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -99,13 +113,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Only chromium is configured, so only chromium is downloaded.
+      # Both Playwright projects run on the Chromium engine, so only chromium is downloaded.
+      #
+      # The install stays unconditional. It is idempotent — it skips a browser already in
+      # the cache directory — and it has to run regardless for the system libraries, which
+      # `path` does not carry. It is also what makes `restore-keys` safe: a partial restore
+      # can hand back a browser build that does not match the installed Playwright, and the
+      # install is the step that notices and corrects it.
       - name: Cache Playwright browsers
         uses: actions/cache@v4
-        id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -128,6 +148,9 @@ jobs:
   lighthouse:
     name: Lighthouse (performance, a11y, budgets)
     runs-on: ubuntu-latest
+    # The job most able to hang rather than fail: it drives a real browser at /dashboard,
+    # whose SSE stream never closes, behind a readiness loop that waits up to two minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -143,6 +166,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -151,13 +175,22 @@ jobs:
 
       # Backgrounded because both servers must stay up for the whole Lighthouse run;
       # the script exits only on failure, and prints "ready" once both answer.
+      #
+      # The loop used to fall through on exhaustion, so a server that never answered left
+      # this step green and surfaced two steps later as lh-auth failing to find a sign-in
+      # link — which reads as an auth defect rather than a server that never started.
       - name: Start app and fake Railway
         run: |
           pnpm serve:e2e &
+          ready=0
           for _ in $(seq 1 60); do
-            curl -sf http://localhost:3100/api/health > /dev/null && break
+            if curl -sf http://localhost:3100/api/health > /dev/null; then ready=1; break; fi
             sleep 2
           done
+          if [ "$ready" != 1 ]; then
+            echo "The app did not answer /api/health within 120s."
+            exit 1
+          fi
 
       # numberOfRuns is 1 in lighthouserc.cjs — one Chrome, never a pool.
       - name: Lighthouse CI
@@ -173,6 +206,7 @@ jobs:
   schema:
     name: Railway schema drift
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -192,11 +226,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: [quality, build, e2e, lighthouse, schema]
     if: always()
+    timeout-minutes: 5
     steps:
-      - name: Fail if any dependency failed
+      # Two assertions, because either alone is passable by a job that never ran.
+      #
+      # This used to fail only on 'failure' or 'cancelled', so a job skipped by a future
+      # `if:` condition — or dropped from `needs` in a bad merge — left branch protection
+      # green with nothing behind it. Requiring 'success' to be present catches the empty
+      # case; rejecting 'skipped' catches the partly-empty one.
+      - name: Fail unless every check succeeded
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
-            echo "One or more checks failed."
+          if [ "${{ contains(needs.*.result, 'success') }}" != "true" ]; then
+            echo "No check reported success."
+            exit 1
+          fi
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
+            echo "One or more checks failed, was cancelled, or was skipped."
             exit 1
           fi
           echo "All checks passed."
