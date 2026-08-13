@@ -23,10 +23,22 @@ The component project loads `setup-intl` as well as `setup-dom`, which is what l
 Server Component be rendered by awaiting it. The two are additive: `setup-dom` mocks
 `next-intl` for client components, `setup-intl` mocks `next-intl/server`.
 
-## Coverage is 80% on all four metrics, and the exclude list is not a lever
+## Coverage is a ratchet, not a floor, and the exclude list is not a lever
 
-`include: ["src/**"]`, thresholds 80 for lines, branches, functions and statements. A miss
-fails `pnpm test:coverage`, which fails `pnpm check` and CI.
+`include: ["src/**"]`. Thresholds sit **just under the measured figures**, not at a round
+number below them, and there are per-directory floors for `src/lib/**` and `src/hooks/**` as
+well as the global four. A miss fails `pnpm test:coverage`, which fails `pnpm check` and CI.
+
+Both halves of that matter, and both were once wrong. The thresholds were 80 against an
+actual of ~94, so a change could delete a third of the branch coverage and still pass —
+the gate stated an intention rather than defending one. And a global aggregate cannot see
+one file at zero: five modules had no test at all while the headline read 94, including
+`lib/railway/subscribe.ts`, the upstream WebSocket. `perFile: true` is the obvious answer
+and the wrong one — it fails on legitimately thin modules like `i18n/config.ts`, and its
+only remedy is widening the exclude list, which is precisely what this section forbids.
+
+When the real number rises, raise these. Lowering one is the same class of edit as raising
+a bundle budget: permitted, and argued for in the commit that does it.
 
 Excluded: `src/test/**`, `*.d.ts`, `*.test.*`, and the framework shells — `layout.tsx`,
 `page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`. Those are React Server Components

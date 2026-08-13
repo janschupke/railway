@@ -25,7 +25,7 @@ the relevant rule before touching auth, the design tokens, the log stream, or a 
 - [Architecture](.ai/rules/architecture.md) — RSC reads / Server Actions write / one SSE route, `src/proxy.ts`, the managed-name ownership rule, import boundaries, `src/lib/constants.ts`, `src/env.ts`
 - [Design system](.ai/rules/design-system.md) — two token layers (`--rc-*`), the seven-step type scale defined in four files, and the four appearance bans on feature components
 - [Internationalisation](.ai/rules/i18n.md) — every string in `messages/en.json`, type-checked keys, `MessageKey` for code that cannot translate itself
-- [Testing](.ai/rules/testing.md) — four tiers, colocated, 80% coverage gate, asserted log records, and the fake Railway with its fault injection
+- [Testing](.ai/rules/testing.md) — four tiers, colocated, a ratcheted coverage gate, asserted log records, and the fake Railway with its fault injection
 - [Security](.ai/rules/security.md) — the token never leaves the server, no upstream text in the browser, one writer per header, `pnpm audit --prod` gates CI
 - [Errors and logging](.ai/rules/errors-and-logging.md) — `ActionResult`, `reportError` and the incident id, stable event names, and what is never logged
 - [Accessibility](.ai/rules/accessibility.md) — strict `jsx-a11y`, axe in both themes, the token contrast test, and LHCI at `minScore: 1`
@@ -50,7 +50,7 @@ Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 - **`src/components/**` and `src/hooks/**` may not import** `lib/auth/session|refresh|server` or `lib/logger` / `lib/log/*`. Pass what the component needs as a prop.
 - **Every tuned number goes in `src/lib/constants.ts`**, in its group, with a rationale comment.
 - **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input.
-- **Coverage is 80% on all four metrics and knip findings fail CI.** Widening an exclude list is not the fix.
+- **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.
 - **Never create a branch**; commit subjects are sentence-case prose, and bodies explain the defect and the rejected alternatives.

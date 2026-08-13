@@ -77,11 +77,39 @@ export default defineConfig({
         "src/app/**/error.tsx",
         "src/app/**/not-found.tsx",
       ],
+      /*
+       * A ratchet rather than a floor.
+       *
+       * These were 80 against an actual of ~94, which is eight to fourteen points of
+       * slack — a change could delete a third of the branch coverage and still pass, so
+       * the gate documented an intention rather than defending one. Set just under the
+       * measured figures instead, which is what makes a drop a failure rather than a
+       * statistic.
+       *
+       * Raise these when the real number rises. Lowering one is the same class of edit
+       * as raising a bundle budget: allowed, and it should be argued for in the commit.
+       */
       thresholds: {
-        lines: 80,
-        branches: 80,
-        functions: 80,
-        statements: 80,
+        lines: 96,
+        branches: 89,
+        functions: 95,
+        statements: 95,
+
+        /*
+         * Per-directory, because a global aggregate cannot see a single file at zero.
+         *
+         * Five modules sat at 0% while the headline number read 94 — including
+         * lib/railway/subscribe.ts, the upstream WebSocket, which security.md singles
+         * out precisely because a `ws` failure carries the resolved upstream address.
+         * The aggregate is not the wrong metric; it is the wrong resolution.
+         *
+         * Rejected: `perFile: true`. It fails on legitimately thin modules — i18n/config.ts
+         * is one exported constant — and its only available remedy is widening the
+         * exclude list, which testing.md forbids for exactly this reason. Directory
+         * floors put the pressure where the logic is without inviting that.
+         */
+        "src/lib/**": { lines: 95, branches: 89, functions: 95, statements: 94 },
+        "src/hooks/**": { lines: 95, branches: 87, functions: 95, statements: 95 },
       },
     },
   },
