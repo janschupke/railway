@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetEnv } from "@/env";
-import { logRecords } from "@/test/log-capture";
+import { logRecords, rawLogLines } from "@/test/log-capture";
 import {
   CONSENT_COOKIE,
   PKCE_COOKIE,
@@ -179,6 +179,34 @@ describe("POST /api/auth/logout", () => {
 
   it("refuses a request that identifies itself with neither header", async () => {
     expect((await logout(request("/api/auth/logout"))).status).toBe(403);
+  });
+
+  it("records the rejection without echoing what the caller sent", async () => {
+    /*
+     * Every caller that reaches this line is by definition not a browser, so both
+     * headers are whatever curl felt like sending — and they were being written straight
+     * into the record. The diagnostic content is "was there an Origin, and did the
+     * fetch metadata claim anything recognisable", which survives as a boolean and a
+     * closed set.
+     */
+    await logout(
+      request("/api/auth/logout", {
+        origin: "https://ORIGIN-CANARY.test",
+        "sec-fetch-site": "SITE-CANARY",
+      }),
+    );
+
+    const everythingLogged = rawLogLines().join("");
+    expect(everythingLogged).not.toContain("ORIGIN-CANARY");
+    expect(everythingLogged).not.toContain("SITE-CANARY");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "auth.logout.rejected",
+        reason: "cross_origin",
+        origin_present: true,
+        sec_fetch_site: "other",
+      }),
+    );
   });
 });
 

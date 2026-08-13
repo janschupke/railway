@@ -108,6 +108,34 @@ describe("GET /api/auth/callback", () => {
   it("passes a declined consent back to the landing page", async () => {
     const response = await GET(request("?error=access_denied&state=st"));
     expect(errorParam(response)).toBe("access_denied");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({ msg: "auth.callback.failed", reason: "access_denied" }),
+    );
+  });
+
+  it("does not write an invented error code into the log", async () => {
+    /*
+     * `?error=` is a query parameter anyone can construct, and it was going into
+     * `reason` verbatim — the field an operator groups on. That is the same unbounded,
+     * attacker-chosen cardinality the rejected deploymentId is deliberately kept out of,
+     * and here it also lands in a record retained past the request.
+     *
+     * The canary covers the log as bytes, not just the parsed record: the point is that
+     * the string never appears anywhere in the line, however it got serialised.
+     */
+    const invented = `not_a_real_code_${"X".repeat(200)}`;
+    const response = await GET(request(`?error=${invented}&state=st`));
+
+    expect(rawLogLines().join("")).not.toContain("not_a_real_code");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "auth.callback.failed",
+        reason: "provider_error",
+      }),
+    );
+    // The user still lands somewhere that explains itself; the page renders any code it
+    // does not know as the same sentence, so classifying costs nothing on screen.
+    expect(errorParam(response)).toBe("provider_error");
   });
 
   it("reports a failed token exchange without leaking the reason to the browser", async () => {

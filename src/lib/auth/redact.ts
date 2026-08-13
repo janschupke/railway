@@ -30,6 +30,39 @@ function oauthDetail(error: object): string {
   return parts.join(" · ");
 }
 
+/**
+ * Error codes an authorization server may put in `?error=`.
+ *
+ * RFC 6749 §4.1.2.1 and OIDC Core §3.1.2.6. Closed on purpose: the value arrives on a URL
+ * anyone can construct, so it is attacker-controlled and unbounded, and it was being
+ * written verbatim into a field an operator greps. Everything outside this list becomes
+ * `provider_error`, which costs nothing — the landing page already renders any code it
+ * does not recognise as the same generic sentence.
+ */
+const PROVIDER_ERROR_CODES = new Set([
+  "access_denied",
+  "invalid_request",
+  "unauthorized_client",
+  "unsupported_response_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+  "interaction_required",
+  "login_required",
+  "account_selection_required",
+  "consent_required",
+  "invalid_request_uri",
+  "invalid_request_object",
+  "request_not_supported",
+  "request_uri_not_supported",
+  "registration_not_supported",
+]);
+
+/** The provider's `?error=`, reduced to a value with bounded cardinality. */
+export function classifyProviderError(value: string): string {
+  return PROVIDER_ERROR_CODES.has(value) ? value : "provider_error";
+}
+
 export function describeOidcFailure(error: unknown): string {
   if (typeof error !== "object" || error === null) {
     // A thrown primitive: its own string form is the whole value, so it is safe.

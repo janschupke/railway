@@ -2,7 +2,7 @@ import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
 import { callbackUrl, env } from "@/env";
 import { oidcConfig } from "@/lib/auth/oidc";
-import { describeOidcFailure } from "@/lib/auth/redact";
+import { classifyProviderError, describeOidcFailure } from "@/lib/auth/redact";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
@@ -72,9 +72,17 @@ async function complete(request: NextRequest) {
     return fail(request, "missing_pkce_state");
   }
 
-  // The user declined consent, or Railway rejected the request.
+  /*
+   * The user declined consent, or Railway rejected the request.
+   *
+   * Classified rather than passed through: this is the one `fail` reason that does not
+   * originate here, and a query parameter anyone can write was going verbatim into
+   * `auth.callback.failed` — the same unbounded-cardinality trap the rejected
+   * deploymentId is deliberately kept out of. The landing page renders any code it does
+   * not recognise as the same sentence, so nothing the user sees changes.
+   */
   const error = request.nextUrl.searchParams.get("error");
-  if (error) return fail(request, error);
+  if (error) return fail(request, classifyProviderError(error));
 
   /*
    * Rebuild the callback URL from APP_URL rather than trusting request.url: behind

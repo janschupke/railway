@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeOidcFailure } from "./redact";
+import { classifyProviderError, describeOidcFailure } from "./redact";
 
 /**
  * Canaries, not realistic values: an assertion that a token is absent is only worth
@@ -92,5 +92,23 @@ describe("describeOidcFailure", () => {
 
   it("never returns an empty line", () => {
     expect(describeOidcFailure({})).toBe("unknown OIDC failure");
+  });
+});
+
+describe("classifyProviderError", () => {
+  it("keeps the codes an authorization server is allowed to send", () => {
+    // Bounded cardinality is the point; these are the values worth grouping on.
+    expect(classifyProviderError("access_denied")).toBe("access_denied");
+    expect(classifyProviderError("consent_required")).toBe("consent_required");
+    expect(classifyProviderError("temporarily_unavailable")).toBe(
+      "temporarily_unavailable",
+    );
+  });
+
+  it("collapses anything else, however it is dressed up", () => {
+    expect(classifyProviderError("access_denied ")).toBe("provider_error");
+    expect(classifyProviderError("ACCESS_DENIED")).toBe("provider_error");
+    expect(classifyProviderError("X".repeat(4096))).toBe("provider_error");
+    expect(classifyProviderError("")).toBe("provider_error");
   });
 });

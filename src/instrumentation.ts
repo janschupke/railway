@@ -28,6 +28,23 @@ import { log } from "@/lib/logger";
  */
 const CLIENT_DISCONNECT = "The destination stream closed early.";
 
+/**
+ * The request path, reduced to the app's own route shapes.
+ *
+ * `request.path` is the concrete URL path, so a 404 storm against /aaa, /aab, /aac wrote
+ * a new field value per request into a field meant to be grouped on — and the paths are
+ * chosen by whoever sent them. `onRequestError`'s context carries routerKind, routeType
+ * and renderSource but not the matched route pattern, so this derives a bounded stand-in
+ * from the first segment instead of reporting the concrete path.
+ */
+const ROUTE_GROUPS = new Set(["dashboard", "api"]);
+
+function routeGroup(path: string): string {
+  const [, first] = path.split("?", 1)[0]!.split("/");
+  if (!first) return "/";
+  return ROUTE_GROUPS.has(first) ? `/${first}` : "other";
+}
+
 export const onRequestError: Instrumentation.onRequestError = (
   error,
   request,
@@ -41,7 +58,7 @@ export const onRequestError: Instrumentation.onRequestError = (
       typeof error === "object" && error !== null && "digest" in error
         ? String((error as { digest: unknown }).digest)
         : undefined,
-    path: request.path,
+    route_group: routeGroup(request.path),
     router: context.routerKind,
     route_type: context.routeType,
     render_source: context.renderSource,
