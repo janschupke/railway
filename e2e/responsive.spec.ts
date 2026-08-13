@@ -103,7 +103,23 @@ test.describe("the dashboard at phone width", () => {
     const box = (await loadMore.boundingBox())!;
     // The control-token floor; anything shorter is a miss on a touch screen.
     expect(box.height).toBeGreaterThanOrEqual(28);
-    await expect(loadMore).toBeInViewport();
+
+    /*
+     * Its width, not its position.
+     *
+     * `toBeInViewport()` used to be asserted here and was intermittently false — which
+     * turned out to be the app working as designed rather than a defect. The sentinel
+     * carries a root margin, so scrolling the control into view is what trips the
+     * observer, and the rows that load land ABOVE the button and push it back down. The
+     * control's vertical position is therefore transient by construction and asserting
+     * on it is asserting on the losing side of a race the product intends to have.
+     *
+     * What is stably true on a phone is that the target is touch-sized and not clipped
+     * by the viewport horizontally, which is the actual complaint this test exists for.
+     */
+    const viewport = page.viewportSize()!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
 
     while ((await loadMore.count()) > 0) {
       await rows(page).last().scrollIntoViewIfNeeded();

@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useThrottledRefresh } from "./use-throttled-refresh";
 
-/** Debounce against the per-row settle refresh; both fire within the same second. */
-const MIN_REFRESH_GAP_MS = 2_000;
 /** Backoff after a fatal connection failure. Nothing here is urgent. */
 const RETRY_BASE_MS = 5_000;
 const RETRY_CEILING_MS = 60_000;
@@ -24,7 +22,12 @@ export function useProjectWatcher(
   projectId: string | null,
   environmentId: string | null,
 ) {
-  const router = useRouter();
+  /*
+   * The throttle is shared across the tab, not held here. It used to live in this
+   * effect's closure, which meant it only ever coalesced this watcher's own refreshes —
+   * never the per-row ones firing on the same event.
+   */
+  const refresh = useThrottledRefresh();
 
   useEffect(() => {
     if (!projectId || !environmentId) return;
@@ -32,15 +35,6 @@ export function useProjectWatcher(
     let source: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let retry = 0;
-    let lastRefresh = 0;
-
-    const refresh = () => {
-      // /dashboard is force-dynamic, so every refresh is two Railway round trips. A
-      // deployment settling fires this and container-row's own settle refresh at once.
-      if (Date.now() - lastRefresh < MIN_REFRESH_GAP_MS) return;
-      lastRefresh = Date.now();
-      router.refresh();
-    };
 
     const close = () => {
       source?.close();
@@ -104,5 +98,5 @@ export function useProjectWatcher(
       document.removeEventListener("visibilitychange", onVisibility);
       close();
     };
-  }, [projectId, environmentId, router]);
+  }, [projectId, environmentId, refresh]);
 }

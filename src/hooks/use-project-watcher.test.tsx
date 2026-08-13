@@ -2,6 +2,7 @@ import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import { useProjectWatcher } from "./use-project-watcher";
+import { __resetRefreshThrottle } from "./use-throttled-refresh";
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -63,6 +64,8 @@ describe("useProjectWatcher", () => {
     FakeEventSource.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource);
     routerMock.refresh.mockClear();
+    // Shared across the tab by design, so it outlives a test unless reset.
+    __resetRefreshThrottle();
     Object.defineProperty(document, "visibilityState", {
       value: "visible",
       configurable: true,

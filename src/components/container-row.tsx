@@ -2,10 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { ChevronDown, ExternalLink, Info } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
+import { useThrottledRefresh } from "@/hooks/use-throttled-refresh";
 import {
   isTerminal,
   isTransitioning,
@@ -66,7 +66,7 @@ export function ContainerRow({
   const t = useTranslations("containers");
   const tCommon = useTranslations("common");
   const locale = useLocale();
-  const router = useRouter();
+  const refresh = useThrottledRefresh();
   const [expanded, setExpanded] = useState(false);
   /*
    * Outlives `expanded` by one transition, because `hidden` is `display: none` and
@@ -167,10 +167,16 @@ export function ContainerRow({
    * would be a page-wide signal attributable to no control the user touched. The badge
    * has already flipped from the stream by the time this runs, which is the signal that
    * matters.
+   *
+   * "Several rows can settle in the same second" was written as a reason not to show a
+   * pending state, and was also a request storm nobody had costed: this is per row, on a
+   * force-dynamic route, so N rows settling meant 2N Railway round trips plus whatever
+   * the project watcher fired for the same event. The throttle is shared across the tab
+   * — see use-throttled-refresh — so they now coalesce into one.
    */
   useEffect(() => {
-    if (stream.done && isTerminal(state)) router.refresh();
-  }, [stream.done, state, router]);
+    if (stream.done && isTerminal(state)) refresh();
+  }, [stream.done, state, refresh]);
 
   return (
     <li className="border-border border-b last:border-b-0">

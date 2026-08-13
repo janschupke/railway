@@ -88,6 +88,15 @@ export const WATCH = {
    * tab: the 15s default is 240/hour against Hobby's 1000, and zero for a tab nobody is
    * looking at, since the client holds no connection while hidden.
    */
+  /**
+   * Floor between two `router.refresh()` calls, across every source in the tab.
+   *
+   * /dashboard is force-dynamic, so one refresh is two Railway round trips. The watcher
+   * and every settling row all want to refresh on the same event, and each used to
+   * decide for itself — see hooks/use-throttled-refresh.ts for why the guard has to be
+   * shared rather than per-component.
+   */
+  MIN_REFRESH_GAP_MS: 2_000,
   /** Spread, so several tabs opened together do not align on the same second. */
   JITTER: 0.2,
   /** Backoff ceiling after repeated Railway failures. */
