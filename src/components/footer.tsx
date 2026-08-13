@@ -15,6 +15,11 @@ import { BarInner } from "@/components/ui/page";
  * facing edge) so the two read as one frame. That is deliberately wider than the
  * landing page's `max-w-md` card: the footer is app chrome, like the header, not part
  * of the page's content column.
+ *
+ * The type step mirrors it too. This was `caption` — a step below the header's identity
+ * text — which made the bottom bar of the frame smaller than the top one and left the
+ * note under the reading threshold at 12px. It recedes by colour (`subtle`) instead,
+ * which is the axis that was meant to be carrying it.
  */
 export async function Footer() {
   const t = await getTranslations("footer");
@@ -22,7 +27,7 @@ export async function Footer() {
   return (
     <footer className="border-border bg-surface mt-auto border-t">
       <BarInner className="flex-wrap gap-x-6 gap-y-2">
-        <Text variant="caption" tone="subtle">
+        <Text variant="body" tone="subtle">
           {t("apiNote")}
         </Text>
 
@@ -32,7 +37,7 @@ export async function Footer() {
             contentinfo landmark, and dressing them as controls would announce two
             buttons in a footer that has no actions in it.
           */}
-          <Text asChild variant="caption" tone="subtle">
+          <Text asChild variant="body" tone="subtle">
             <a
               className="focus-ring link hover:text-text"
               href={LINKS.REPOSITORY}
@@ -42,7 +47,7 @@ export async function Footer() {
               {t("source")}
             </a>
           </Text>
-          <Text asChild variant="caption" tone="subtle">
+          <Text asChild variant="body" tone="subtle">
             <a
               className="focus-ring link hover:text-text"
               href={LINKS.RAILWAY_HOME}

@@ -68,7 +68,9 @@ export default async function LandingPage({
       <div className="relative w-full max-w-md space-y-4 p-6">
         {message && <Banner tone="error">{message}</Banner>}
 
-        <Card className="space-y-4 p-6">
+        {/* `raised`, not the default: the yard is moving behind this card, and at the
+            flat elevation the two surfaces read as one. */}
+        <Card elevation="raised" className="space-y-4 p-6">
           {/* The mark is in the header two inches above; repeating it here was noise. */}
           <Heading level={1} variant="display">
             {t("app.name")}

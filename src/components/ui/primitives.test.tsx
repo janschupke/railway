@@ -186,6 +186,29 @@ describe("Card", () => {
     render(<Card data-testid="card">body</Card>);
     expect(screen.getByTestId("card")).toHaveTextContent("body");
   });
+
+  it("sits in the page's plane unless asked to lift", () => {
+    render(<Card data-testid="card">body</Card>);
+    expect(screen.getByTestId("card")).toHaveClass("shadow-sm");
+  });
+
+  it("lifts off its background at the raised elevation", () => {
+    /*
+     * Both halves asserted: the variant *selects* one shadow rather than layering a
+     * second on the base, so a raised card carrying shadow-sm as well would mean the
+     * step had been added to the base string instead of to the variant, and whichever
+     * utility Tailwind emitted last would decide how the sign-in card looks.
+     */
+    render(
+      <Card elevation="raised" data-testid="card">
+        body
+      </Card>,
+    );
+
+    const card = screen.getByTestId("card");
+    expect(card).toHaveClass("shadow-md");
+    expect(card).not.toHaveClass("shadow-sm");
+  });
 });
 
 describe("PendingStatus", () => {

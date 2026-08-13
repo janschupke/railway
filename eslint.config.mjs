@@ -240,6 +240,8 @@ const eslintConfig = defineConfig([
               "width",
               "layout",
               "pad",
+              // Card's elevation step, for the same reason.
+              "elevation",
               "side",
               "align",
               "orientation",
