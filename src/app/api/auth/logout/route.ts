@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
      */
     log.info("auth.session.cleared");
 
-    const response = NextResponse.redirect(new URL("/", request.url), {
+    // APP_URL, not request.url: in a route handler the latter is the container's own
+    // origin, and the redirect goes out absolute. See the callback route.
+    const response = NextResponse.redirect(new URL("/", env().APP_URL), {
       // 303 so the browser follows with GET after the POST.
       status: 303,
     });

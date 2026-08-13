@@ -28,10 +28,16 @@ function clearTransients<T extends NextResponse>(response: T, appUrl: string): T
  * five branches — a missing PKCE verifier or state, the provider's own `?error=`, a
  * failed exchange, a response with no `sub`, and a grant that withheld a refresh token —
  * were all silent, and one line closes all five without any chance of drifting apart.
+ *
+ * `appUrl` is the base, not `request.url`, for the reason given at the exchange below and
+ * measured on the deployed image: in a route handler `request.url` is the *internal*
+ * origin, `http://localhost:<PORT>`, and the real Host and X-Forwarded-Host headers do not
+ * reach it. A route handler's redirect goes out as the absolute URL it was given, so that
+ * origin lands in the browser's address bar.
  */
-function fail(request: NextRequest, appUrl: string, reason: string) {
+function fail(appUrl: string, reason: string) {
   log.warn("auth.callback.failed", { reason });
-  const url = new URL(`/?error=${encodeURIComponent(reason)}`, request.url);
+  const url = new URL(`/?error=${encodeURIComponent(reason)}`, appUrl);
   return clearTransients(NextResponse.redirect(url), appUrl);
 }
 
@@ -69,7 +75,7 @@ async function complete(request: NextRequest) {
   const codeVerifier = request.cookies.get(names.pkce)?.value;
   const expectedState = request.cookies.get(names.state)?.value;
   if (!codeVerifier || !expectedState) {
-    return fail(request, APP_URL, "missing_pkce_state");
+    return fail(APP_URL, "missing_pkce_state");
   }
 
   /*
@@ -82,7 +88,7 @@ async function complete(request: NextRequest) {
    * not recognise as the same sentence, so nothing the user sees changes.
    */
   const error = request.nextUrl.searchParams.get("error");
-  if (error) return fail(request, APP_URL, classifyProviderError(error));
+  if (error) return fail(APP_URL, classifyProviderError(error));
 
   /*
    * Rebuild the callback URL from APP_URL rather than trusting request.url: behind
@@ -102,10 +108,10 @@ async function complete(request: NextRequest) {
       return null;
     });
 
-  if (!tokens) return fail(request, APP_URL, "token_exchange_failed");
+  if (!tokens) return fail(APP_URL, "token_exchange_failed");
 
   const claims = tokens.claims();
-  if (!claims?.sub) return fail(request, APP_URL, "missing_id_token");
+  if (!claims?.sub) return fail(APP_URL, "missing_id_token");
 
   if (!tokens.refresh_token) {
     /*
@@ -122,9 +128,13 @@ async function complete(request: NextRequest) {
      * there is nothing left to try.
      */
     if (request.cookies.get(names.consent)?.value === "1") {
-      return fail(request, APP_URL, "no_refresh_token");
+      return fail(APP_URL, "no_refresh_token");
     }
-    const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, request.url);
+    // APP_URL, not request.url. This is the redirect that shipped the internal origin to
+    // a real browser: a grant with no refresh token sent the user to
+    // https://localhost:<PORT>/api/auth/login?consent=1, which is a dead address anywhere
+    // but inside the container.
+    const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, APP_URL);
     return clearTransients(NextResponse.redirect(retry), APP_URL);
   }
 
@@ -153,7 +163,8 @@ async function complete(request: NextRequest) {
     expires_in_s: session.expiresAt - Math.floor(Date.now() / 1000),
   });
 
-  const response = NextResponse.redirect(new URL("/dashboard", request.url));
+  // Same base as every other exit here, for the same reason.
+  const response = NextResponse.redirect(new URL("/dashboard", APP_URL));
   response.cookies.set(
     sessionCookieName(APP_URL),
     await sealSession(session, SESSION_SECRET),
