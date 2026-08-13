@@ -48,10 +48,21 @@ legitimate CI failure, not something to work around.
 
 ## Node, TypeScript, tooling
 
-- **Node 22**, pnpm 11.9.0 (pinned via `packageManager`). No `.nvmrc`. pnpm is not
-  incidental — `pnpm-workspace.yaml`'s `allowBuilds` is a postinstall allowlist npm cannot
-  express, and `pnpm audit --prod` is the shape the CI gate argues for. ADR-11 in
-  [README.md](../README.md) prices the alternative.
+- **Node 22**, declared in `package.json` as `engines.node: "22.x"` and nowhere else.
+  That field is not documentation: Nixpacks reads it to choose the build image, and it
+  outranks a `.nvmrc` in its own precedence order — which is why there still is no
+  `.nvmrc`. It was missing once, Nixpacks defaulted to Node 18, and corepack's pinned
+  pnpm 11.9.0 died on it with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` — an error that
+  names pnpm and means "wrong Node". `src/toolchain.test.ts` holds it and the four CI
+  `node-version` keys to the same major.
+- Pinned to a major, not a floor. `>=22` lets the builder resolve to whatever it has
+  newest, which is a different runtime arriving without a commit.
+- pnpm 11.9.0, pinned via `packageManager`. pnpm is not incidental —
+  `pnpm-workspace.yaml`'s `allowBuilds` is a postinstall allowlist npm cannot express, and
+  `pnpm audit --prod` is the shape the CI gate argues for. ADR-11 in
+  [README.md](../README.md) prices the alternative. The pin is also why the Node version
+  has to be declared: corepack fetches exactly that pnpm and runs it on whatever the image
+  provides.
 - Files under `scripts/` run on Node's type-stripping loader
   (`node --experimental-strip-types`), which is why `allowImportingTsExtensions` is on and
   why those imports carry explicit `.ts` specifiers. Safe because the project never emits.
@@ -83,6 +94,11 @@ legitimate CI failure, not something to work around.
 Railway itself, NIXPACKS. `railway.json`: `startCommand: pnpm start`, healthcheck
 `/api/health` with a 60 s timeout, restart `ON_FAILURE` ×3. `APP_URL` is derived from
 Railway's injected `RAILWAY_PUBLIC_DOMAIN` in production and only needs setting locally.
+
+The build image's Node comes from `engines.node` — see the toolchain section above.
+Nothing else in the repo reaches Nixpacks: it does not read `.github/workflows/ci.yml`,
+and it does not read the rules. A runtime assumption that lives only in CI is an
+assumption the thing that ships has never seen.
 
 Single replica by design — the SSE stream slot counter is in-memory and per replica, and SSE
 pins a client to one replica anyway.
