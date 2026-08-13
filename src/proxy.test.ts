@@ -14,7 +14,7 @@ vi.mock("@/lib/auth/refresh", async (importOriginal) => {
   return { ...actual, refreshSession: (s: RailwaySession) => refreshSession(s) };
 });
 
-const { proxy } = await import("./proxy");
+const { proxy, config } = await import("./proxy");
 const { SessionExpiredError } = await import("@/lib/auth/refresh");
 
 const SECRET = process.env.SESSION_SECRET!;
@@ -261,5 +261,51 @@ describe("request id", () => {
     );
 
     expect(response.headers.get("x-request-id")).toMatch(ID);
+  });
+});
+
+describe("config.matcher", () => {
+  /*
+   * Asserted as a regex against paths rather than by running the proxy, because what is
+   * being tested is which requests reach it at all — a question Next answers before any
+   * of this module's code runs, and therefore one no proxy() test can see.
+   */
+  const matches = (pathname: string) => {
+    const [pattern] = config.matcher;
+    return new RegExp(`^${pattern}$`).test(pathname);
+  };
+
+  it("covers the pages that need a session", () => {
+    expect(matches("/dashboard")).toBe(true);
+    expect(matches("/dashboard/anything")).toBe(true);
+    expect(matches("/")).toBe(true);
+  });
+
+  it("skips the auth routes, which mint the session they would be gated by", () => {
+    expect(matches("/api/auth/login")).toBe(false);
+    expect(matches("/api/auth/callback")).toBe(false);
+    expect(matches("/api/auth/logout")).toBe(false);
+  });
+
+  it("skips the healthcheck, so its own handler can answer", () => {
+    /*
+     * This was matched, and the proxy calls env() before anything else — so a
+     * deployment with a bad SESSION_SECRET threw here and Railway's healthcheck saw a
+     * bare 500, while the route written to report exactly that condition with a 503 and
+     * a logged issue list was unreachable. The route's own tests never caught it: they
+     * call the handler directly, where the proxy does not exist.
+     */
+    expect(matches("/api/health")).toBe(false);
+  });
+
+  it("skips static assets that would otherwise pay an HKDF derive each", () => {
+    expect(matches("/_next/static/chunk.js")).toBe(false);
+    expect(matches("/favicon.ico")).toBe(false);
+    expect(matches("/icon.svg")).toBe(false);
+  });
+
+  it("still covers the routes that do need the session", () => {
+    expect(matches("/api/streams/dep_1")).toBe(true);
+    expect(matches("/api/watch/proj_1")).toBe(true);
   });
 });

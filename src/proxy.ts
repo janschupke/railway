@@ -18,14 +18,13 @@ const PROTECTED = ["/dashboard"];
 /**
  * A misconfigured deployment fails here first, and used to fail silently.
  *
- * The proxy matcher covers `/api/health`, so `env()` throws in this function before the
- * health route — whose whole job is to report exactly this — ever runs. The deployment
- * answered 500 with nothing written anywhere, which is the least diagnosable failure the
- * app has.
- *
  * The throw is preserved; only the record is new. Logged once per process rather than
- * per request, because a broken deployment is asked for `/api/health` every few seconds
- * and the second line says nothing the first did not.
+ * per request, because every navigation hits this and the second line says nothing the
+ * first did not.
+ *
+ * `/api/health` is no longer among those requests — it is excluded from the matcher
+ * below so its own handler can answer 503 for exactly this case, which is what Railway's
+ * healthcheck should see instead of a bare 500 from here.
  */
 let envFailureLogged = false;
 
@@ -213,14 +212,22 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Everything except static assets and the auth routes themselves — the auth
-     * routes mint the session and must not be gated by it.
+     * Everything except static assets, the auth routes themselves and the healthcheck.
+     *
+     * The auth routes mint the session and must not be gated by it.
+     *
+     * api/health is excluded so its own handler runs. This proxy calls env() first, so a
+     * misconfigured deployment threw here and Railway's healthcheck saw a bare 500 —
+     * while the route whose entire job is to report that condition, and which answers
+     * 503 {"status":"misconfigured"} with the issue list going to the log rather than to
+     * the caller, was unreachable. It needs no session, so nothing is given up: it now
+     * pays no HKDF derive either, on an endpoint polled every few seconds.
      *
      * icon.svg sits beside favicon.ico for the reason next.config.ts already gives for
      * the two _next paths: a matched request pays an HKDF derive and a JWE decrypt, and
      * a favicon is fetched on every cold tab. The static security headers still reach it,
      * because next.config.ts sets those on /:path* independently of this matcher.
      */
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/auth|api/health).*)",
   ],
 };

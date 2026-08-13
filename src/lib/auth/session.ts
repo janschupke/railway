@@ -77,10 +77,31 @@ export type RailwaySession = {
 };
 
 /**
+ * Derived keys, by the secret they came from.
+ *
+ * The derivation is a pure function of SESSION_SECRET, which is fixed for the life of
+ * the process, and it was being redone on every seal and every open — four times for
+ * one dashboard render (the proxy, the root layout, the shell loader and the container
+ * list), plus a pair per SSE connect and one per healthcheck. Keyed on the secret rather
+ * than held in a single variable so a test that swaps SESSION_SECRET gets a fresh key
+ * instead of a stale one; the Promise is stored rather than the result so concurrent
+ * callers share one derivation instead of racing several.
+ */
+const derivedKeys = new Map<string, Promise<Uint8Array>>();
+
+/**
  * HKDF-SHA256 over SESSION_SECRET, via Web Crypto so this module runs unchanged
  * in the Node runtime and in middleware.
  */
-async function deriveKey(secret: string): Promise<Uint8Array> {
+function deriveKey(secret: string): Promise<Uint8Array> {
+  const cached = derivedKeys.get(secret);
+  if (cached) return cached;
+  const derived = deriveKeyUncached(secret);
+  derivedKeys.set(secret, derived);
+  return derived;
+}
+
+async function deriveKeyUncached(secret: string): Promise<Uint8Array> {
   const material = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),

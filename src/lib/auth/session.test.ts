@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SESSION } from "@/lib/constants";
 import {
   cookieOptions,
@@ -90,6 +90,39 @@ describe("sessionCookieName", () => {
     // The prefix requires Secure. Rather than depend on how each browser resolves that
     // over http://localhost, dev and the e2e fixture keep the unprefixed name.
     expect(sessionCookieName("http://localhost:3100")).toBe("rc_session");
+  });
+});
+
+describe("key derivation", () => {
+  it("derives once per secret rather than once per seal", async () => {
+    /*
+     * The derivation is a pure function of SESSION_SECRET, which is fixed for the life
+     * of the process, and it was redone on every seal and every open: four times for a
+     * single dashboard render — the proxy, the root layout, the shell loader and the
+     * container list — plus a pair per SSE connect.
+     */
+    const secret = "a-secret-used-only-by-this-test-32ch";
+    const deriveBits = vi.spyOn(crypto.subtle, "deriveBits");
+
+    try {
+      const sealed = await sealSession(session, secret);
+      await openSession(sealed, secret);
+      await sealSession(session, secret);
+
+      expect(deriveBits).toHaveBeenCalledTimes(1);
+    } finally {
+      deriveBits.mockRestore();
+    }
+  });
+
+  it("keys the cache on the secret, so a rotated secret is not served a stale key", async () => {
+    const a = "secret-number-one-at-least-32-characters";
+    const b = "secret-number-two-at-least-32-characters";
+
+    const sealed = await sealSession(session, a);
+    // Would round-trip if the derivation were memoised in a single variable.
+    expect(await openSession(sealed, b)).toBeNull();
+    expect(await openSession(sealed, a)).toEqual(session);
   });
 });
 

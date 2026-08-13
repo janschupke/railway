@@ -54,7 +54,17 @@ const defaultDeps: MonitorDeps = {
     try {
       yield* streamLogs(client, document, field, deploymentId, signal);
     } finally {
-      void client.dispose();
+      /*
+       * Awaited, not discarded. `void` here left the socket teardown unobserved: a
+       * dispose that rejects became an unhandled rejection with no context, and the
+       * generator returned before the close handshake had been sent. The catch is
+       * deliberate — a socket that fails to close cleanly is not worth failing the
+       * stream over, but it should not crash the process either.
+       *
+       * Wrapped because graphql-ws types dispose() as `void | Promise<void>`; it is
+       * the async branch that has a rejection to observe.
+       */
+      await Promise.resolve(client.dispose()).catch(() => {});
     }
   },
 };
@@ -359,7 +369,19 @@ export async function* monitorDeployment(
   } finally {
     stop();
     signal.removeEventListener("abort", stop);
-    // Let the subscription unwind; it is already aborted by this point.
-    void logs;
+    /*
+     * Attach a rejection handler, and deliberately do NOT await.
+     *
+     * `void logs;` was a no-op wearing a comment: it evaluates an already-running
+     * promise and discards it, so a rejection had nowhere to go and would surface as an
+     * unhandled rejection with no context attached. `.catch()` fixes that much.
+     *
+     * Awaiting it was tried and reverted. The subscription only returns once it observes
+     * `signal`, so awaiting makes this generator's completion depend on an upstream
+     * behaving — which is the precise failure the SSE transport keeps onClose out of a
+     * producer `finally` to avoid, and which deadlocked a test whose fake ignores the
+     * signal. Teardown must not be able to hang on the thing it is tearing down.
+     */
+    void logs.catch(() => {});
   }
 }
