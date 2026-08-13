@@ -176,13 +176,28 @@ anyone, so that is the product surface. See "Limitations".
 ### ADR-7 — The URL is the state; there is no client store
 
 No Redux, Zustand, Jotai, React Query or SWR. The measured shape of client state is one
-app-authored context, eight `useState`, zero `useReducer`, zero `useOptimistic`.
+app-authored context, seventeen `useState`, zero `useReducer`, zero `useOptimistic`.
 
 **The selected project and environment live in the URL.** They are search params, read
 by `page.tsx` and resolved server-side in `data.ts` — a stale or absent param falls back
 to the first project rather than blanking the page. So the dashboard is linkable,
 survives a reload, and the server does the fetching. `ProjectPicker` holds no selection
 of its own; it writes to the URL and re-reads the result.
+
+**The list's filters live in the URL too, but are applied on the client.** `q`, `status`
+and `owner` are search params, so a filtered list is shareable and survives a reload like
+any other selection — but `useContainerFilters` writes them with
+`window.history.replaceState` rather than `router.replace`, and `ContainerList` narrows
+the array in memory. The reason is `PROJECT_QUERY`: it takes a project id and nothing
+else, so the server has no way to filter and would recompute the same answer after two
+Railway round trips per keystroke. Next patches both history methods to feed the router,
+and its restore path seeds from the tree's own `renderedSearch`, so `useSearchParams`
+updates with no request. Two traps are documented in place: the state argument must be
+`null` (`window.history.state` carries `__NA`, which makes the patched `replaceState`
+skip the router update and leave `useSearchParams` stale), and the page count resets on
+the filter signature rather than on the `containers` array, which `router.refresh()`
+replaces every few seconds. Scroll depth is deliberately not a param — a selection is
+shareable, a scroll position is not.
 
 **`router.refresh()` is the cache invalidation.** The dashboard is `force-dynamic` and
 every Railway request is `cache: "no-store"`, because it is a live view of
@@ -732,6 +747,15 @@ Log records are asserted, not printed past. `src/test/log-capture.ts` is install
 globally from `src/test/setup.ts`, so every tier can read what was actually written —
 including the credential canary, which runs over the real OAuth callback handler and
 searches the raw serialized bytes rather than a parsed record.
+
+**One spec runs at phone width, not the whole suite.** `playwright.config.ts` declares a
+second `mobile` project scoped by `testMatch` to `e2e/responsive.spec.ts`. `workers: 1`
+is not negotiable — the fixture holds shared state — so a second full project would
+roughly double CI wall-clock, and the app declares one `sm:` in all of `src/` and adapts
+by wrapping everywhere else, leaving no viewport-conditional code to regress. What a
+phone viewport genuinely proves is what that spec asserts: nothing overflows sideways
+with the list filtered and paged, the nine status chips wrap rather than clip, the search
+field takes the line, and the back-to-top button does not cover the last row's controls.
 
 One deliberate split: the sign-in button's busy state is a component test, not an e2e
 one. It exists only between the click and the browser committing the next document, and

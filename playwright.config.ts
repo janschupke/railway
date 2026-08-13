@@ -31,7 +31,29 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      // Everything except the one spec that only means anything on a phone.
+      testIgnore: /responsive\.spec\.ts/,
+    },
+    /*
+     * One spec at phone width, not the whole suite twice.
+     *
+     * `workers: 1` is not negotiable (the fixture holds shared state), so a second full
+     * project would roughly double CI wall-clock. It would also buy very little: the app
+     * declares one `sm:` in all of src/ and adapts by wrapping everywhere else, so there
+     * is no viewport-conditional code for a second run to regress. What a phone viewport
+     * genuinely proves — nothing overflows sideways, the chip strip wraps rather than
+     * clips, the controls stay tappable — is what e2e/responsive.spec.ts asserts.
+     */
+    {
+      name: "mobile",
+      use: { ...devices["Pixel 7"] },
+      testMatch: /responsive\.spec\.ts/,
+    },
+  ],
 
   webServer: [
     {

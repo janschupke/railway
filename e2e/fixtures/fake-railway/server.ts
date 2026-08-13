@@ -137,15 +137,39 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       projectId?: string;
       environmentId?: string;
       image?: string;
+      /**
+       * How many to make, named `${name}-${i}`. One request rather than forty, because a
+       * paged list needs more services than the seed holds and forty round trips per
+       * spec is the kind of setup cost that gets a suite abandoned.
+       */
+      count?: number;
+      /** Parks each deployment at this status; see Store.addService. */
+      status?: string;
     };
-    const service = store.addService({
-      name: input.name,
-      projectId: input.projectId ?? "proj_demo",
-      environmentId: input.environmentId ?? "env_prod",
-      image: input.image ?? "redis:7-alpine",
-      deployed: true,
-    });
-    return json(res, 200, service);
+
+    const make = (name: string) =>
+      store.addService({
+        name,
+        projectId: input.projectId ?? "proj_demo",
+        environmentId: input.environmentId ?? "env_prod",
+        image: input.image ?? "redis:7-alpine",
+        deployed: true,
+        ...(input.status ? { status: input.status } : {}),
+      });
+
+    if (input.count && input.count > 1) {
+      // Zero-padded, so "service-2" cannot also match "service-20" in a spec's locator.
+      const width = String(input.count - 1).length;
+      return json(
+        res,
+        200,
+        Array.from({ length: input.count }, (_, i) =>
+          make(`${input.name}-${String(i).padStart(width, "0")}`),
+        ),
+      );
+    }
+
+    return json(res, 200, make(input.name));
   }
 
   if (url.pathname === "/__test/services") {

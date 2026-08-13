@@ -1,9 +1,12 @@
 import {
   button,
+  containerRows,
   dismissWithEscape,
   expect,
   onlyVisible,
   openDestroyDialog,
+  seedServices,
+  settled,
   signIn,
   spinUp,
   test,
@@ -139,6 +142,44 @@ test.describe("popup motion", () => {
     await dismissWithEscape(page, dialog);
 
     await expect(dialog).toHaveCount(0);
+  });
+
+  test("back to top glides by default and jumps under reduced motion", async ({
+    page,
+  }) => {
+    /*
+     * The one motion on this page the global CSS rule cannot reach. globals.css
+     * neutralises animations and transitions under prefers-reduced-motion, but
+     * scrollTo's `behavior` is a JS argument that overrides the CSS scroll-behavior
+     * property outright — so the choice has to be made in JS, and this is what says so.
+     */
+    await seedServices(page, { name: "spun-web", count: 45 });
+    await page.reload();
+    await settled(page);
+
+    const scrollDown = async () => {
+      await containerRows(page).last().scrollIntoViewIfNeeded();
+      await expect(button(page, /back to top/i)).toBeVisible();
+    };
+
+    // Sampled one frame after the click: smooth is still on its way, instant is home.
+    const offsetAfterAFrame = () =>
+      page.evaluate(
+        () =>
+          new Promise<number>((done) =>
+            requestAnimationFrame(() => done(window.scrollY)),
+          ),
+      );
+
+    await scrollDown();
+    await button(page, /back to top/i).click();
+    expect(await offsetAfterAFrame()).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await scrollDown();
+    await button(page, /back to top/i).click();
+    expect(await offsetAfterAFrame()).toBe(0);
   });
 
   test("expanding a container row animates the panel open", async ({ page }) => {

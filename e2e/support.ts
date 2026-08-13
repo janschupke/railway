@@ -101,8 +101,20 @@ export const button = (page: Page, name: RegExp | string) =>
   onlyVisible(page.getByRole("button", { name }));
 
 /** The container list, named so it cannot be confused with the toast viewport. */
-const containerList = (page: Page) =>
+export const containerList = (page: Page) =>
   onlyVisible(page.getByRole("list", { name: "Containers" }));
+
+/**
+ * Every row currently rendered.
+ *
+ * The list is paged, so this is what is on screen rather than what the environment
+ * holds — which is the distinction a paging spec is actually about.
+ */
+export const containerRows = (page: Page) => containerList(page).getByRole("listitem");
+
+/** The list's search field. */
+export const searchBox = (page: Page) =>
+  onlyVisible(page.getByLabel("Search containers"));
 
 export function row(page: Page, name: string) {
   return onlyVisible(
@@ -217,6 +229,23 @@ export async function spinUp(page: Page, name: string, preset = "Redis") {
  */
 export async function createServiceOutOfBand(page: Page, name: string) {
   await page.request.post(`${FIXTURE_URL}/__test/services`, { data: { name } });
+}
+
+/**
+ * Seeds a batch of services in one request, optionally parked at a status.
+ *
+ * The default fixture holds a single service, which is the right size for every
+ * lifecycle spec and far too small for a paged one. Seeded here rather than in
+ * `store.reset()` so the rest of the suite keeps its cheap, one-row starting point.
+ *
+ * Names come back zero-padded — `web-00`, `web-01` — so a locator for one cannot also
+ * match another that merely starts the same way.
+ */
+export async function seedServices(
+  page: Page,
+  options: { name: string; count?: number; status?: string },
+) {
+  await page.request.post(`${FIXTURE_URL}/__test/services`, { data: options });
 }
 
 /** Service records from the fixture, including the environment each was created with. */

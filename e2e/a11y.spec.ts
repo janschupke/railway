@@ -1,6 +1,7 @@
 import {
   alerts,
   button,
+  containerRows,
   expect,
   expectNoA11yViolations,
   field,
@@ -8,6 +9,8 @@ import {
   onlyVisible,
   openDestroyDialog,
   row,
+  searchBox,
+  seedServices,
   setTheme,
   signIn,
   spinUp,
@@ -54,6 +57,38 @@ test.describe("accessibility", () => {
       await setTheme(page, theme);
       await expect(row(page, "postgres")).toBeVisible();
       await expectNoA11yViolations(page, `dashboard/${theme}`);
+    });
+
+    test(`a filtered, paged list has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Three surfaces the other cases never reach: nine selected/unselected chips in a
+       * toolbar, two checkboxes in a group, and the back-to-top button floating over the
+       * rows. Contrast on the selected chip is the one most likely to move with a token,
+       * and a floating control overlapping an interactive one is something axe can see.
+       */
+      await signIn(page);
+      await seedServices(page, { name: "spun-web", count: 45 });
+      await page.reload();
+      await setTheme(page, theme);
+
+      await button(page, /^Running$/).click();
+      await expect(containerRows(page)).toHaveCount(20);
+      await containerRows(page).last().scrollIntoViewIfNeeded();
+      await expect(button(page, /back to top/i)).toBeVisible();
+
+      await expectNoA11yViolations(page, `dashboard-filtered/${theme}`);
+    });
+
+    test(`the no-matches state has no violations (${theme})`, async ({ page }) => {
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await searchBox(page).fill("nothing-is-called-this");
+      await expect(
+        onlyVisible(page.getByText("No containers match these filters")),
+      ).toBeVisible();
+
+      await expectNoA11yViolations(page, `dashboard-no-matches/${theme}`);
     });
 
     test(`empty dashboard has no violations (${theme})`, async ({ page }) => {

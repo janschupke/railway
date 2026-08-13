@@ -39,6 +39,11 @@
     "containersHeading": "Containers",
     "containersListLabel": "Containers",
     "createdHere": "{managed, number} of {total, plural, one {# container} other {# containers}} created here",
+    "listSummary": "Showing {shown, number} of {matched, plural, one {# container} other {# containers}}, {managed, number} created here",
+    "loadMore": "Load more",
+    "endOfList": "That is every container in this environment.",
+    "endOfFilteredList": "That is every container matching these filters.",
+    "scrollToTop": "Back to top",
     "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
     "noProjectsTitle": "No projects to show",
     "noProjectsDescription": "Railway returned an empty project list for this account. Your authorization is intact, so re-authorizing usually changes nothing.",
@@ -62,6 +67,18 @@
     "retryPending": "Retrying…",
     "reauthorize": "Re-authorize",
     "errorRef": "ref: {digest}"
+  },
+  "filters": {
+    "searchLabel": "Search containers",
+    "searchPlaceholder": "Filter by name, image or repo",
+    "clearSearch": "Clear search",
+    "statusLabel": "Status",
+    "ownerLabel": "Origin",
+    "ownerCreated": "Created here",
+    "ownerExternal": "Not managed here",
+    "clear": "Clear filters",
+    "noMatchesTitle": "No containers match these filters",
+    "noMatchesDescription": "Widen the search or clear the filters to see the rest of this environment."
   },
   "containers": {
     "noSource": "no source",

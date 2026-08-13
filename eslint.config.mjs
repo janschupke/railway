@@ -105,12 +105,20 @@ const eslintConfig = defineConfig([
             exclude: [
               "^t$",
               "^t\\.rich$",
-              "^tCommon$",
+              /*
+               * A second namespace in the same file is named `tCommon`, `tStates`,
+               * `tFilters` — `t` followed by the namespace. Matching the shape rather
+               * than listing each one keeps this from growing a line per component.
+               */
+              "^t[A-Z]\\w*$",
               "^useTranslations$",
               "^getTranslations$",
               "^(cn|cva|clsx|twMerge)$",
               // A local error-lookup helper keyed by field name, not copy.
               "^fieldError$",
+              // A CSS media query is a selector, and the app has to read this one in JS:
+              // scrollTo's `behavior` overrides the CSS property the global rule sets.
+              "^window\\.matchMedia$",
             ],
           },
           /*
@@ -118,7 +126,15 @@ const eslintConfig = defineConfig([
            * and politeness values — protocol, not prose.
            */
           "object-properties": {
-            exclude: ["role", "aria-live", "aria-.*", ".*[Cc]lassName", "tone"],
+            // `behavior` is scrollTo's own enum — "auto" or "smooth", never prose.
+            exclude: [
+              "role",
+              "aria-live",
+              "aria-.*",
+              ".*[Cc]lassName",
+              "tone",
+              "behavior",
+            ],
           },
           "jsx-attributes": {
             exclude: [

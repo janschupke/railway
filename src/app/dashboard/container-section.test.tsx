@@ -76,4 +76,29 @@ describe("ContainerSection", () => {
 
     expect(screen.getByText("1 of 1 container created here")).toBeInTheDocument();
   });
+
+  it("switches to the on-screen count once the list is longer than a page", async () => {
+    /*
+     * "1 of 45 created here" over twenty visible rows describes a list nobody is looking
+     * at. Past a page the sentence has to name all three numbers.
+     */
+    await renderSection(
+      Array.from({ length: 45 }, (_, i) =>
+        container({ serviceId: `svc_${i}`, displayName: `c${i}`, managed: i === 0 }),
+      ),
+    );
+
+    expect(
+      screen.getByText("Showing 20 of 45 containers, 1 created here"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(20);
+  });
+
+  it("renders the filter bar only when there is something to filter", async () => {
+    await renderSection([]);
+    expect(screen.queryByLabelText("Search containers")).toBeNull();
+
+    await renderSection([container()]);
+    expect(screen.getByLabelText("Search containers")).toBeInTheDocument();
+  });
 });

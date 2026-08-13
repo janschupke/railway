@@ -30,6 +30,63 @@ if (!window.ResizeObserver) {
   } as unknown as typeof ResizeObserver;
 }
 
+/*
+ * jsdom ships no IntersectionObserver at all, and the container list uses one to page.
+ *
+ * The stub is a registry rather than an empty class: a test needs to *fire* an
+ * intersection to prove the next page loads, which an inert observer cannot do. Each
+ * instance registers itself on construction and drops out on disconnect, so
+ * `fireIntersection()` reaches whatever the component under test currently observes.
+ */
+type ObserverEntry = { callback: IntersectionObserverCallback; targets: Element[] };
+const observers = new Set<ObserverEntry>();
+
+if (!window.IntersectionObserver) {
+  window.IntersectionObserver = class {
+    #entry: ObserverEntry;
+    constructor(callback: IntersectionObserverCallback) {
+      this.#entry = { callback, targets: [] };
+      observers.add(this.#entry);
+    }
+    observe(target: Element) {
+      this.#entry.targets.push(target);
+    }
+    unobserve(target: Element) {
+      this.#entry.targets = this.#entry.targets.filter((t) => t !== target);
+    }
+    disconnect() {
+      observers.delete(this.#entry);
+    }
+    takeRecords() {
+      return [];
+    }
+  } as unknown as typeof IntersectionObserver;
+}
+
+/** Reports every observed target as on screen, as a real scroll would. */
+export function fireIntersection(isIntersecting = true) {
+  for (const { callback, targets } of observers) {
+    callback(
+      targets.map(
+        (target) =>
+          ({
+            target,
+            isIntersecting,
+            intersectionRatio: isIntersecting ? 1 : 0,
+          }) as IntersectionObserverEntry,
+      ),
+      null as unknown as IntersectionObserver,
+    );
+  }
+}
+
+/*
+ * jsdom's window.scrollTo throws "not implemented", which fails the test rather than the
+ * assertion. A spy keeps the call assertable — scroll-to-top has to prove it passes
+ * `behavior: "auto"` under prefers-reduced-motion.
+ */
+window.scrollTo = vi.fn() as unknown as typeof window.scrollTo;
+
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false;
   Element.prototype.setPointerCapture = () => {};
@@ -51,9 +108,24 @@ export const routerMock = {
   prefetch: vi.fn(),
 };
 
+/*
+ * The URL is the app's state (ADR-7), so a component test that cannot set it cannot test
+ * a filtered list or a deep link. The mock reads through a mutable holder rather than
+ * returning a fresh empty instance, and `setSearchParams` is what a test calls before
+ * rendering. Reset after every test alongside cleanup, so one spec cannot leak a filter
+ * into the next.
+ */
+const searchParamsMock = { current: new URLSearchParams() };
+
+export function setSearchParams(init = "") {
+  searchParamsMock.current = new URLSearchParams(init);
+}
+
+afterEach(() => setSearchParams());
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock.current,
   usePathname: () => "/dashboard",
   redirect: vi.fn(),
 }));

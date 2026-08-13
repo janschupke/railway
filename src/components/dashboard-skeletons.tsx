@@ -1,6 +1,6 @@
+import { ContainerSectionHeader } from "./container-section-header";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
-import { Heading } from "./ui/text";
 
 /*
  * Placeholder compositions for the dashboard.
@@ -17,6 +17,16 @@ import { Heading } from "./ui/text";
 
 /** How many rows the list stands in for before its real length is known. */
 const PLACEHOLDER_ROWS = 3;
+
+/**
+ * Chips in the status strip's placeholder.
+ *
+ * Fewer than the nine states, on purpose: the real strip wraps to two or three lines on a
+ * narrow viewport and a placeholder that matched it exactly would be a wall of grey. One
+ * line's worth is enough to reserve the row's height, which is what the card below cares
+ * about.
+ */
+const PLACEHOLDER_CHIPS = 4;
 
 /*
  * Control placeholders take their height from the same `--control-h-*` tokens the real
@@ -120,10 +130,28 @@ export function ContainerSectionSkeleton({
      * appears and disappears on every project switch is worse than none. No role=status
      * either — toasts and Banner own that role (see ui/misc.tsx).
      */
-    <section className="space-y-2" aria-busy="true" data-loading="containers">
-      <div className="flex items-baseline justify-between">
-        <Heading level={2}>{heading}</Heading>
-        <Skeleton className="h-4 w-40" />
+    <section className="space-y-3" aria-busy="true" data-loading="containers">
+      <ContainerSectionHeader
+        heading={heading}
+        summary={<Skeleton className="h-4 w-56" />}
+      />
+
+      {/*
+        The filter bar the real list grows once it has containers. Standing in for it is
+        not optional: without this the card jumps a control row down the page the moment
+        the fetch lands, which is the drift e2e/skeleton.spec.ts exists to catch.
+
+        Heights come from the same `--control-h-*` tokens the real controls use, and the
+        chip strip mirrors ContainerFilterBar's `flex flex-wrap gap-1` rather than a bar
+        of its own width.
+      */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <Skeleton shape="control" className="h-control-md min-w-0 grow basis-64" />
+        <div className="flex flex-wrap gap-1">
+          {Array.from({ length: PLACEHOLDER_CHIPS }, (_, i) => (
+            <Skeleton key={i} shape="pill" className="h-5 w-16" />
+          ))}
+        </div>
       </div>
 
       <Card>
@@ -132,7 +160,7 @@ export function ContainerSectionSkeleton({
           getByRole("list", { name: "Containers" }) and asserts there is exactly one, so
           a placeholder list would be a second one and break every container spec.
         */}
-        <div>
+        <div data-loading="container-rows">
           {Array.from({ length: rows }, (_, i) => (
             <ContainerRowSkeleton key={i} />
           ))}

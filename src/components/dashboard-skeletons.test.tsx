@@ -43,11 +43,24 @@ describe("ContainerSectionSkeleton", () => {
       <ContainerSectionSkeleton heading="Containers" rows={5} />,
     );
 
-    // Each row contributes a pill placeholder for the status badge.
-    expect(container.querySelectorAll(".rounded-full")).toHaveLength(5);
+    // Each row contributes a pill placeholder for the status badge. Scoped to the rows,
+    // because the filter strip above the card is made of pills too.
+    expect(
+      container.querySelectorAll('[data-loading="container-rows"] .rounded-full'),
+    ).toHaveLength(5);
     for (const el of container.querySelectorAll(".bg-skeleton")) {
       expect(el).toHaveAttribute("aria-hidden", "true");
     }
+  });
+
+  it("stands in for the filter bar the loaded list carries", () => {
+    /*
+     * Without this the card jumps a control row down the page the moment the fetch lands
+     * — the skeleton-versus-real drift this file exists to prevent, now that the real
+     * section grows a search field and a chip strip above its card.
+     */
+    const { container } = render(<ContainerSectionSkeleton heading="Containers" />);
+    expect(container.querySelector(".h-control-md.basis-64")).toBeInTheDocument();
   });
 
   it("stands in for the time column at the width the row actually uses", () => {

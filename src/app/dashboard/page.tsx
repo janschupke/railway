@@ -202,6 +202,16 @@ export default async function DashboardPage({
 
               A router.refresh() keeps the same key, so it deliberately does NOT blank
               the list; those call sites surface their own pending state instead.
+
+              The list's own filters (q, status, owner) are deliberately NOT in this key,
+              and adding them is the plausible-looking change to resist. They are applied
+              on the client — Railway's project query accepts no filter arguments, so the
+              server would only recompute the same answer — which means a filter change
+              re-runs nothing here and has nothing to suspend on. Keying on them would
+              blank the whole list behind a skeleton on every keystroke instead.
+
+              searchParams stays {project, environment} for the same reason: widening it
+              would say the server reads filters, and it must not.
             */}
               <Suspense
                 key={`${project?.id ?? ""}:${environment?.id ?? ""}`}

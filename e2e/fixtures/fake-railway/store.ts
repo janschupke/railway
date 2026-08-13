@@ -175,6 +175,16 @@ export class Store {
     environmentId: string;
     image: string | null;
     deployed?: boolean;
+    /**
+     * Pins the deployment at a status instead of letting it walk the progression.
+     *
+     * A filter spec needs a list holding several statuses at once and holding them
+     * still; a deployment that advances every 400ms would move out from under the
+     * assertion. Parked by setting `step` past the end of the progression, which is what
+     * `tick()` already checks — so SLEEPING and REMOVED, which appear in no progression
+     * at all, are expressible too.
+     */
+    status?: string;
   }): Service {
     const service: Service = {
       id: this.id("svc"),
@@ -188,10 +198,11 @@ export class Store {
       variables: {},
     };
     this.services.set(service.id, service);
-    if (input.deployed) {
+    if (input.deployed || input.status) {
       const deployment = this.addDeployment(service.id);
-      deployment.status = "SUCCESS";
-      deployment.step = PROGRESSION.length - 1;
+      deployment.status = input.status ?? "SUCCESS";
+      // Past the end, so tick() leaves it alone whatever progression it would have used.
+      deployment.step = Math.max(PROGRESSION.length, FAILING_PROGRESSION.length);
     }
     return service;
   }

@@ -19,10 +19,20 @@
     "every route now carries Radix ToggleGroup and the shared Slot core (~20 kB gzip) that",
     "only / and /dashboard used to. Measured 161.8 kB, up from 142.1. Deliberate: a 404",
     "that cannot say which app it belongs to was the thing being fixed. /dashboard fell",
-    "209.1 -> 207.5 in the same change, because its header skeleton is now dead code."
+    "209.1 -> 207.5 in the same change, because its header skeleton is now dead code.",
+    "",
+    "/ 166 -> 171: restoring the headroom this number was supposed to have. It had been",
+    "seeded at 166.0 against a budget of 166 — flush, not 3% under — so the landing page",
+    "failed the gate on a change that did not touch it. The container list gained a filter",
+    "bar and paging; the landing page's own first-load moved 166.0 -> 166.2, entirely from",
+    "the shared layout graph re-splitting (12.9 + 3.6 kB became 9.0 + 7.7 kB), and its",
+    "route chunk is byte-identical. Set at actual + ~3% as the rule above intends.",
+    "/dashboard absorbed the feature itself at 211.7 -> 214.7, inside its existing budget:",
+    "the status chips reuse ToggleGroup, already in the graph via ThemeToggle, and the",
+    "origin checkboxes are native inputs rather than Radix Checkbox."
   ],
   "routes": {
-    "/": 166,
+    "/": 171,
     "/dashboard": 215,
     "/_not-found": 167
   }

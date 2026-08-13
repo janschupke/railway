@@ -1,9 +1,10 @@
 import { getTranslations } from "next-intl/server";
-import { ContainerRow } from "@/components/container-row";
+import { ContainerList } from "@/components/container-list";
+import { ContainerSectionHeader } from "@/components/container-section-header";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/misc";
-import { Heading, Text } from "@/components/ui/text";
+import { Text } from "@/components/ui/text";
 import { managedPrefix } from "@/lib/railway/managed";
 import { loadContainers } from "./data";
 
@@ -11,9 +12,15 @@ import { loadContainers } from "./data";
  * The container list and everything derived from it.
  *
  * Split out of page.tsx so its Railway round trip sits behind a Suspense boundary
- * rather than in front of the shell. The managed count and the prefix note both need
- * containers, so the whole section moves — including its heading, which the fallback
- * then renders as real text so it never flickers.
+ * rather than in front of the shell. The prefix note needs containers, so the whole
+ * section moves — including its heading, which the fallback then renders as real text so
+ * it never flickers.
+ *
+ * This half is the part that does not depend on what the reader has filtered to: the
+ * fetch, the failure banner, the "nothing here at all" state, and the prefix note.
+ * Filtering, paging and the count sentence live in ContainerList, on the client, because
+ * Railway's project query accepts no filter arguments — narrowing on the server would
+ * mean a round trip per keystroke to compute an answer this app can compute locally.
  *
  * The containers-failed banner lives here rather than at the top of <main>: it explains
  * this section, not the page. A failed *project* list is the one that invalidates the
@@ -33,9 +40,7 @@ export async function ContainerSection({
   if (!projectId || !environmentId) {
     return (
       <section className="space-y-2">
-        <div className="flex items-baseline justify-between">
-          <Heading level={2}>{t("containersHeading")}</Heading>
-        </div>
+        <ContainerSectionHeader heading={t("containersHeading")} />
         <Card>
           <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
         </Card>
@@ -44,48 +49,34 @@ export async function ContainerSection({
   }
 
   const { containers, error } = await loadContainers(projectId, environmentId);
-  const managedCount = containers.filter((c) => c.managed).length;
 
+  /*
+   * Two shapes, and only one of them can be filtered.
+   *
+   * An environment with nothing in it stays server-rendered: a filter bar above an empty
+   * state offers controls that can only ever return the same nothing. Everything else
+   * hands off to ContainerList, which owns the heading's count sentence too — it is the
+   * only side that knows how much of the list is currently on screen.
+   */
   return (
     <section className="space-y-2">
-      <div className="flex items-baseline justify-between">
-        <Heading level={2}>{t("containersHeading")}</Heading>
-        {/*
-          Nothing to count, nothing to say. At zero this read "0 of no containers created
-          here" — ICU resolving a `=0` branch that replaced only the count and left the
-          rest of the sentence around it — directly above the empty state that already
-          says nothing is running. The catalog no longer carries a zero form at all, so
-          this guard is what keeps that promise rather than a comment asking it to.
-        */}
-        {containers.length > 0 && (
-          <Text asChild variant="caption" tone="subtle">
-            <p>
-              {t("createdHere", { managed: managedCount, total: containers.length })}
-            </p>
-          </Text>
-        )}
-      </div>
-
       {error && <Banner tone="error">{error}</Banner>}
 
-      <Card>
-        {containers.length === 0 ? (
-          <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
-        ) : (
-          // Named so the list is distinguishable from other lists on the page — the
-          // toast viewport is also a list.
-          <ul aria-label={t("containersListLabel")}>
-            {containers.map((container) => (
-              <ContainerRow
-                key={container.serviceId}
-                container={container}
-                projectId={projectId}
-                environmentId={environmentId}
-              />
-            ))}
-          </ul>
-        )}
-      </Card>
+      {containers.length === 0 ? (
+        <>
+          <ContainerSectionHeader heading={t("containersHeading")} />
+          <Card>
+            <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
+          </Card>
+        </>
+      ) : (
+        <ContainerList
+          containers={containers}
+          projectId={projectId}
+          environmentId={environmentId}
+          heading={t("containersHeading")}
+        />
+      )}
 
       <Text asChild variant="caption" tone="subtle">
         <p>

@@ -117,6 +117,34 @@ export const UI = {
 } as const;
 
 /**
+ * The container list's filtering, paging and scroll affordances.
+ *
+ * All presentation: Railway's project query returns every service in one response and
+ * accepts no filter or cursor, so none of these numbers reach the network. They bound
+ * what is *rendered*, which is what actually costs — each visible row is a client
+ * component that may hold a log stream.
+ */
+export const LIST = {
+  /** Rows per page, and the increment each Load more adds. */
+  PAGE_SIZE: 20,
+  /**
+   * Search settle time.
+   *
+   * Not merely a URL-write throttle: filtering changes which rows are mounted, and a
+   * mounted row opens an EventSource for a transitioning container against
+   * STREAM.MAX_CONCURRENT_PER_USER. Undebounced, a typed word would open and tear down
+   * streams per keystroke.
+   */
+  SEARCH_DEBOUNCE_MS: 250,
+  /** Ceiling on the search needle; longer than the longest container name plus a tag. */
+  QUERY_MAX: 64,
+  /** Load the next page before the sentinel reaches the viewport, not as it arrives. */
+  SENTINEL_ROOT_MARGIN_PX: 200,
+  /** Scroll depth past which returning to the top stops being a flick of the wrist. */
+  SCROLL_TOP_AFTER_PX: 640,
+} as const;
+
+/**
  * Outbound links. Not the API endpoints — those are configurable per environment in
  * env.ts so the E2E fixture can stand in; these are the human-facing pages, which
  * always point at the real Railway and at this app's own source.

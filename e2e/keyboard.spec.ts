@@ -1,10 +1,14 @@
 import {
   button,
+  containerRows,
   dismissWithEscape,
   expect,
   field,
   onlyVisible,
   row,
+  searchBox,
+  seedServices,
+  settled,
   signIn,
   spinUp,
   test,
@@ -198,6 +202,58 @@ test.describe("keyboard operation", () => {
     await expect(cache.getByRole("log")).toHaveAttribute("aria-live", "polite");
   });
 
+  test("walks the status chips with the arrow keys, one tab stop for nine", async ({
+    page,
+  }) => {
+    /*
+     * The reason the chips are a Radix ToggleGroup rather than nine buttons in a div:
+     * a roving tabindex means the filter strip costs one Tab, not nine, to pass through.
+     */
+    await signIn(page);
+
+    const chips = page.getByRole("toolbar", { name: "Status" }).getByRole("button");
+    await chips.first().focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(chips.nth(1)).toBeFocused();
+
+    await page.keyboard.press("Space");
+    await expect(chips.nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveURL(/[?&]status=building/);
+  });
+
+  test("pages the list to its end from the keyboard", async ({ page }) => {
+    /*
+     * An observer-driven infinite list is unreachable by keyboard — there is no way to
+     * page without scrolling — which is why Load more renders whenever there is more,
+     * not only where IntersectionObserver is missing.
+     *
+     * Focusing the control scrolls it into view, and that scroll legitimately autoloads
+     * a page on the way, so the counts below are not a fixed multiple of the page size.
+     * What is asserted is what matters: keys alone reach the end, and focus stays on the
+     * control while it exists, because rows are inserted above it.
+     */
+    await signIn(page);
+    await seedServices(page, { name: "spun-web", count: 65 });
+    await page.reload();
+    await settled(page);
+
+    const loadMore = button(page, /load more/i);
+    await loadMore.focus();
+
+    let previous = await containerRows(page).count();
+    while ((await loadMore.count()) > 0) {
+      await expect(loadMore).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => containerRows(page).count()).toBeGreaterThan(previous);
+      previous = await containerRows(page).count();
+    }
+
+    await expect(containerRows(page)).toHaveCount(66);
+    await expect(
+      page.getByText("That is every container in this environment."),
+    ).toBeVisible();
+  });
+
   test("keeps a visible focus indicator on every interactive control", async ({
     page,
   }) => {
@@ -208,6 +264,9 @@ test.describe("keyboard operation", () => {
       field(page, "Image reference"),
       field(page, "Name"),
       button(page, /spin up container/i),
+      searchBox(page),
+      page.getByRole("toolbar", { name: "Status" }).getByRole("button").first(),
+      onlyVisible(page.getByLabel("Created here")),
     ]) {
       await locator.focus();
       const outlineVisible = await locator.evaluate((el) => {
