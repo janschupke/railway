@@ -9,6 +9,7 @@ import {
   openDestroyDialog,
   railwayLink,
   row,
+  seedServices,
   setTabVisibility,
   settled,
   signIn,
@@ -321,5 +322,87 @@ test.describe("container lifecycle", () => {
      * sentence built around it — directly on top of the empty state that says this.
      */
     await expect(onlyVisible(page.getByText(/\d+ of /))).toHaveCount(0);
+  });
+});
+
+/**
+ * The two refusals a user can act on, neither of which had a spec.
+ *
+ * Both were asserted server-side or in a component test, which proves the response is
+ * right and says nothing about whether the person ever sees it — and in both cases the
+ * whole point of the design is that a refusal explains itself instead of presenting as
+ * silence.
+ */
+test.describe("refusals the user is told about", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("names the open-panel limit rather than leaving a pane connecting", async ({
+    page,
+  }) => {
+    /*
+     * STREAM.MAX_CONCURRENT_PER_USER is 4, and the number is not arbitrary: browsers
+     * allow six connections per origin over HTTP/1.1, one goes to the project watcher
+     * and one is reserved for navigation. A seventh EventSource does not fail — it
+     * queues, silently, forever. That is the failure this message exists to replace,
+     * and until now nothing checked that it reaches the screen.
+     */
+    /*
+     * Exactly five, and transitioning, which is the only arrangement that reaches the
+     * cap. Two other numbers do not work, and both took a run to find out:
+     *
+     * Settled rows release their slot almost immediately — the monitor sees a terminal
+     * status and ends the stream — so expanding five of those never holds more than one
+     * or two at once.
+     *
+     * Six transitioning rows overshoot the *browser's* limit instead of the server's.
+     * Chrome allows six connections per origin over HTTP/1.1; the project watcher holds
+     * one, so the sixth stream is queued by the browser and never reaches the server at
+     * all. That is a pane stuck on "Connecting…", which is precisely the silent failure
+     * MAX_CONCURRENT_PER_USER was lowered to 4 to avoid, and it would make this spec
+     * assert the opposite of what it is for.
+     *
+     * Five transitioning rows attach without being expanded, all five requests are sent,
+     * the server grants four and refuses the fifth.
+     */
+    await seedServices(page, { name: "spun-svc", count: 5, status: "BUILDING" });
+    await page.reload();
+    await settled(page);
+
+    // Seeded as `spun-svc-N`, zero-indexed; rows render with the managed prefix stripped.
+    const names = Array.from({ length: 5 }, (_, i) => `svc-${i}`);
+    for (const name of names) await disclosure(page, name).click();
+
+    /*
+     * errors.streamLimit, the sentence the SERVER sends — not containers.streamUnavailable,
+     * which is the row's fallback for a refusal that named nothing. Getting those two the
+     * wrong way round is easy and the difference is the whole design: a 200 carrying a
+     * named error exists precisely because a 429 reaches EventSource as an unlabelled
+     * failure with no action attached to it.
+     *
+     * Which row loses the race is not fixed, so the assertion is that one of them says
+     * so — as opposed to silence, which is what this message replaced.
+     */
+    await expect(
+      onlyVisible(page.getByText(/too many log panels/i)).first(),
+    ).toBeVisible();
+  });
+
+  test("raises a toast when Railway refuses the create outright", async ({ page }) => {
+    /*
+     * The non-field failure path in spin-up-form: a duplicate name and a malformed
+     * image both attach to a field and are covered above, but a Railway refusal has no
+     * field to attach to and surfaces as a toast. That branch had no e2e at all.
+     */
+    await injectFaults(page, { rateLimit: 20 });
+
+    await field(page, "Image reference").fill("redis:7-alpine");
+    await field(page, "Name").fill("doomed");
+    await button(page, /spin up container/i).click();
+
+    await expect(toast(page, /could not spin up/i)).toBeVisible();
+    // And nothing was created behind the failure.
+    await expect(row(page, "doomed")).toHaveCount(0);
   });
 });

@@ -149,3 +149,46 @@ test.describe("a project list that could not be read at all", () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * A mid-session refusal from Railway, at the transport rather than in a field.
+ *
+ * The `unauthorized` fault was declared in support.ts, the store and the server and used
+ * by no spec at all — so this branch, the one where Railway answers HTTP 401 rather than
+ * the 200-with-"Not Authorized" shape the other tests use, had never been walked. They
+ * are different code paths: one is classified from the status, the other from Railway's
+ * prose, and only the second had coverage.
+ */
+test.describe("a project read Railway refuses outright", () => {
+  test.beforeEach(async ({ page }) => {
+    // Both project sources are read in parallel, so two faults are consumed per render;
+    // a generous count keeps the reload below refused too.
+    await injectFaults(page, { unauthorized: 20 });
+    await signInBare(page);
+  });
+
+  test("offers re-authorization rather than a retry", async ({ page }) => {
+    const alert = onlyVisible(page.locator("main").getByRole("alert"));
+
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText(/authoriz/i);
+    // The distinction that matters: retrying a credential Railway has rejected is the
+    // loop this app used to send people round.
+    await expect(alert.getByRole("link", { name: /re-authorize/i })).toBeVisible();
+    await expect(alert.getByRole("button", { name: /^retry$/i })).toBeHidden();
+  });
+
+  test("draws no controls that cannot work", async ({ page }) => {
+    // With no project list there is nothing to pick and nothing to spin up into.
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(button(page, /spin up container/i)).toHaveCount(0);
+  });
+
+  test("says nothing about the upstream failure itself", async ({ page }) => {
+    // Railway's own wording never reaches the browser — the sentence is this app's, and
+    // the reference id is the only thing that joins it to the server log.
+    const main = page.locator("main");
+    await expect(main).not.toContainText(/Not authorized/);
+    await expect(main).toContainText(/[Rr]eference/);
+  });
+});
