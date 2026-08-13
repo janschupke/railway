@@ -210,12 +210,21 @@ const eslintConfig = defineConfig([
               "data-.*",
               "aria-hidden",
               /*
-               * aria-busy takes "true"/"false" — a token the platform defines, not copy.
-               * Every other aria-* attribute stays checked, because the ones that carry
-               * text (aria-label, aria-description) are exactly the strings a translator
-               * needs and the ones most easily forgotten.
+               * ARIA attributes whose values come from a closed set the platform
+               * defines, not from copy: "true"/"false", "polite"/"assertive".
+               *
+               * Only reachable on a *component* — the rule does not flag these on a bare
+               * DOM element — so they surfaced the moment a live region became a
+               * primitive rather than three inline copies. Every other aria-* stays
+               * checked, because the ones that carry text (aria-label,
+               * aria-description) are exactly the strings a translator needs and the
+               * ones most easily forgotten.
                */
               "aria-busy",
+              "aria-live",
+              "aria-atomic",
+              // Polymorphic element selector: "p" is a tag name, not a sentence.
+              "as",
               // Component APIs whose values are enum members, not sentences.
               "type",
               "role",

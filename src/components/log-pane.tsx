@@ -53,9 +53,14 @@ export function LogPane({
         viewportClassName="p-3"
         viewportRef={viewportRef}
         viewportProps={{
+          /*
+           * `role="log"` carries an implicit aria-live of polite, which is exactly what
+           * a build emitting hundreds of lines needs — assertive would be unusable. The
+           * explicit attribute was redundant rather than additive, and on a dashboard
+           * already holding several regions the cheapest one to remove is the one that
+           * says nothing the role does not.
+           */
           role: "log",
-          // Polite: a build emits hundreds of lines and assertive would be unusable.
-          "aria-live": "polite",
           "aria-label": t("logsLabel"),
         }}
       >

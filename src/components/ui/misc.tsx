@@ -1,6 +1,7 @@
 import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Text } from "./text";
+import { LiveRegion } from "./live-region";
 
 /**
  * Busy indicator.
@@ -33,14 +34,9 @@ export function PendingStatus({
   className?: string;
 }) {
   return (
-    <span
-      /*
-       * A bare live region, deliberately without role="status": toasts and Banner
-       * already claim that role, and a third source would make every status assertion
-       * in the suite ambiguous. aria-live + aria-atomic announces identically.
-       */
-      aria-live="polite"
-      aria-atomic="true"
+    <LiveRegion
+      // The region itself is LiveRegion's job — see there for why it stays mounted
+      // while idle and why it carries no role.
       data-pending-status={label ? "" : undefined}
       className={cn(
         "text-text-subtle text-caption flex items-center gap-1.5",
@@ -53,7 +49,7 @@ export function PendingStatus({
           {label}
         </>
       ) : null}
-    </span>
+    </LiveRegion>
   );
 }
 

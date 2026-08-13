@@ -35,9 +35,17 @@ const viewport = () => screen.getByRole("log");
 
 describe("LogPane", () => {
   it("announces output politely, not assertively", () => {
-    // A build emits hundreds of lines; assertive would make the page unusable.
+    /*
+     * A build emits hundreds of lines; assertive would make the page unusable.
+     *
+     * Asserted through role="log", which carries an implicit polite live region — the
+     * explicit aria-live said nothing the role did not, and on a dashboard already
+     * holding several regions the redundant one is the cheapest to remove. What must
+     * stay true is that this is a log region and that it is not assertive.
+     */
     render(<LogPane lines={[]} status="live" />);
-    expect(viewport()).toHaveAttribute("aria-live", "polite");
+    expect(viewport()).toHaveAttribute("role", "log");
+    expect(viewport()).not.toHaveAttribute("aria-live", "assertive");
     expect(viewport()).toHaveAccessibleName("Container logs");
   });
 

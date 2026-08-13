@@ -6,7 +6,7 @@ import { filterContainers, filterKey, hasActiveFilters } from "@/lib/container-f
 import type { Container } from "@/lib/railway/types";
 import { useContainerFilters } from "@/hooks/use-container-filters";
 import { useIncrementalList } from "@/hooks/use-incremental-list";
-import { ContainerFilterBar } from "./container-filters";
+import { ContainerFilterBar } from "./container-filter-bar";
 import { ContainerRow } from "./container-row";
 import { ContainerSectionHeader } from "./container-section-header";
 import { ScrollToTop } from "./scroll-to-top";
@@ -14,6 +14,7 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { EmptyState } from "./ui/misc";
 import { Text } from "./ui/text";
+import { LiveRegion } from "./ui/live-region";
 
 /**
  * The filtered, paged container list.
@@ -93,9 +94,7 @@ export function ContainerList({
               text, which is the classic way an announcement is dropped. The debounce is
               what keeps it to one announcement per settle rather than one per keystroke.
             */}
-            <p aria-live="polite" aria-atomic="true">
-              {summary}
-            </p>
+            <LiveRegion as="p">{summary}</LiveRegion>
           </Text>
         }
       />

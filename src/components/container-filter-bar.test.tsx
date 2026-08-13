@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NO_FILTERS, parseFilters } from "@/lib/container-filters";
-import { ContainerFilterBar } from "./container-filters";
+import { ContainerFilterBar } from "./container-filter-bar";
 
 const handlers = () => ({
   onDraftChange: vi.fn(),

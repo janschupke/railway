@@ -212,15 +212,24 @@ test.describe("keyboard operation", () => {
   });
 
   test("announces the log region politely", async ({ page }) => {
-    // Assertive would interrupt a screen-reader user on every one of hundreds of
-    // build lines, which makes the page unusable rather than accessible.
+    /*
+     * Assertive would interrupt a screen-reader user on every one of hundreds of build
+     * lines, which makes the page unusable rather than accessible.
+     *
+     * Asserted as "is a log region, and is not assertive" rather than on an explicit
+     * aria-live. role="log" carries an implicit polite live region, so the attribute
+     * was saying nothing the role did not — and the dashboard has enough regions
+     * competing without a redundant one.
+     */
     await signIn(page);
     await spinUp(page, "cache");
 
     const cache = row(page, "cache");
     await disclosure(page, "cache").click();
 
-    await expect(cache.getByRole("log")).toHaveAttribute("aria-live", "polite");
+    const log = cache.getByRole("log");
+    await expect(log).toBeVisible();
+    await expect(log).not.toHaveAttribute("aria-live", "assertive");
   });
 
   test("walks the status chips with the arrow keys, one tab stop for nine", async ({
