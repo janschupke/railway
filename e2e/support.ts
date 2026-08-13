@@ -232,6 +232,26 @@ export async function createServiceOutOfBand(page: Page, name: string) {
 }
 
 /**
+ * Drives `document.visibilityState`, which is what gates the project watcher.
+ *
+ * Two uses, and the second is not obvious. A hidden tab holds no watch connection and
+ * makes no Railway requests — that is the property watch.spec.ts asserts, and it is also
+ * the only way a spec can hold the *counted* faults (`rateLimit`, `unauthorized`) for
+ * itself. Those come off one queue in the fixture, drained by whichever request arrives
+ * first, and the watcher polls once a second: leave it running and it eats the 429s the
+ * spec queued for a user action.
+ */
+export async function setTabVisibility(page: Page, state: "hidden" | "visible") {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", {
+      value,
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, state);
+}
+
+/**
  * Seeds a batch of services in one request, optionally parked at a status.
  *
  * The default fixture holds a single service, which is the right size for every

@@ -7,6 +7,7 @@ import {
   onlyVisible,
   openDestroyDialog,
   row,
+  setTabVisibility,
   settled,
   signIn,
   spinUp,
@@ -246,6 +247,14 @@ test.describe("container lifecycle", () => {
   test("surfaces a Railway rate limit instead of failing silently", async ({
     page,
   }) => {
+    /*
+     * The watcher polls once a second in this suite and draws from the same fault queue,
+     * so it would spend the 429s before the button is ever pressed. Hiding the tab closes
+     * that connection — the app's own documented behaviour, asserted in watch.spec.ts —
+     * which leaves the queued faults for the request this spec is actually about.
+     */
+    await setTabVisibility(page, "hidden");
+
     // Three attempts are made per request, so four queued 429s outlast the retries.
     await injectFaults(page, { rateLimit: 4 });
 

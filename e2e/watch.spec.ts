@@ -1,4 +1,11 @@
-import { createServiceOutOfBand, expect, row, signIn, test } from "./support";
+import {
+  createServiceOutOfBand,
+  expect,
+  row,
+  setTabVisibility,
+  signIn,
+  test,
+} from "./support";
 
 /**
  * The dashboard notices changes it did not make.
@@ -23,7 +30,14 @@ test.describe("the project watcher", () => {
     // this existed the row appeared only when someone pressed Refresh or navigated.
     await createServiceOutOfBand(page, "out-of-band");
 
-    await expect(row(page, "out-of-band")).toBeVisible({ timeout: 20_000 });
+    /*
+     * No timeout override: the suite's interval is one second, so the config's ten is
+     * ample. It used to be 20s, which was wide enough to absorb a full *production* tick
+     * — and that is the only reason this spec stayed green while WATCH_POLL_MS was
+     * ignored by env() and the real interval was 15s. A budget loose enough to hide the
+     * bug it exists to catch is not a budget.
+     */
+    await expect(row(page, "out-of-band")).toBeVisible();
   });
 
   test("holds no connection while the tab is hidden", async ({ page }) => {
@@ -36,18 +50,9 @@ test.describe("the project watcher", () => {
      * resource entry is only recorded when the request *finishes*, and a held SSE stream
      * never does, so the timeline shows nothing at all while one is open.
      */
-    const setVisibility = (state: "hidden" | "visible") =>
-      page.evaluate((value) => {
-        Object.defineProperty(document, "visibilityState", {
-          value,
-          configurable: true,
-        });
-        document.dispatchEvent(new Event("visibilitychange"));
-      }, state);
-
     // Counted from the hide onwards. The connection opened during sign-in predates any
     // listener this test could attach, and — being held open — issues nothing further.
-    await setVisibility("hidden");
+    await setTabVisibility(page, "hidden");
 
     let opened = 0;
     page.on("request", (request) => {
@@ -58,7 +63,7 @@ test.describe("the project watcher", () => {
     await page.waitForTimeout(4_000);
     expect(opened, "a hidden tab opened a watch connection").toBe(0);
 
-    await setVisibility("visible");
+    await setTabVisibility(page, "visible");
     await expect.poll(() => opened).toBeGreaterThan(0);
   });
 });

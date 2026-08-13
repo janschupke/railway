@@ -85,14 +85,25 @@ export function env(): Env {
   if (cached) return cached;
 
   const parsed = schema.safeParse({
-    RAILWAY_CLIENT_ID: process.env.RAILWAY_CLIENT_ID,
-    RAILWAY_CLIENT_SECRET: process.env.RAILWAY_CLIENT_SECRET,
-    SESSION_SECRET: process.env.SESSION_SECRET,
+    /*
+     * Read from the schema's own keys rather than a hand-written literal.
+     *
+     * WATCH_POLL_MS was declared above and left out of the literal below for its entire
+     * life, and because it carries a default nothing ever failed: env() returned 15000
+     * while playwright.config.ts, scripts/serve-e2e.ts and any deployment that set it
+     * were all silently ignored. The variable that exists precisely so an operator can
+     * tune it to their plan's rate limit was the one that could not be tuned.
+     *
+     * A list that has to be kept in step with the schema is a list that drifts. This one
+     * cannot: every field is read from the environment variable of its own name, by
+     * construction, and a field added above needs nothing here.
+     */
+    ...Object.fromEntries(
+      Object.keys(schema.shape).map((key) => [key, process.env[key]]),
+    ),
+    // The one field not read from a variable of its own name: in production the origin
+    // comes from Railway's injected RAILWAY_PUBLIC_DOMAIN instead. See inferredAppUrl.
     APP_URL: inferredAppUrl(),
-    MANAGED_PREFIX: process.env.MANAGED_PREFIX,
-    RAILWAY_ISSUER: process.env.RAILWAY_ISSUER,
-    RAILWAY_API_URL: process.env.RAILWAY_API_URL,
-    RAILWAY_WS_URL: process.env.RAILWAY_WS_URL,
   });
 
   if (!parsed.success) {

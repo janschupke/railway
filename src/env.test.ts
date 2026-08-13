@@ -65,6 +65,33 @@ describe("env", () => {
     expect(env().MANAGED_PREFIX).toBe("spun-");
   });
 
+  it("lets a deployment change the ownership prefix", () => {
+    setEnv({ ...REQUIRED, MANAGED_PREFIX: "rc-" });
+    expect(env().MANAGED_PREFIX).toBe("rc-");
+  });
+
+  it("defaults the watch interval to a quarter of Hobby's hourly budget", () => {
+    setEnv({ ...REQUIRED, WATCH_POLL_MS: undefined });
+    expect(env().WATCH_POLL_MS).toBe(15_000);
+  });
+
+  it("lets the environment set the watch interval", () => {
+    /*
+     * This is the assertion the file was missing. WATCH_POLL_MS was declared in the
+     * schema and left out of the parse input, and because it carries a default nothing
+     * failed — env() returned 15000 while playwright.config.ts, scripts/serve-e2e.ts and
+     * every deployment that set it were ignored. A default test alone cannot see that;
+     * only reading a value back through the environment can.
+     */
+    setEnv({ ...REQUIRED, WATCH_POLL_MS: "1000" });
+    expect(env().WATCH_POLL_MS).toBe(1_000);
+  });
+
+  it("floors the watch interval, so a typo cannot become a self-inflicted DoS", () => {
+    setEnv({ ...REQUIRED, WATCH_POLL_MS: "999" });
+    expect(() => env()).toThrow(/WATCH_POLL_MS/);
+  });
+
   it("names every missing variable at once rather than one per boot", () => {
     setEnv({
       RAILWAY_CLIENT_ID: undefined,
