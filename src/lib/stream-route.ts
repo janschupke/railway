@@ -3,6 +3,9 @@ import "server-only";
 import { requestContext, runWithRequestContext } from "@/lib/log/context";
 import { log, type LogEvent, type LogFields } from "@/lib/logger";
 
+/** What the SSE transport reports on teardown. Mirrors sse.ts's own shape. */
+type SseCloseInfo = { reason: string; durationMs: number };
+
 /**
  * Shared pieces of the two SSE route handlers.
  *
@@ -31,17 +34,34 @@ import { log, type LogEvent, type LogFields } from "@/lib/logger";
  * Release happens before the log, and unconditionally: a logger that throws must not
  * cost the user a slot.
  */
-export function closeStream(
+export function streamCloser(
   event: LogEvent,
   release: () => void,
-  fields: LogFields<Record<string, string | number | undefined>>,
-): void {
+  fields: (info: SseCloseInfo) => LogFields<Record<string, string | number>>,
+): (info: SseCloseInfo) => void {
+  /*
+   * Captured HERE, when the route builds the callback, and not inside it.
+   *
+   * This is the whole reason the helper is a factory rather than a function the callback
+   * calls. Teardown does not always run where the handler ran — a client hangup arrives
+   * through an AbortSignal listener and a runtime cancellation through
+   * ReadableStream.cancel, neither of which is an async resource created by the handler
+   * — so `requestContext()` read at close time returns nothing at all.
+   *
+   * A first attempt at this extraction did read it at close time. Every close line lost
+   * its request_id, subject_id and route, which is precisely the join the line exists
+   * for, and the unit tests could not see it: they assert the fields the caller passes,
+   * and the scope is not one of them. The e2e log output is what showed it.
+   */
   const scope = requestContext();
-  try {
-    release();
-  } finally {
-    const record = () => log.info(event, fields);
-    if (scope) runWithRequestContext(scope, record);
-    else record();
-  }
+
+  return (info) => {
+    try {
+      release();
+    } finally {
+      const record = () => log.info(event, fields(info));
+      if (scope) runWithRequestContext(scope, record);
+      else record();
+    }
+  };
 }

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/server";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heading, Text } from "@/components/ui/text";
+import { PageMain } from "@/components/ui/page";
 
 /**
  * The 404, which until now was Next's built-in one.
@@ -27,7 +28,7 @@ export default async function NotFound() {
   const signedIn = Boolean(await getSession());
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 items-center p-6">
+    <PageMain width="narrow" layout="centre">
       <Card className="w-full space-y-3 p-6">
         <Heading level={1} variant="title">
           {t("title")}
@@ -41,6 +42,6 @@ export default async function NotFound() {
           </a>
         </Button>
       </Card>
-    </main>
+    </PageMain>
   );
 }

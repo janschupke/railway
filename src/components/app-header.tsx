@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { SignOutButton } from "./sign-out-button";
 import { Text } from "./ui/text";
 import { ThemeToggle } from "./ui/theme-toggle";
+import { BarInner } from "@/components/ui/page";
 
 /**
  * The one top bar, rendered from the root layout so every route gets it.
@@ -61,7 +62,7 @@ export async function AppHeader({
      * page nobody will see.
      */
     <header className="border-border bg-surface border-b">
-      <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-3">
+      <BarInner>
         <Link
           href="/"
           prefetch={false}
@@ -88,7 +89,7 @@ export async function AppHeader({
           <ThemeToggle />
           {user && <SignOutButton />}
         </div>
-      </div>
+      </BarInner>
     </header>
   );
 }

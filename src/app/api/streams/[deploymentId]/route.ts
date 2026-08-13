@@ -5,7 +5,7 @@ import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { closeStream } from "@/lib/stream-route";
+import { streamCloser } from "@/lib/stream-route";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
@@ -156,13 +156,12 @@ async function handle(
       // `reason` is what makes this worth having: a stream that ended because the tab
       // closed and one that hit the fifteen-minute ceiling are the same line otherwise,
       // and only the second is a problem.
-      onClose: ({ reason, durationMs }) =>
-        closeStream("stream.closed", release, {
-          deployment_id: deploymentId,
-          phase,
-          reason,
-          duration_ms: durationMs,
-        }),
+      onClose: streamCloser("stream.closed", release, ({ reason, durationMs }) => ({
+        deployment_id: deploymentId,
+        phase,
+        reason,
+        duration_ms: durationMs,
+      })),
     },
   );
 }

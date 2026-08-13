@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorBlock } from "@/components/ui/error-block";
 import { Heading, Text } from "@/components/ui/text";
+import { PageMain } from "@/components/ui/page";
 
 export default function DashboardError({
   error,
@@ -37,7 +38,7 @@ export default function DashboardError({
      * content, and the header above it is unchanged — so snapping from 56rem to 28rem
      * read as landing on a different page rather than as one page reporting a failure.
      */
-    <main className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
+    <PageMain layout="centre">
       <Card className="w-full space-y-3 p-6">
         {/* A page's only heading, at the same rank and role as the landing page's.
             It used to render at body size in a lighter weight than any other h1. */}
@@ -74,6 +75,6 @@ export default function DashboardError({
           </Text>
         )}
       </Card>
-    </main>
+    </PageMain>
   );
 }

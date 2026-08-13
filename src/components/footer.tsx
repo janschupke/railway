@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { LINKS } from "@/lib/constants";
 import { Text } from "./ui/text";
+import { BarInner } from "@/components/ui/page";
 
 /**
  * The app's one footer, rendered from the root layout so the landing page, the
@@ -20,7 +21,7 @@ export async function Footer() {
 
   return (
     <footer className="border-border bg-surface mt-auto border-t">
-      <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-3">
+      <BarInner className="flex-wrap gap-x-6 gap-y-2">
         <Text variant="caption" tone="subtle">
           {t("apiNote")}
         </Text>
@@ -52,7 +53,7 @@ export async function Footer() {
             </a>
           </Text>
         </nav>
-      </div>
+      </BarInner>
     </footer>
   );
 }

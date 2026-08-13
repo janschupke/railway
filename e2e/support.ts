@@ -313,9 +313,26 @@ export async function expectNoA11yViolations(page: Page, context?: string) {
     document.getAnimations().every((animation) => animation.playState !== "running"),
   );
 
-  const results = await new AxeBuilder({ page })
+  /*
+   * Two scans, because the WCAG tags do not cover document structure.
+   *
+   * `page-has-heading-one`, `heading-order` and `bypass` are all tagged best-practice
+   * in axe, so a wcag-only scan reported nothing while /dashboard had no h1 at all and
+   * no page had a skip link. Four rules are named rather than adding the whole
+   * best-practice tag: that pulls in `region`, `landmark-unique` and others whose
+   * fallout is unbounded and unrelated to the defect being fixed. Widening further is a
+   * deliberate act, one rule at a time.
+   */
+  // Sequential, not Promise.all: axe-core injects one instance per frame and refuses a
+  // second concurrent run outright ("Axe is already running").
+  const wcag = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
+  const structure = await new AxeBuilder({ page })
+    .withRules(["page-has-heading-one", "heading-order", "landmark-one-main", "bypass"])
+    .analyze();
+
+  const results = { violations: [...wcag.violations, ...structure.violations] };
 
   const summary = results.violations.map((v) => ({
     id: v.id,

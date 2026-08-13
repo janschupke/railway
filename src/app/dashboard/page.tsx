@@ -16,6 +16,8 @@ import { EmptyState } from "@/components/ui/misc";
 import { LINKS } from "@/lib/constants";
 import { ContainerSection } from "./container-section";
 import { loadDashboardShell } from "./data";
+import { PageMain } from "@/components/ui/page";
+import { Heading } from "@/components/ui/text";
 
 // The dashboard is a live view of Railway; caching it would show stale containers.
 export const dynamic = "force-dynamic";
@@ -83,7 +85,24 @@ export default async function DashboardPage({
   );
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6">
+    <PageMain>
+      {/*
+        The page had no h1 at all — its highest heading was the container section's h2,
+        so the document outline started at level two and the screen had no title.
+
+        Invisible to every gate: axe's `page-has-heading-one` and `heading-order` are
+        best-practice rules, and e2e/support.ts scans wcag tags only. The second scan
+        added in this commit is what makes it stay fixed.
+
+        Visually hidden rather than shown. The dashboard's subject is the project
+        picker directly below, which names the project and environment far more usefully
+        than a repeated app name would; a visible title here would be chrome restating
+        what the next control already says. The outline and the screen-reader announce
+        both need it to exist, which is what this does.
+      */}
+      <Heading level={1} className="sr-only">
+        {t("title")}
+      </Heading>
       {error ? (
         <ErrorBlock
           message={error}
@@ -226,6 +245,6 @@ export default async function DashboardPage({
           )}
         </>
       )}
-    </main>
+    </PageMain>
   );
 }

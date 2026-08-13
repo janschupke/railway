@@ -4,6 +4,7 @@ import {
   ProjectPickerSkeleton,
   SpinUpFormSkeleton,
 } from "@/components/dashboard-skeletons";
+import { PageMain } from "@/components/ui/page";
 
 /**
  * Cold navigation into the dashboard.
@@ -21,14 +22,10 @@ export default async function DashboardLoading() {
   const t = await getTranslations();
 
   return (
-    <main
-      className="mx-auto w-full max-w-4xl flex-1 space-y-6 p-6"
-      aria-busy="true"
-      aria-label={t("dashboard.loading")}
-    >
+    <PageMain aria-busy="true" aria-label={t("dashboard.loading")}>
       <ProjectPickerSkeleton />
       <SpinUpFormSkeleton />
       <ContainerSectionSkeleton heading={t("dashboard.containersHeading")} />
-    </main>
+    </PageMain>
   );
 }

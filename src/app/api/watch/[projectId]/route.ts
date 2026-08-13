@@ -7,7 +7,7 @@ import { fingerprint } from "@/lib/railway/watch-fingerprint";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { closeStream } from "@/lib/stream-route";
+import { streamCloser } from "@/lib/stream-route";
 import { sleep } from "@/lib/utils";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { WATCH } from "@/lib/constants";
@@ -143,12 +143,11 @@ async function handle(
     },
     {
       clientSignal: request.signal,
-      onClose: ({ reason, durationMs }) =>
-        closeStream("watch.closed", release, {
-          project_id: projectId,
-          reason,
-          duration_ms: durationMs,
-        }),
+      onClose: streamCloser("watch.closed", release, ({ reason, durationMs }) => ({
+        project_id: projectId,
+        reason,
+        duration_ms: durationMs,
+      })),
     },
   );
 }

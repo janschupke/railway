@@ -7,6 +7,7 @@ import { SignInButton } from "@/components/sign-in-button";
 import { Banner } from "@/components/ui/banner";
 import { Card } from "@/components/ui/card";
 import { Heading, Text } from "@/components/ui/text";
+import { PageMain } from "@/components/ui/page";
 
 /*
  * The OAuth failure codes this app writes into `?error=`, plus the ones Railway passes
@@ -48,7 +49,7 @@ export default async function LandingPage({
      * it lives in the app header now, and the hero has moved into the card so the page
      * is one object instead of three blocks adrift on the canvas.
      */
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-4 p-6">
+    <PageMain width="narrow" layout="hero">
       {message && <Banner tone="error">{message}</Banner>}
 
       <Card className="space-y-4 p-6">
@@ -82,6 +83,6 @@ export default async function LandingPage({
           </p>
         </Text>
       </Card>
-    </main>
+    </PageMain>
   );
 }

@@ -25,10 +25,30 @@ import {
  * a native <select> for a custom one defensible.
  */
 test.describe("keyboard operation", () => {
+  test("offers a skip link as the very first stop, on every page", async ({ page }) => {
+    /*
+     * Without it, reaching the content costs five or six stops on every navigation —
+     * the brand link, three theme radios, sign out. Axe stays silent because its
+     * `bypass` rule is satisfied by the <main> landmark alone, so nothing but this
+     * notices if the link is dropped or stops pointing anywhere.
+     */
+    await page.goto("/");
+
+    await page.keyboard.press("Tab");
+    const skip = page.getByRole("link", { name: /skip to content/i });
+    await expect(skip).toBeFocused();
+    // sr-only until focused: it must not take up space for everyone else.
+    await expect(skip).toBeInViewport();
+
+    await page.keyboard.press("Enter");
+    await expect(page.locator("main")).toBeFocused();
+  });
+
   test("signs in without a mouse", async ({ page }) => {
     await page.goto("/");
 
-    await page.keyboard.press("Tab"); // the brand link, which the header puts first
+    // Past the skip link, then the brand link the header puts first.
+    await page.keyboard.press("Tab");
     await page.getByRole("link", { name: /sign in with railway/i }).focus();
     await page.keyboard.press("Enter");
 

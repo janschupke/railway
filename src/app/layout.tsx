@@ -6,6 +6,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { AppHeader } from "@/components/app-header";
 import { Footer } from "@/components/footer";
+import { SkipLink } from "@/components/ui/page";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -28,6 +29,7 @@ const NO_FLASH_THEME = `(function(){try{var t=localStorage.getItem("theme");if(t
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const locale = await getLocale();
+  const t = await getTranslations("common");
   /*
    * Minted per request in src/proxy.ts. Next stamps its own injected scripts from the
    * request's CSP header automatically; an author-written dangerouslySetInnerHTML
@@ -57,6 +59,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           React discards the server tree and renders a second copy alongside it.
         */}
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
+        {/*
+          The first focusable thing on every page.
+
+          Without it a keyboard user pays five or six stops — the brand link, three theme
+          radios, sign out — before reaching the content, on every navigation. Axe does
+          not report it: its `bypass` rule is satisfied by the presence of a <main>
+          landmark, and Lighthouse does not look at all, so all three gates were silent
+          on this.
+
+          A plain anchor, in the Server Component: no JS, and it works on the very first
+          paint rather than after hydration, which is when a keyboard user is most likely
+          to be pressing Tab.
+        */}
+        <SkipLink label={t("skipToContent")} />
         {/*
           ToastProvider deliberately lives in the dashboard layout, not here: it is the
           only subtree that raises toasts, and mounting Radix Toast globally cost the

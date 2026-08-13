@@ -29,11 +29,27 @@
     "route chunk is byte-identical. Set at actual + ~3% as the rule above intends.",
     "/dashboard absorbed the feature itself at 211.7 -> 214.7, inside its existing budget:",
     "the status chips reuse ToggleGroup, already in the graph via ThemeToggle, and the",
-    "origin checkboxes are native inputs rather than Radix Checkbox."
+    "origin checkboxes are native inputs rather than Radix Checkbox.",
+    "",
+    "/dashboard 215 -> 222: the accessibility and shared-refresh work. Measured 215.0,",
+    "which is 0.0 kB over the previous number — the budget had been seeded flush against",
+    "214.7 rather than with the ~3% this file's own rule asks for, so it was one rounding",
+    "step from failing on a change that did not touch the route. Three additions account",
+    "for it: use-throttled-refresh, which container-row now calls instead of useRouter",
+    "directly; the ui/page column primitive, reached from the layout's header and footer;",
+    "and the skip link. All three are small — the whole delta is 0.3 kB — and the page",
+    "shell replaces seven hand-written className blobs, so the source is smaller than",
+    "before. Re-seeded at actual + ~3% as the rule above intends, rather than at actual.",
+    "",
+    "/_not-found 167 -> 171: same measurement, 165.8 against 161.8 previously. The 404",
+    "renders the root layout, so it pays for the same shared graph the dashboard does —",
+    "the page primitive and the skip link — plus the layout re-splitting its chunks. It",
+    "was already the route with the least of its own code and the most inherited, which",
+    "is why a change to shared chrome shows up here most clearly."
   ],
   "routes": {
     "/": 171,
-    "/dashboard": 215,
-    "/_not-found": 167
+    "/dashboard": 222,
+    "/_not-found": 171
   }
 }

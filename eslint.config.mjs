@@ -209,6 +209,13 @@ const eslintConfig = defineConfig([
               "value",
               "data-.*",
               "aria-hidden",
+              /*
+               * aria-busy takes "true"/"false" — a token the platform defines, not copy.
+               * Every other aria-* attribute stays checked, because the ones that carry
+               * text (aria-label, aria-description) are exactly the strings a translator
+               * needs and the ones most easily forgotten.
+               */
+              "aria-busy",
               // Component APIs whose values are enum members, not sentences.
               "type",
               "role",
@@ -216,6 +223,14 @@ const eslintConfig = defineConfig([
               "size",
               "tone",
               "shape",
+              /*
+               * PageMain and BarInner's cva variants. Same class as `variant` and `size`
+               * above: consumed by class-variance-authority to select a recipe, never
+               * rendered, and a translator has nothing to do with "narrow" or "hero".
+               */
+              "width",
+              "layout",
+              "pad",
               "side",
               "align",
               "orientation",

@@ -6,6 +6,7 @@
   "common": {
     "cancel": "Cancel",
     "retry": "Retry",
+    "skipToContent": "Skip to content",
     "signIn": "Sign in with Railway",
     "signInPending": "Redirecting to Railway…",
     "signOut": "Sign out",
@@ -35,6 +36,7 @@
     "backToStart": "Back to the start"
   },
   "dashboard": {
+    "title": "Dashboard",
     "loading": "Loading dashboard",
     "containersHeading": "Containers",
     "containersListLabel": "Containers",
