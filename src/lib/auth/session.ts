@@ -13,21 +13,50 @@ export const CONSENT_COOKIE = "rc_consent";
 export const CONSENT_PARAM = "consent";
 
 /**
- * The session cookie's name, which depends on the origin serving it.
+ * A cookie's name, which depends on the origin serving it.
  *
  * `__Host-` binds a cookie to exactly one origin: no sibling subdomain can overwrite it
  * and a `Domain` attribute is forbidden, which closes cookie-tossing — an attacker with
- * a write primitive on a related host planting *their* session and having the victim
- * act in it. Without the prefix nothing in the OIDC flow prevents that, because state
- * and PKCE only guard the callback, and this path skips the callback entirely.
+ * a write primitive on a related host planting *their* value and having the victim act
+ * on it.
  *
  * The prefix also *requires* Secure, which plain-http localhost cannot satisfy. Rather
  * than depend on how each browser resolves that contradiction, the name follows the
  * origin: dev, the E2E fixture on http://localhost:3100 and Lighthouse keep the
- * unprefixed name and behave exactly as before.
+ * unprefixed names and behave exactly as before.
+ */
+function hostCookieName(base: string, appUrl: string): string {
+  return appUrl.startsWith("https://") ? `__Host-${base}` : base;
+}
+
+/**
+ * The session cookie's name.
+ *
+ * Cookie-tossing against this one plants a whole session, and nothing in the OIDC flow
+ * prevents it: state and PKCE guard only the callback, and this path skips the callback
+ * entirely.
  */
 export function sessionCookieName(appUrl: string): string {
-  return appUrl.startsWith("https://") ? `__Host-${SESSION_COOKIE}` : SESSION_COOKIE;
+  return hostCookieName(SESSION_COOKIE, appUrl);
+}
+
+/**
+ * Names for the three cookies that live only for the duration of a sign-in.
+ *
+ * They were left unprefixed while the session cookie was not, which was an oversight
+ * rather than a decision. PKCE and state ARE the callback's CSRF defence: overwrite them
+ * from a sibling host and the victim completes the flow against an authorization code
+ * the attacker chose, ending up signed into the attacker's Railway account and filing
+ * their own containers there. The blast radius is smaller than a planted session and
+ * the public suffix list blunts it on railway.app itself, but neither is a reason for
+ * the two halves of one flow to be protected differently.
+ */
+export function transientCookieNames(appUrl: string) {
+  return {
+    pkce: hostCookieName(PKCE_COOKIE, appUrl),
+    state: hostCookieName(STATE_COOKIE, appUrl),
+    consent: hostCookieName(CONSENT_COOKIE, appUrl),
+  };
 }
 
 type SessionUser = {

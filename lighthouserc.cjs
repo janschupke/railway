@@ -2,7 +2,9 @@ const { existsSync, readFileSync } = require("node:fs");
 
 const APP_PORT = process.env.APP_PORT ?? 3100;
 const APP_URL = `http://localhost:${APP_PORT}`;
-const COOKIE_FILE = process.env.LH_COOKIE_FILE ?? ".lighthouse-cookie";
+// Inside .lighthouseci/, which is already ignored whole — the file is a live sealed
+// session and does not belong at the repo root, in every build context. See lh-auth.ts.
+const COOKIE_FILE = process.env.LH_COOKIE_FILE ?? ".lighthouseci/cookie";
 
 /*
  * Written by scripts/lh-auth.ts, which completes the real OAuth round trip against the

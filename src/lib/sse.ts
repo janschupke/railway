@@ -25,6 +25,20 @@ type SseCloseReason =
 // an export nothing imports is a knip failure.
 type SseCloseInfo = { reason: SseCloseReason; durationMs: number };
 
+/**
+ * One definition, because both exits have to send them.
+ *
+ * The content type is what makes a response an event stream to the browser; anything
+ * else, 204 included, is a fatal error to EventSource rather than a stream that ended.
+ */
+const SSE_HEADERS = {
+  "content-type": "text/event-stream; charset=utf-8",
+  "cache-control": "no-cache, no-transform",
+  connection: "keep-alive",
+  // Defensive: stops any nginx-style proxy from buffering the stream.
+  "x-accel-buffering": "no",
+} as const;
+
 export type SseOptions = {
   keepaliveMs?: number;
   maxDurationMs?: number;
@@ -86,12 +100,18 @@ export function sseResponse(
    *
    * Returning early rather than constructing the stream keeps `produce` from ever running,
    * so there is no upstream socket to unwind.
+   *
+   * It is still an event-stream response, and that part is not cosmetic. A 204, or any
+   * response without this content type, is a *fatal* condition to EventSource: it fires
+   * `error` and gives up permanently rather than reconnecting. An immediately-finished
+   * stream is the case EventSource already handles by reconnecting, which is exactly
+   * what a client that is in fact still there should get.
    */
   if (clientSignal?.aborted) {
     claim("client-abort");
     controller.abort();
     onClose?.({ reason: "client-abort", durationMs: 0 });
-    return new Response(null, { status: 204 });
+    return new Response("", { headers: SSE_HEADERS });
   }
 
   clientSignal?.addEventListener(
@@ -211,13 +231,5 @@ export function sseResponse(
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      // Defensive: stops any nginx-style proxy from buffering the stream.
-      "x-accel-buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: SSE_HEADERS });
 }

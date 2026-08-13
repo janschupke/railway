@@ -24,6 +24,23 @@ function isSecureOrLocal(value: string): boolean {
   }
 }
 
+/**
+ * The same rule as isSecureOrLocal, for the WebSocket scheme.
+ *
+ * `z.url()` accepts `ws://` — it parses, so it is a URL — which is why this cannot be
+ * left to the type alone. The subscription sends the Railway access token on the upgrade
+ * request, so a `ws://` host that is not loopback puts a live credential on the wire in
+ * clear text, with the operator's only warning being that they typed it.
+ */
+function isWebSocketSecureOrLocal(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "wss:" || LOCAL_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export const RAILWAY_DEFAULTS = {
   ISSUER: "https://backboard.railway.com",
   API_URL: "https://backboard.railway.com/graphql/v2",
@@ -74,7 +91,13 @@ const schema = z.object({
    */
   RAILWAY_ISSUER: z.url().default(RAILWAY_DEFAULTS.ISSUER),
   RAILWAY_API_URL: z.url().default(RAILWAY_DEFAULTS.API_URL),
-  RAILWAY_WS_URL: z.string().min(1).default(RAILWAY_DEFAULTS.WS_URL),
+  RAILWAY_WS_URL: z
+    .url("RAILWAY_WS_URL must be an absolute URL")
+    .refine(
+      isWebSocketSecureOrLocal,
+      "RAILWAY_WS_URL must use wss unless it points at localhost",
+    )
+    .default(RAILWAY_DEFAULTS.WS_URL),
 });
 
 export type Env = z.infer<typeof schema>;

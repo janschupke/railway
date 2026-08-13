@@ -41,7 +41,32 @@ describe("env", () => {
     });
 
     expect(env().RAILWAY_ISSUER).toBe("http://localhost:4010");
+    // Was set but never asserted, so nothing here held the override actually applied.
+    expect(env().RAILWAY_API_URL).toBe("http://localhost:4010/graphql/v2");
     expect(env().RAILWAY_WS_URL).toBe("ws://localhost:4010/graphql/v2");
+  });
+
+  it("refuses a cleartext WebSocket endpoint that is not loopback", () => {
+    /*
+     * The subscription sends the Railway access token on the upgrade request, so a
+     * `ws://` host that is not loopback puts a live credential on the wire in clear
+     * text. This field was `z.string().min(1)` while both its siblings were `z.url()` —
+     * and `z.url()` alone would not have caught it either, since `ws://` parses.
+     */
+    setEnv({ ...REQUIRED, RAILWAY_WS_URL: "ws://backboard.railway.com/graphql/v2" });
+    expect(() => env()).toThrow(/RAILWAY_WS_URL/);
+
+    setEnv({ ...REQUIRED, RAILWAY_WS_URL: "not-a-url" });
+    expect(() => env()).toThrow(/RAILWAY_WS_URL/);
+  });
+
+  it("allows wss anywhere, and ws only on loopback", () => {
+    setEnv({ ...REQUIRED, RAILWAY_WS_URL: "wss://backboard.railway.com/graphql/v2" });
+    expect(env().RAILWAY_WS_URL).toBe("wss://backboard.railway.com/graphql/v2");
+
+    // The e2e fixture, which must keep working.
+    setEnv({ ...REQUIRED, RAILWAY_WS_URL: "ws://127.0.0.1:4010/graphql/v2" });
+    expect(env().RAILWAY_WS_URL).toBe("ws://127.0.0.1:4010/graphql/v2");
   });
 
   it("derives APP_URL from Railway's injected domain in production", () => {

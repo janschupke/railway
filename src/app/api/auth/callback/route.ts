@@ -7,20 +7,19 @@ import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
 import {
-  CONSENT_COOKIE,
   CONSENT_PARAM,
-  PKCE_COOKIE,
-  STATE_COOKIE,
   cookieOptions,
   sealSession,
   sessionCookieName,
+  transientCookieNames,
   type RailwaySession,
 } from "@/lib/auth/session";
 
-function clearTransients<T extends NextResponse>(response: T): T {
-  response.cookies.delete(PKCE_COOKIE);
-  response.cookies.delete(STATE_COOKIE);
-  response.cookies.delete(CONSENT_COOKIE);
+function clearTransients<T extends NextResponse>(response: T, appUrl: string): T {
+  const names = transientCookieNames(appUrl);
+  response.cookies.delete(names.pkce);
+  response.cookies.delete(names.state);
+  response.cookies.delete(names.consent);
   return response;
 }
 
@@ -30,10 +29,10 @@ function clearTransients<T extends NextResponse>(response: T): T {
  * failed exchange, a response with no `sub`, and a grant that withheld a refresh token —
  * were all silent, and one line closes all five without any chance of drifting apart.
  */
-function fail(request: NextRequest, reason: string) {
+function fail(request: NextRequest, appUrl: string, reason: string) {
   log.warn("auth.callback.failed", { reason });
   const url = new URL(`/?error=${encodeURIComponent(reason)}`, request.url);
-  return clearTransients(NextResponse.redirect(url));
+  return clearTransients(NextResponse.redirect(url), appUrl);
 }
 
 /**
@@ -66,10 +65,11 @@ export async function GET(request: NextRequest) {
 async function complete(request: NextRequest) {
   const { APP_URL, SESSION_SECRET } = env();
 
-  const codeVerifier = request.cookies.get(PKCE_COOKIE)?.value;
-  const expectedState = request.cookies.get(STATE_COOKIE)?.value;
+  const names = transientCookieNames(APP_URL);
+  const codeVerifier = request.cookies.get(names.pkce)?.value;
+  const expectedState = request.cookies.get(names.state)?.value;
   if (!codeVerifier || !expectedState) {
-    return fail(request, "missing_pkce_state");
+    return fail(request, APP_URL, "missing_pkce_state");
   }
 
   /*
@@ -82,7 +82,7 @@ async function complete(request: NextRequest) {
    * not recognise as the same sentence, so nothing the user sees changes.
    */
   const error = request.nextUrl.searchParams.get("error");
-  if (error) return fail(request, classifyProviderError(error));
+  if (error) return fail(request, APP_URL, classifyProviderError(error));
 
   /*
    * Rebuild the callback URL from APP_URL rather than trusting request.url: behind
@@ -102,10 +102,10 @@ async function complete(request: NextRequest) {
       return null;
     });
 
-  if (!tokens) return fail(request, "token_exchange_failed");
+  if (!tokens) return fail(request, APP_URL, "token_exchange_failed");
 
   const claims = tokens.claims();
-  if (!claims?.sub) return fail(request, "missing_id_token");
+  if (!claims?.sub) return fail(request, APP_URL, "missing_id_token");
 
   if (!tokens.refresh_token) {
     /*
@@ -121,11 +121,11 @@ async function complete(request: NextRequest) {
      * is already here, consent has been shown and Railway still withheld the token, so
      * there is nothing left to try.
      */
-    if (request.cookies.get(CONSENT_COOKIE)?.value === "1") {
-      return fail(request, "no_refresh_token");
+    if (request.cookies.get(names.consent)?.value === "1") {
+      return fail(request, APP_URL, "no_refresh_token");
     }
     const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, request.url);
-    return clearTransients(NextResponse.redirect(retry));
+    return clearTransients(NextResponse.redirect(retry), APP_URL);
   }
 
   const session: RailwaySession = {
@@ -159,5 +159,5 @@ async function complete(request: NextRequest) {
     await sealSession(session, SESSION_SECRET),
     { ...cookieOptions(APP_URL), maxAge: SESSION.MAX_AGE_SECONDS },
   );
-  return clearTransients(response);
+  return clearTransients(response, APP_URL);
 }

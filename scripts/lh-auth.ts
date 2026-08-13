@@ -10,11 +10,21 @@
  * One browser, one page. Never a pool.
  */
 
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { chromium } from "@playwright/test";
 
 const APP_URL = `http://localhost:${process.env.APP_PORT ?? 3100}`;
-const OUTPUT = process.env.LH_COOKIE_FILE ?? ".lighthouse-cookie";
+/*
+ * Under .lighthouseci/ rather than at the repo root.
+ *
+ * The file holds a live sealed session. It is only ever the fake Railway's, and it was
+ * always gitignored — but a bare dotfile at the root is inside every `docker build`
+ * context and every `npm pack`, and "it is only the fixture's" is a property of today's
+ * usage rather than of the file. The directory it moves into is already ignored whole,
+ * so the ignore rule cannot be forgotten for a sibling later.
+ */
+const OUTPUT = process.env.LH_COOKIE_FILE ?? ".lighthouseci/cookie";
 
 const browser = await chromium.launch();
 try {
@@ -32,6 +42,7 @@ try {
     process.exit(1);
   }
 
+  mkdirSync(dirname(OUTPUT), { recursive: true });
   writeFileSync(OUTPUT, `${session.name}=${session.value}`, "utf8");
   console.log(`Wrote session cookie to ${OUTPUT}`);
 } finally {

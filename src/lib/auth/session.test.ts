@@ -6,6 +6,7 @@ import {
   openSession,
   sealSession,
   sessionCookieName,
+  transientCookieNames,
   type RailwaySession,
 } from "./session";
 
@@ -89,6 +90,32 @@ describe("sessionCookieName", () => {
     // The prefix requires Secure. Rather than depend on how each browser resolves that
     // over http://localhost, dev and the e2e fixture keep the unprefixed name.
     expect(sessionCookieName("http://localhost:3100")).toBe("rc_session");
+  });
+});
+
+describe("transientCookieNames", () => {
+  it("gives the sign-in cookies the same protection as the session", () => {
+    /*
+     * PKCE and state ARE the callback's CSRF defence, and they were left unprefixed
+     * while the cookie they exist to protect was not. Overwrite them from a sibling
+     * host and the victim completes the flow against an authorization code the attacker
+     * chose — signed into the attacker's Railway account, filing their own containers
+     * there. Smaller blast radius than a planted session, but not a reason for the two
+     * halves of one flow to be protected differently.
+     */
+    expect(transientCookieNames("https://console.up.railway.app")).toEqual({
+      pkce: "__Host-rc_pkce",
+      state: "__Host-rc_state",
+      consent: "__Host-rc_consent",
+    });
+  });
+
+  it("keeps the plain names on localhost, exactly as the session cookie does", () => {
+    expect(transientCookieNames("http://localhost:3100")).toEqual({
+      pkce: "rc_pkce",
+      state: "rc_state",
+      consent: "rc_consent",
+    });
   });
 });
 

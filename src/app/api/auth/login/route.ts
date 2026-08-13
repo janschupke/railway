@@ -5,13 +5,7 @@ import { SCOPES, oidcConfig } from "@/lib/auth/oidc";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
-import {
-  CONSENT_COOKIE,
-  CONSENT_PARAM,
-  PKCE_COOKIE,
-  STATE_COOKIE,
-  cookieOptions,
-} from "@/lib/auth/session";
+import { CONSENT_PARAM, cookieOptions, transientCookieNames } from "@/lib/auth/session";
 
 /**
  * Starts the authorization flow.
@@ -56,12 +50,13 @@ async function start(request: NextRequest) {
     ...cookieOptions(APP_URL),
     maxAge: SESSION.TRANSIENT_MAX_AGE_SECONDS,
   };
-  response.cookies.set(PKCE_COOKIE, codeVerifier, opts);
-  response.cookies.set(STATE_COOKIE, state, opts);
+  const names = transientCookieNames(APP_URL);
+  response.cookies.set(names.pkce, codeVerifier, opts);
+  response.cookies.set(names.state, state, opts);
 
   // Records which kind of attempt this is, so the callback's retry cannot become a loop.
-  if (forceConsent) response.cookies.set(CONSENT_COOKIE, "1", opts);
-  else response.cookies.delete(CONSENT_COOKIE);
+  if (forceConsent) response.cookies.set(names.consent, "1", opts);
+  else response.cookies.delete(names.consent);
 
   // debug: no identity is known yet and it is one redirect. It earns its place only as
   // the denominator for an abandoned-sign-in rate, which is not an every-deploy question.

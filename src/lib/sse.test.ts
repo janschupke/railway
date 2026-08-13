@@ -234,7 +234,18 @@ describe("sseResponse", () => {
       expect(seen[0]?.reason).toBe("client-abort");
       // Never started, so there is no upstream socket to unwind.
       expect(produced).toBe(false);
-      expect(response.status).toBe(204);
+      /*
+       * Still an event stream, and not a 204. Anything without this content type is a
+       * fatal condition to EventSource — it fires `error` and stops reconnecting — where
+       * a stream that simply finished is the case it already handles. Getting this wrong
+       * turned a reconnect into a dead watcher, which showed up as a list that stopped
+       * responding rather than as anything resembling a stream defect.
+       */
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe(
+        "text/event-stream; charset=utf-8",
+      );
+      expect(await response.text()).toBe("");
     });
 
     it("clears its timers even when the caller's teardown throws", async () => {

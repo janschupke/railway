@@ -48,6 +48,8 @@ next-env.d.ts
 /test-results
 /coverage
 
-# Lighthouse
+# Lighthouse. The session cookie lh-auth.ts mints lives inside .lighthouseci/, so one
+# entry covers it; the old root-level /.lighthouse-cookie is kept so a tree that still
+# has one from a previous run does not start showing it as untracked.
 /.lighthouseci
 /.lighthouse-cookie
