@@ -97,11 +97,20 @@ Railway, **`DOCKERFILE` builder** — see `railway.json` and the `Dockerfile`. H
 `startCommand`**: the runtime stage has no package manager in it, so `pnpm start` would
 build cleanly and then fail to boot. `CMD` runs `next start` directly.
 
-`APP_URL` is derived from Railway's injected `RAILWAY_PUBLIC_DOMAIN` in production and
-only needs setting locally. The build sets a placeholder for it and for the three
-credentials, inline on the `pnpm build` command, so nothing outside can override them and
-no image layer records them — the same rule `ci.yml` states, enforced rather than
-restated.
+The service needs three variables: `RAILWAY_CLIENT_ID`, `RAILWAY_CLIENT_SECRET`, and a
+`SESSION_SECRET` of at least 32 characters.
+
+**And a public domain.** `APP_URL` is the fourth required field and nobody sets it in
+production — it is derived from `RAILWAY_PUBLIC_DOMAIN`, which Railway injects only once
+the service _has_ a domain, not on every deployment. A new service has neither, so `env()`
+fails, `/api/health` answers 503 by design, and the platform reports **"Healthcheck
+failure"** with nothing about a missing variable in it. Generate a domain under Settings →
+Networking, or set `APP_URL` explicitly. The schema message names `RAILWAY_PUBLIC_DOMAIN`
+for this reason, and `boot.env_invalid` puts it in the deploy log before the first request.
+
+The build sets a placeholder for those four inline on the `pnpm build` command, so nothing
+outside can override them and no image layer records them — the same rule `ci.yml` states,
+enforced rather than restated.
 
 ### Why not NIXPACKS
 

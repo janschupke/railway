@@ -82,6 +82,20 @@ describe("env", () => {
     expect(env().APP_URL).toBe("https://console.up.railway.app");
   });
 
+  it("names RAILWAY_PUBLIC_DOMAIN when the origin cannot be derived", () => {
+    /*
+     * The healthcheck failure this message exists for. Three variables set, no public
+     * domain on the service yet, so Railway injects no RAILWAY_PUBLIC_DOMAIN, APP_URL
+     * cannot be derived and /api/health answers 503 — a correctly-built deployment
+     * reported as unhealthy. "APP_URL must be an absolute URL" sent the operator looking
+     * for a variable they were right not to have set.
+     */
+    setEnv({ ...REQUIRED, APP_URL: undefined, RAILWAY_PUBLIC_DOMAIN: undefined });
+
+    expect(() => env()).toThrow(/RAILWAY_PUBLIC_DOMAIN/);
+    expect(() => env()).toThrow(/generate one/i);
+  });
+
   it("prefers an explicit APP_URL over the injected domain", () => {
     setEnv({ ...REQUIRED, RAILWAY_PUBLIC_DOMAIN: "console.up.railway.app" });
     expect(env().APP_URL).toBe("http://localhost:3000");

@@ -70,8 +70,21 @@ export const schema = z.object({
    * Gated on the host rather than NODE_ENV on purpose: Playwright and serve-e2e both
    * run NODE_ENV=production against http://localhost:3100.
    */
+  /*
+   * The message names RAILWAY_PUBLIC_DOMAIN because APP_URL is the one field nobody sets
+   * directly in production — inferredAppUrl derives it — so "APP_URL must be an absolute
+   * URL" sent an operator looking for a variable they were right not to have set. Railway
+   * injects RAILWAY_PUBLIC_DOMAIN only once the service has a public domain, which a new
+   * service does not until someone generates one, and until then this is the whole reason
+   * a correctly-built deployment fails its healthcheck.
+   */
   APP_URL: z
-    .url("APP_URL must be an absolute URL")
+    .url(
+      "APP_URL is not set and could not be derived. On Railway it comes from " +
+        "RAILWAY_PUBLIC_DOMAIN, which is injected only once the service has a public " +
+        "domain: generate one under Settings > Networking, or set APP_URL explicitly " +
+        "to the origin this app is reached at.",
+    )
     .refine(isSecureOrLocal, "APP_URL must use https unless it points at localhost"),
   /**
    * Services this app creates are named `<prefix><name>`. The prefix is the
