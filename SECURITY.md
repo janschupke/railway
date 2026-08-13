@@ -186,9 +186,11 @@ reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm light
   name per line. Never recorded: email, display name, profile image, access, refresh or
   id tokens, `Error.cause`, the sealed cookie, or container stdout. Auth events
   (sign-in, sign-out, refresh, refresh failure, CSRF rejection) and state-changing
-  actions (`container.created`, `container.destroyed`, `container.destroy_refused`) are
-  logged at `info` or `warn` — this is the audit trail Railway does not keep once a
-  service is deleted.
+  actions (`container.created`, `container.create_failed`, `container.destroyed`,
+  `container.destroy_refused`) are logged at `info` or `warn` — this is the audit trail
+  Railway does not keep once a service is deleted. A create is recorded whether or not the
+  deploy that follows it succeeds: an orphaned service is the case the record is most
+  needed for, and `outcome` on `container.created` says which one it was.
 - **The rejected `deploymentId` is deliberately not logged.** It is an unbounded,
   attacker-controlled string straight off the URL, and putting it in a field an operator
   greps is the injection surface the validator exists to close. `id_length` carries the

@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { railwayApiUrl } from "@/lib/railway/client";
+import { logRecords, rawLogLines } from "@/test/log-capture";
 
 const revalidatePath = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
@@ -87,6 +88,9 @@ const spinUpForm = (over: Record<string, string> = {}) =>
     image: "redis:7-alpine",
     ...over,
   });
+
+/** The one record carrying an event name, so an assertion names the event it means. */
+const record = (event: string) => logRecords().find((r) => r.msg === event);
 
 beforeEach(() => {
   revalidatePath.mockClear();
@@ -201,6 +205,85 @@ describe("spinUp", () => {
 
     expect(result).toMatchObject({ ok: false });
     expect(result.ok ? "" : result.error).toMatch(/Created cache/);
+    // A service exists, so the audit line ran — and says it is not running.
+    expect(record("container.created")).toMatchObject({
+      service_id: "s",
+      outcome: "variables_failed",
+    });
+  });
+
+  it("names the service when Railway refuses the deploy", async () => {
+    /*
+     * The service exists on Railway and is billable. Answering with a generic failure —
+     * which is what an uncaught deploy error produced — left the user with an orphan they
+     * had never been told the name of, and left the audit trail with no record of it at
+     * all: `container.created` was downstream of the throw.
+     */
+    let generated = "";
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_orphan", name: "spun-cache" } },
+        }),
+      ),
+      api.mutation("VariableCollectionUpsert", ({ variables }) => {
+        const sent = (variables.input as { variables: Record<string, string> })
+          .variables;
+        generated = sent.POSTGRES_PASSWORD!;
+        return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    const result = await spinUp(null, spinUpForm({ image: "postgres:16-alpine" }));
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Created cache, but Railway refused to deploy it. Destroy it and try again.",
+    });
+    expect(record("container.created")).toMatchObject({
+      project_id: "p1",
+      environment_id: "e1",
+      service_name: "spun-cache",
+      service_id: "svc_orphan",
+      image: "postgres:16-alpine",
+      deployment_id: null,
+      outcome: "deploy_failed",
+      variable_names: "POSTGRES_PASSWORD",
+    });
+    // The un-deployed service has to appear in the list for the user to destroy it.
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    // Names only, on the failure path as much as on the success one.
+    expect(generated).not.toBe("");
+    expect(rawLogLines().join("")).not.toContain(generated);
+  });
+
+  it("records the attempt when the service itself could not be created", async () => {
+    // Nothing exists on Railway, so there is nothing to name — but "who tried to create
+    // what, from which image" is the question the audit trail is for, and reportError's
+    // own line carries none of it.
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    const result = await spinUp(null, spinUpForm());
+
+    expect(result).toMatchObject({ ok: false });
+    expect(record("container.create_failed")).toMatchObject({
+      project_id: "p1",
+      environment_id: "e1",
+      service_name: "spun-cache",
+      image: "redis:7-alpine",
+    });
+    // No service was created, so nothing may claim one was.
+    expect(record("container.created")).toBeUndefined();
   });
 
   it("refuses a duplicate name without calling Railway", async () => {

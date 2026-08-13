@@ -934,7 +934,8 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   upstream connection per viewer per replica. That is what SSE's replica affinity forces
   once there is more than one instance.
 - **An audit log** of spin-up/spin-down per user — now half done. The events are recorded
-  (`container.created`, `container.destroyed`, `container.destroy_refused`, with the
+  (`container.created`, `container.create_failed`, `container.destroyed`,
+  `container.destroy_refused`, with the
   subject and the ids), and the field set is deliberately the shape a table would take, so
   the remaining work is a parse rather than a re-instrumentation. What a database adds is
   retention beyond the log window and a query the user can run themselves.

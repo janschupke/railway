@@ -2,6 +2,7 @@ import { HttpResponse, graphql } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { STREAM } from "@/lib/constants";
+import { logRecords } from "@/test/log-capture";
 import {
   createContainer,
   destroyContainer,
@@ -298,7 +299,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: "dep_1",
-      configured: true,
+      outcome: "deployed",
     });
   });
 
@@ -335,7 +336,7 @@ describe("createContainer", () => {
     });
 
     expect(calls).toEqual(["create", "variables", "deploy"]);
-    expect(result.configured).toBe(true);
+    expect(result.outcome).toBe("deployed");
   });
 
   it("asks Railway not to deploy on the variable change", async () => {
@@ -413,7 +414,46 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
-      configured: false,
+      outcome: "variables_failed",
+    });
+  });
+
+  it("reports the service when the deploy is refused, rather than throwing it away", async () => {
+    /*
+     * The regression T-471 names. A throw here carries no service id, so the caller could
+     * not tell "nothing was created" from "a billable service exists and is not running",
+     * and the audit line that says who created what never ran at all.
+     */
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-x",
+      image: "redis:7-alpine",
+    });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: null,
+      outcome: "deploy_failed",
+    });
+
+    // The classification the user's sentence no longer carries has to survive somewhere,
+    // and this record — incident id included — is where.
+    const failure = logRecords().find((r) => r.msg === "railway.deploy_failed");
+    expect(failure).toMatchObject({ service_id: "svc_1" });
+    expect(failure?.err).toMatchObject({
+      type: "RailwayApiError",
+      operation: "ServiceInstanceDeployV2",
+      incident: expect.stringMatching(/^[0-9a-f]{8}$/) as unknown as string,
     });
   });
 
@@ -437,7 +477,7 @@ describe("createContainer", () => {
         name: "spun-x",
         image: "redis:7-alpine",
       }),
-    ).resolves.toMatchObject({ configured: true });
+    ).resolves.toMatchObject({ outcome: "deployed" });
   });
 
   it("still reports the service when the deploy returns no id", async () => {
@@ -462,7 +502,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
-      configured: true,
+      outcome: "deployed",
     });
   });
 });

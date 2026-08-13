@@ -137,13 +137,37 @@ async function create(formData: FormData): Promise<ActionResult> {
     const preset = presetFor(image);
     const variables = resolveVariables(preset?.variables);
 
-    const created = await createContainer(accessToken, {
-      projectId,
-      environmentId,
-      name: managedName,
-      image,
-      ...(variables ? { variables } : {}),
-    });
+    /*
+     * Scoped to this one call, not to the whole action.
+     *
+     * The outer catch also covers the token read and the duplicate-name lookup, where no
+     * create was ever attempted and an event named `container.create_failed` would be a
+     * lie. Here, a throw means `serviceCreate` itself was refused: nothing exists on
+     * Railway, and the record is of an attempt. Every outcome that does leave a service
+     * behind returns instead, and is logged as `container.created` below.
+     */
+    let created;
+    try {
+      created = await createContainer(accessToken, {
+        projectId,
+        environmentId,
+        name: managedName,
+        image,
+        ...(variables ? { variables } : {}),
+      });
+    } catch (error) {
+      // Rethrown immediately: `describeActionError` still owns what the user is told. This
+      // adds the context an `action` line cannot have — which name, which image, where —
+      // and warn because a refused create is an anomaly, not the ordinary path.
+      log.warn("container.create_failed", {
+        project_id: projectId,
+        environment_id: environmentId,
+        service_name: managedName,
+        image,
+        error,
+      });
+      throw error;
+    }
 
     /*
      * The audit trail. This action creates billable infrastructure, and once a service is
@@ -153,6 +177,10 @@ async function create(formData: FormData): Promise<ActionResult> {
      * single most useful field in the record. The field set is deliberately the shape a
      * database table would take, so promoting this to one later is a parse rather than a
      * re-instrumentation.
+     *
+     * Reached on every path where a service now exists, running or not — which is what
+     * makes it an audit trail rather than a success counter. `outcome` says which, so a
+     * record of an orphan is not indistinguishable from a record of a live container.
      */
     log.info("container.created", {
       project_id: projectId,
@@ -161,6 +189,7 @@ async function create(formData: FormData): Promise<ActionResult> {
       image,
       service_id: created.serviceId,
       deployment_id: created.deploymentId,
+      outcome: created.outcome,
       // Names only, never values — they are generated credentials. The logger's own
       // scalar-only field type is what makes that hard to get wrong. See secrets.ts.
       variable_names: variables ? Object.keys(variables).join(",") : "",
@@ -168,10 +197,18 @@ async function create(formData: FormData): Promise<ActionResult> {
 
     revalidatePath("/dashboard");
 
-    if (!created.configured) {
-      // The service exists and is destroyable; saying only "failed" would leave the user
-      // hunting for something they were not told had been created.
+    /*
+     * Both failures name the container. The service exists and is destroyable; saying only
+     * "failed" would leave the user hunting for something they were not told had been
+     * created — and on the deploy branch it is a billable orphan they would have no name
+     * to search Railway for. The two sentences differ because the remedies differ: refused
+     * variables are a preset problem, a refused deploy is Railway's.
+     */
+    if (created.outcome === "variables_failed") {
       return { ok: false, error: t("actions.createdButNotConfigured", { name }) };
+    }
+    if (created.outcome === "deploy_failed") {
+      return { ok: false, error: t("actions.createdButNotDeployed", { name }) };
     }
 
     return {

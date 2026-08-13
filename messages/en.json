@@ -146,6 +146,7 @@
     "spinningUp": "Spinning up {name}",
     "spinningUpWithCredentials": "Spinning up {name}. Its generated credentials are on Railway, under this service's Variables.",
     "createdButNotConfigured": "Created {name}, but Railway refused its environment variables, so it was not deployed. Destroy it and try again.",
+    "createdButNotDeployed": "Created {name}, but Railway refused to deploy it. Destroy it and try again.",
     "missingReference": "Missing container reference.",
     "gone": "That container no longer exists.",
     "notManaged": "This service was not created here, so it cannot be destroyed here.",

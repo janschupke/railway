@@ -199,8 +199,15 @@ export async function createContainer(
 ): Promise<{
   serviceId: string;
   deploymentId: string | null;
-  /** False when the service exists but its environment could not be set. */
-  configured: boolean;
+  /**
+   * What happened after `serviceCreate` returned.
+   *
+   * Both failure values mean the same thing to the caller — the service exists and is not
+   * running — but they are different sentences to a user and different lines in the audit
+   * log, so they are not collapsed into a boolean. Reaching any of the three means a
+   * service was created; only a throw from this function means none was.
+   */
+  outcome: "deployed" | "variables_failed" | "deploy_failed";
 }> {
   const created = await gql<{ serviceCreate: { id: string; name: string } }>(
     SERVICE_CREATE_MUTATION,
@@ -260,7 +267,7 @@ export async function createContainer(
         variable_names: Object.keys(params.variables).join(","),
         error,
       });
-      return { serviceId, deploymentId: null, configured: false };
+      return { serviceId, deploymentId: null, outcome: "variables_failed" };
     }
   }
 
@@ -268,17 +275,29 @@ export async function createContainer(
    * serviceCreate registers the service; the deploy is a separate step. If this second
    * call fails the service exists but is not running, which the dashboard shows as an
    * un-deployed container the user can destroy — better than silently orphaning it.
+   *
+   * Caught for the same reason the variables call above is: a throw from here would carry
+   * no service id, so the caller could not tell "nothing was created" from "a billable
+   * service was created and left un-deployed", and would log neither. The classification
+   * this discards from the user's sentence — auth, rate limit, outage — is entirely
+   * preserved in the record below, incident id included.
    */
-  const deployed = await gql<{ serviceInstanceDeployV2: string | null }>(
-    SERVICE_DEPLOY_MUTATION,
-    { serviceId, environmentId: params.environmentId },
-    { accessToken, operationName: "ServiceInstanceDeployV2", signal },
-  );
+  let deployed: { serviceInstanceDeployV2: string | null };
+  try {
+    deployed = await gql<{ serviceInstanceDeployV2: string | null }>(
+      SERVICE_DEPLOY_MUTATION,
+      { serviceId, environmentId: params.environmentId },
+      { accessToken, operationName: "ServiceInstanceDeployV2", signal },
+    );
+  } catch (error) {
+    log.warn("railway.deploy_failed", { service_id: serviceId, error });
+    return { serviceId, deploymentId: null, outcome: "deploy_failed" };
+  }
 
   return {
     serviceId,
     deploymentId: deployed.serviceInstanceDeployV2 ?? null,
-    configured: true,
+    outcome: "deployed",
   };
 }
 
