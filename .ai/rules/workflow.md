@@ -21,8 +21,9 @@ per-rule files say which.
 ## Knip findings fail; dead code is an error
 
 `pnpm knip` reports unused files, dependencies and exports, and CI gates on it. Next's App
-Router has no single entry point, so `knip.jsonc` lists page/layout/route files, the proxy,
-`scripts/*.ts` and the e2e specs explicitly. **A new entry point that is not reachable from
+Router has no single entry point, so `knip.jsonc` lists page/layout/route files,
+`scripts/*.ts`, the e2e specs and the fixture server explicitly. `src/proxy.ts` and
+`src/instrumentation.ts` are **not** in that list — knip's Next plugin detects them. **A new entry point that is not reachable from
 those patterns must be added there**, or the whole subtree reports as unreachable.
 
 `src/test/**` is ignored, which has a consequence worth knowing: an import _from_ a test
@@ -33,14 +34,13 @@ dead. That is why `src/test/log-capture.ts` imports nothing from `src/lib`.
 
 `.github/workflows/ci.yml`, on push and PR to `master`, five jobs plus an aggregator:
 
-| Job          | What it runs                                                                                                        |
-| ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `quality`    | `pnpm audit --prod --audit-level=high` (gating) + full-tree audit (advisory), prettier, eslint, tsc, knip, coverage |
-| `build`      | `pnpm build`, then `pnpm size`                                                                                      |
-| `e2e`        | Playwright chromium against the fake Railway                                                                        |
-| `lighthouse` | `pnpm serve:e2e` backgrounded, then LHCI                                                                            |
-| `schema`     | `pnpm verify:schema` — OIDC discovery drift only, since CI holds no `RAILWAY_TOKEN`                                 |
-| `required`   | aggregator named **"All checks"**, the single name branch protection requires                                       |
+| Job        | What it runs                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `quality`  | `pnpm audit --prod --audit-level=high` (gating) + full-tree audit (advisory), prettier, eslint, tsc, knip, coverage |
+| `build`    | `pnpm build`, then `pnpm size`                                                                                      |
+| `browser`  | Playwright — both the `chromium` and `mobile` projects — then `pnpm serve:e2e` backgrounded and LHCI, in one job    |
+| `schema`   | `pnpm verify:schema` — OIDC discovery drift only, since CI holds no `RAILWAY_TOKEN`                                 |
+| `required` | aggregator named **"All checks"**, the single name branch protection requires                                       |
 
 CI injects placeholder credentials at the workflow level. **The build and the e2e fixture
 must not need real credentials** — if the env schema starts demanding them, that is a
@@ -48,7 +48,10 @@ legitimate CI failure, not something to work around.
 
 ## Node, TypeScript, tooling
 
-- **Node 22**, pnpm 11.9.0 (pinned via `packageManager`). No `.nvmrc`.
+- **Node 22**, pnpm 11.9.0 (pinned via `packageManager`). No `.nvmrc`. pnpm is not
+  incidental — `pnpm-workspace.yaml`'s `allowBuilds` is a postinstall allowlist npm cannot
+  express, and `pnpm audit --prod` is the shape the CI gate argues for. ADR-11 in
+  [README.md](../README.md) prices the alternative.
 - Files under `scripts/` run on Node's type-stripping loader
   (`node --experimental-strip-types`), which is why `allowImportingTsExtensions` is on and
   why those imports carry explicit `.ts` specifiers. Safe because the project never emits.

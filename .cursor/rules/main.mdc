@@ -10,9 +10,12 @@ Railway account over OIDC, picks a project and environment, and creates or destr
 Docker-image services with live build and deploy logs streamed into the browser. There is no
 database, no client store, and the visitor's token never leaves the server.
 
-All rules live in [`.ai/rules/`](../../.ai/rules/) — the single source of truth. This file
-mirrors [`AGENTS.md`](../../AGENTS.md); keep them in sync. The reasoning behind each decision
-is in [README.md](../../README.md) (ten ADRs) and [SECURITY.md](../../SECURITY.md).
+All detailed rules live in [`.ai/rules/`](../../.ai/rules/) — the single source of truth.
+This file mirrors the **Rules** and **Critical rules** sections of
+[`AGENTS.md`](../../AGENTS.md); keep those two in sync. It deliberately omits AGENTS.md's
+`## Commands` section and the `nextjs-agent-rules` block Next writes into that file. The
+reasoning behind each decision is in [README.md](../../README.md) (eleven ADRs) and
+[SECURITY.md](../../SECURITY.md).
 
 ## Rules
 

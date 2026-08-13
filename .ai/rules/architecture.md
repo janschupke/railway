@@ -16,7 +16,11 @@ over OIDC, picks a project and environment, and creates or destroys Docker-image
 with live build and deploy logs streamed into the browser.
 
 Single package — not a monorepo. `pnpm-workspace.yaml` exists only to carry `allowBuilds`
-toggles; there is no `packages:` list. pnpm 11.9.0, Node 22, React 19.2.8, Next 16.3.0.
+toggles; there is no `packages:` list. That is not a reason to move to npm: `allowBuilds` is
+a per-package postinstall allowlist with no npm equivalent, and therefore a supply-chain
+control rather than an install-speed tweak. See ADR-11 in [README.md](../../README.md),
+which prices the migration rather than assuming either answer. pnpm 11.9.0, Node 22,
+React 19.2.8, Next 16.3.0.
 
 `@/*` resolves to `src/*` (`tsconfig.json`, mirrored in `vitest.config.mts`). Use it for
 anything cross-directory; use relative `./` only for siblings, which in practice means
@@ -124,7 +128,8 @@ If a component needs something from the session, **pass it as a prop**.
 
 ## Every tuned number lives in `src/lib/constants.ts`
 
-Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `SESSION`, `LIMITS`),
+Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `SESSION`, `LIMITS`,
+`UI`, `LIST`, `LINKS`),
 each with a comment saying why the value is what it is. These were scattered as inline
 literals across the client, the stream route, the session layer and three components, and
 the log backfill limit had already drifted from its default.
@@ -179,8 +184,10 @@ exactly how the above went unnoticed.
 - **Comments explain why, not what.** This codebase records what broke before, which
   alternative was rejected, and what a number was measured against. Match that register —
   a comment that restates the line below it is noise here.
-- `src/instrumentation.ts` is an unused OTel seam (ADR-9). Shipping logs somewhere should
-  change that file and nothing else in `src/**`.
+- `src/instrumentation.ts` is the OTel seam (ADR-9). It is not unused: it exports
+  `onRequestError`, which Next calls on every server render failure and which records the
+  `digest` the error boundary shows the user. Only `register()` is unimplemented. Shipping
+  logs somewhere should change that file and nothing else in `src/**`.
 
 ## Before you call this done
 

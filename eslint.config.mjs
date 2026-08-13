@@ -316,7 +316,7 @@ const eslintConfig = defineConfig([
               // bundle pino and log into a void.
               group: ["**/lib/logger", "**/lib/log/*"],
               message:
-                "The logger writes to the server's stdout. Client-side failures reach the server through instrumentation.ts.",
+                "The logger writes to the server's stdout, which a browser has no access to. There is no client-to-server error channel in this app — surface the failure to the user instead.",
             },
           ],
         },

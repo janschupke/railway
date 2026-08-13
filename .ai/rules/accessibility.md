@@ -77,5 +77,5 @@ pnpm test src/app/contrast.test.ts
 pnpm build && pnpm test:e2e e2e/a11y.spec.ts e2e/keyboard.spec.ts e2e/motion.spec.ts
 ```
 
-The Lighthouse gate needs `.lighthouse-cookie`; `pnpm lighthouse` produces it via
+The Lighthouse gate needs `.lighthouseci/cookie`; `pnpm lighthouse` produces it via
 `pnpm lh:auth` — see [performance.md](performance.md).

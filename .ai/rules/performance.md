@@ -11,9 +11,9 @@ meta:
 
 | Route         | Budget |
 | ------------- | ------ |
-| `/`           | 166    |
-| `/dashboard`  | 215    |
-| `/_not-found` | 167    |
+| `/`           | 171    |
+| `/dashboard`  | 222    |
+| `/_not-found` | 171    |
 
 `scripts/check-bundle-budget.ts` (`pnpm size`) checks them against
 `.next/diagnostics/route-bundle-stats.json` after `pnpm build`, and the `build` job in CI
@@ -55,13 +55,17 @@ off the hot path or add them there.
 `lighthouserc.cjs` runs against `/` and `/dashboard`. `numberOfRuns: 1` — **one Chrome,
 never a pool.**
 
-- `.lighthouse-cookie` is written by `scripts/lh-auth.ts`, which completes the real OAuth
+- `.lighthouseci/cookie` is written by `scripts/lh-auth.ts`, which completes the real OAuth
   round trip against the fake Railway with Playwright. Its absence is **fatal, not a degraded
   mode**: without it the dashboard redirects to the landing page and the run would silently
   measure the same page twice. `pnpm lighthouse` runs `pnpm lh:auth` for you.
 - Resource budgets are errors: script 234 kB, stylesheet 12 kB, font 100 kB, total 389 kB.
   They apply to every URL, so they track the worst case, and they cover what `pnpm size`
   cannot — fonts, CSS and the document itself.
+- `categories:accessibility` is gated at `minScore: 1` — a perfect score, nothing less.
+  `categories:best-practices` and `categories:seo` are **errors** at 0.9. Both are
+  deterministic on a fixed page, unlike the performance score, so gating them costs no
+  flakiness; they were enforced without being written down anywhere until now.
 - `categories:performance` is a **warning** on purpose. Scores swing 10+ points on a shared
   CI runner and a gate that flakes is a gate everyone learns to ignore. Real size regressions
   are caught by the deterministic checks instead.

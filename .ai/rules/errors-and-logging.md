@@ -110,9 +110,14 @@ Exactly one inline disable exists, in `src/app/dashboard/error.tsx`, which runs 
 browser. **Do not add a second one** without the same kind of justification — a stray
 `console.error(error)` is how the token leak got in.
 
-Client-side failures reach the server through `src/instrumentation.ts`, not through the
-logger. A client component cannot import `lib/logger` at all — see
-[architecture.md](architecture.md).
+There is no client-to-server error channel, and `src/instrumentation.ts` is not one:
+`onRequestError` is a **server** hook for **server** render failures and never sees a
+browser-side throw. `dashboard/error.tsx` writes to the browser console and stops, handing
+the user a digest that joins to the server's own `render.failed` record.
+
+Building a real channel would mean a POST endpoint, its own rate limit, a CSP review and a
+new unauthenticated write surface — deliberately not done. A client component cannot import
+`lib/logger` at all; see [architecture.md](architecture.md).
 
 ## `LOG_LEVEL` is the one config that skips `src/env.ts`
 
