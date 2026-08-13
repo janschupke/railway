@@ -248,6 +248,17 @@ export const REQUIRED_FIELDS: Array<{
     args: ["serviceId", "environmentId"],
   },
   { root: "Mutation", field: "serviceDelete", args: ["id"] },
+  /*
+   * Required since the preset catalog started carrying environment. It was probed as
+   * optional first — a mutation this app builds an input for by hand is not something to
+   * assume — and confirmed against the live API on 2026-08-13, together with the shape in
+   * REQUIRED_INPUT_TYPES below.
+   *
+   * Required rather than optional because a database preset without it does not degrade,
+   * it crash-loops: `postgres` with no POSTGRES_PASSWORD exits on its first tick and
+   * Railway restarts it forever.
+   */
+  { root: "Mutation", field: "variableCollectionUpsert", args: ["input"] },
   { root: "Subscription", field: "deploymentLogs", args: ["deploymentId"] },
   { root: "Subscription", field: "buildLogs", args: ["deploymentId"] },
 ];
@@ -279,20 +290,14 @@ export const OPTIONAL_FIELDS: Array<{
     note: "a service cannot be edited in place",
   },
   /*
-   * Environment variables on a new service. Databases exit on their first tick without
-   * credentials — `postgres` without POSTGRES_PASSWORD restarts forever — so without one
-   * of these the preset catalog cannot include them and stays limited to images that boot
-   * bare.
+   * The per-key fallback. `variableCollectionUpsert` above is what the app actually sends
+   * and is now required; this one is here so that if the collection form is ever withdrawn
+   * the report names the replacement rather than leaving the reader to find it.
    */
   {
     root: "Mutation",
-    field: "variableCollectionUpsert",
-    note: "presets cannot carry environment variables",
-  },
-  {
-    root: "Mutation",
     field: "variableUpsert",
-    note: "per-key fallback for variableCollectionUpsert",
+    note: "no per-key fallback if variableCollectionUpsert is withdrawn",
   },
 ];
 
@@ -309,10 +314,25 @@ export const REQUIRED_INPUT_TYPES: Array<{ name: string; fields: string[] }> = [
     name: "ServiceCreateInput",
     fields: ["projectId", "environmentId", "name", "source"],
   },
+  /*
+   * Every member listed here is one `createContainer` sends, `skipDeploys` included:
+   * Railway redeploys a service when its variables change, and the app issues its own
+   * deploy on the very next line. Losing that member would not fail loudly — it would
+   * produce a second deployment the app never learns the id of, and the row would stream
+   * logs for a deployment the user is not watching.
+   */
+  {
+    name: "VariableCollectionUpsertInput",
+    fields: [
+      "projectId",
+      "environmentId",
+      "serviceId",
+      "variables",
+      "replace",
+      "skipDeploys",
+    ],
+  },
 ];
 
 /** Printed, never enforced: the shape is unknown until the probe has been run. */
-export const PROBED_INPUT_TYPES: string[] = [
-  "VariableCollectionUpsertInput",
-  "VariableUpsertInput",
-];
+export const PROBED_INPUT_TYPES: string[] = ["VariableUpsertInput"];

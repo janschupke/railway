@@ -232,6 +232,13 @@ export async function createContainer(
             serviceId,
             variables: params.variables,
             replace: false,
+            /*
+             * Railway redeploys a service when its variables change. The explicit deploy
+             * below is the one this app tracks — it returns the deployment id the row's
+             * log stream keys on — so a second, variable-triggered deployment would leave
+             * the user watching logs from a deployment that is not the current one.
+             */
+            skipDeploys: true,
           },
         },
         { accessToken, operationName: "VariableCollectionUpsert", signal },

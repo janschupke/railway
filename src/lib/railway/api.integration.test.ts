@@ -304,6 +304,50 @@ describe("createContainer", () => {
     expect(result.configured).toBe(true);
   });
 
+  it("asks Railway not to deploy on the variable change", async () => {
+    /*
+     * The deploy below returns the deployment id the row's log stream keys on. Railway
+     * redeploys a service when its variables change, so without `skipDeploys` there is a
+     * second deployment whose id this app never learns — and the row streams logs from a
+     * deployment that is not the one it just started.
+     *
+     * `replace: false` is the other half: the mutation can wipe a service's existing
+     * variables, and that is the wrong default to leave lying around in a call this app
+     * makes on every spin-up.
+     */
+    let sent: Record<string, unknown> | undefined;
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      api.mutation("VariableCollectionUpsert", ({ variables }) => {
+        sent = variables.input as Record<string, unknown>;
+        return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+      ),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "generated" },
+    });
+
+    expect(sent).toMatchObject({
+      projectId: "p1",
+      environmentId: "e1",
+      serviceId: "svc_1",
+      replace: false,
+      skipDeploys: true,
+    });
+  });
+
   it("declines to deploy a service whose environment could not be set", async () => {
     /*
      * The service exists, is prefixed, and is destroyable from the dashboard. That is

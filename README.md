@@ -381,9 +381,14 @@ pnpm verify:schema                       # discovery checks only
 RAILWAY_TOKEN=… pnpm verify:schema       # + full schema introspection
 ```
 
-Get a token at <https://railway.com/account/tokens>. It also reports whether
-`deploymentStop` exists — if it does, spin-down can offer _stop_ alongside _destroy_
-rather than destroy only.
+Get a token at <https://railway.com/account/tokens>. Beyond the root fields, it
+introspects the **input objects the app builds by hand** — `ServiceCreateInput` and
+`VariableCollectionUpsertInput`. That gap was real: a renamed member inside an input
+passes a root-field check and fails every spin-up.
+
+It also prints the capabilities the app does not use, with the consequence of each. As of
+2026-08-13 `deploymentStop`, `deploymentRemove` and `serviceInstanceUpdate` all exist —
+see Limitations for why spin-down is still destroy-only regardless.
 
 CI runs the discovery half on every push.
 
@@ -783,8 +788,11 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
-- **Spin-down means destroy.** Whether a stop-without-destroy mutation exists is
-  reported by `pnpm verify:schema`; until confirmed, the UI does not promise it.
+- **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
+  API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been
+  built. Offering it means a second confirm path, a fourth container state the dashboard
+  can act on, and deciding what "spin up" does to a stopped service; the UI promises
+  nothing it does not do.
 - **SSE pins a client to one replica**, so this is a single-replica app today. See below.
 - **A stream open for more than an hour** outlives its access token. Deploys finish well
   inside that; a long-lived streaming session would need mid-stream token rotation.
