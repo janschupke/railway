@@ -172,3 +172,33 @@ export function cookieOptions(appUrl: string) {
     path: "/",
   };
 }
+
+/** The subset of Next's response cookie jar this needs, so auth stays free of next/server. */
+type CookieJar = {
+  set: (
+    name: string,
+    value: string,
+    options: ReturnType<typeof cookieOptions> & { maxAge: number },
+  ) => void;
+};
+
+/**
+ * Removes a cookie in a way the browser will actually honour.
+ *
+ * **Never `response.cookies.delete(name)`.** That emits `name=; Path=/; Expires=1970`
+ * with no `Secure`, and a cookie whose name carries the `__Host-` prefix is rejected
+ * outright unless it is `Secure`, `Path=/` and has no `Domain`. So the removal is
+ * discarded by the browser and the original cookie stays exactly where it was.
+ *
+ * The failure is invisible in development and in the end-to-end suite, because both run
+ * against `http://localhost`, where `hostCookieName` returns an unprefixed name and the
+ * plain delete works. In production it meant Sign out did not sign anyone out: the
+ * session cookie survived, the redirect to `/` found it, and `/` sent the user straight
+ * back to the dashboard they had just asked to leave.
+ *
+ * Expressed as a `set` with the same options the cookie was written with, which is the
+ * only form that cannot drift from them.
+ */
+export function clearCookie(jar: CookieJar, name: string, appUrl: string): void {
+  jar.set(name, "", { ...cookieOptions(appUrl), maxAge: 0 });
+}

@@ -95,14 +95,21 @@ test("the app icon is reachable and embeddable, signed out", async ({ page }) =>
    * No signIn: this runs on a context with no session cookie, which is the state every
    * caller that matters is in.
    */
-  const icon = await page.request.get("/icon.svg");
+  for (const [path, type] of [
+    ["/icon.svg", "image/svg+xml"],
+    // Requested by browsers whether or not it is declared, so its absence was a 404 in
+    // every console. Same mark, so the same grant.
+    ["/favicon.ico", "image/x-icon"],
+  ]) {
+    const icon = await page.request.get(path!);
 
-  expect(icon.status()).toBe(200);
-  expect(icon.headers()["content-type"]).toContain("image/svg+xml");
-  expect(icon.headers()["cross-origin-resource-policy"]).toBe("cross-origin");
-  // Still sniff-proofed and still framed by the blanket rule; the exemption is one
-  // header wide, not a hole in the table.
-  expect(icon.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(icon.status(), `${path} should be served`).toBe(200);
+    expect(icon.headers()["content-type"]).toContain(type!);
+    expect(icon.headers()["cross-origin-resource-policy"]).toBe("cross-origin");
+    // Still sniff-proofed and still framed by the blanket rule; the exemption is one
+    // header wide, not a hole in the table.
+    expect(icon.headers()["x-content-type-options"]).toBe("nosniff");
+  }
 });
 
 test("nothing but the icon is embeddable cross-origin", async ({ page }) => {

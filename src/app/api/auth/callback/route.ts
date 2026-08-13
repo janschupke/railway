@@ -7,6 +7,7 @@ import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { SESSION } from "@/lib/constants";
 import {
+  clearCookie,
   CONSENT_PARAM,
   cookieOptions,
   sealSession,
@@ -17,9 +18,9 @@ import {
 
 function clearTransients<T extends NextResponse>(response: T, appUrl: string): T {
   const names = transientCookieNames(appUrl);
-  response.cookies.delete(names.pkce);
-  response.cookies.delete(names.state);
-  response.cookies.delete(names.consent);
+  for (const name of [names.pkce, names.state, names.consent]) {
+    clearCookie(response.cookies, name, appUrl);
+  }
   return response;
 }
 

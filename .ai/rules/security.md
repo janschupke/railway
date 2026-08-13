@@ -50,6 +50,20 @@ without a session, both Server Actions go through `requireSession`, and the SSE 
 on client-submitted data. A `serviceId` from a different project than the submitted
 `projectId` fails closed at the lookup. Preserve that shape in any new destructive path.
 
+## Removing a cookie
+
+**Never `response.cookies.delete(name)`.** It emits `name=; Path=/; Expires=1970` with no
+`Secure`, and a `__Host-` cookie is rejected outright unless it is `Secure`, `Path=/` and
+carries no `Domain` — so the browser discards the removal and keeps the cookie. Use
+`clearCookie(response.cookies, name, appUrl)`, which writes the removal with the same
+options the cookie was set with.
+
+This failed silently for every cookie the app removes. Sign out did not sign anyone out:
+the session survived, the redirect to `/` found it, and `/` sent the user back to the
+dashboard. Neither dev nor the e2e suite can see it — both run on `http://localhost`,
+where `hostCookieName` returns unprefixed names and a plain delete works — so
+`src/cookie-removal.test.ts` bans the call structurally instead.
+
 ## Upstream failure text never reaches the browser
 
 Railway's GraphQL errors name internal fields and, on a schema rejection, quote the document
@@ -73,10 +87,12 @@ generic message.
   `X-Frame-Options: DENY`, `Referrer-Policy`, COOP, `Permissions-Policy`, and
   `poweredByHeader: false`.
 - **CORP is the one value that is not the same on every path.** `/:path*` gets
-  `same-origin`; `/icon.svg` alone gets `cross-origin`, because the app's mark is the one
-  response here meant to be read by another origin — a README, a link preview. It is not
-  CORS: no credentials, no readable body for script. Widening it to any other path means
-  letting another site embed that response while a visitor's session cookie is live.
+  `same-origin`. `/icon.svg` and `/favicon.ico` get `cross-origin`, because the app's mark
+  is the only response here meant to be read by another origin — a README, a link preview
+  — and both paths carry it: one is what the page declares, the other is what browsers ask
+  for regardless. It is not CORS: no credentials, no readable body for script. Widening it
+  to any other path means letting another site embed that response while a visitor's
+  session cookie is live.
 
   The rules are ordered — a later value for the same key wins — so the blanket rule comes
   first. `src/app/security-headers.test.ts` asserts the order and both values;

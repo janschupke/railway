@@ -33,9 +33,13 @@ describe("security headers", () => {
   it("lets another origin load the app icon, and nothing else", async () => {
     const entries = await rules();
 
-    expect(valueFor(entries, "/icon.svg", "cross-origin-resource-policy")).toBe(
-      "cross-origin",
-    );
+    // Both forms of the same mark. Exempting one and not the other leaves whichever a
+    // reader picked silently refusing to paint.
+    for (const icon of ["/icon.svg", "/favicon.ico"]) {
+      expect(valueFor(entries, icon, "cross-origin-resource-policy")).toBe(
+        "cross-origin",
+      );
+    }
     /*
      * Everything else stays same-origin. This is what stops another site embedding a
      * page or an API response from this app while a visitor's session cookie is live,
@@ -57,6 +61,7 @@ describe("security headers", () => {
       );
 
     expect(index("/icon.svg")).toBeGreaterThan(index("/:path*"));
+    expect(index("/favicon.ico")).toBeGreaterThan(index("/:path*"));
   });
 
   it("keeps the icon out of the session proxy, or the grant buys nothing", async () => {
@@ -67,6 +72,7 @@ describe("security headers", () => {
      * agreement is asserted here.
      */
     expect(proxyConfig.matcher.join(" ")).toContain("icon.svg");
+    expect(proxyConfig.matcher.join(" ")).toContain("favicon.ico");
   });
 
   it("still applies the rest of the table everywhere", async () => {

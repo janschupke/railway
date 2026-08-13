@@ -4,15 +4,21 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /**
- * The one asset another origin is allowed to load.
+ * The only assets another origin is allowed to load: the app's mark, in both forms.
  *
- * Two files have to agree on it: this one grants the cross-origin read, and src/proxy.ts
- * keeps it out of the session matcher so the fetch pays no HKDF derive. Not shared as an
- * import — this module is build-time config, and pulling it into the runtime proxy would
- * drag the next-intl plugin along with it — so src/app/security-headers.test.ts asserts
- * the two agree instead.
+ * `icon.svg` is what the page declares and what a modern browser uses; `favicon.ico`
+ * carries the same mark at 16, 32 and 48 for the surfaces that still ask for that path,
+ * and browsers request it whether or not it is declared — it was a 404 in the console
+ * until it existed. Both are brand assets, so exempting one and not the other would leave
+ * whichever a reader picked silently refusing to paint.
+ *
+ * Two files have to agree on this list: this one grants the cross-origin read, and
+ * src/proxy.ts keeps both out of the session matcher so an icon fetch pays no HKDF
+ * derive. Not shared as an import — this module is build-time config, and pulling it into
+ * the runtime proxy would drag the next-intl plugin along with it — so
+ * src/app/security-headers.test.ts asserts the two agree instead.
  */
-const PUBLIC_ICON = "icon.svg";
+const PUBLIC_ICONS = ["icon.svg", "favicon.ico"];
 
 /**
  * Response headers that never vary per request. The Content-Security-Policy is not
@@ -90,10 +96,10 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: [{ key: "cross-origin-resource-policy", value: "same-origin" }],
       },
-      {
-        source: `/${PUBLIC_ICON}`,
+      ...PUBLIC_ICONS.map((icon) => ({
+        source: `/${icon}`,
         headers: [{ key: "cross-origin-resource-policy", value: "cross-origin" }],
-      },
+      })),
     ];
   },
 

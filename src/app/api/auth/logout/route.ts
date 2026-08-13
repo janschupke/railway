@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/env";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { sessionCookieName } from "@/lib/auth/session";
+import { clearCookie, sessionCookieName } from "@/lib/auth/session";
 
 /**
  * The four values Fetch Metadata defines for Sec-Fetch-Site.
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       // 303 so the browser follows with GET after the POST.
       status: 303,
     });
-    response.cookies.delete(sessionCookieName(env().APP_URL));
+    clearCookie(response.cookies, sessionCookieName(env().APP_URL), env().APP_URL);
     return response;
   });
 }

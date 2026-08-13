@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/env";
 import { SESSION } from "@/lib/constants";
 import {
+  clearCookie,
   cookieOptions,
   isExpiring,
   openSession,
@@ -204,7 +205,7 @@ export async function proxy(request: NextRequest) {
       ? new URL("/?error=session_expired", request.url)
       : request.url;
     const response = isProtected ? NextResponse.redirect(target) : proceed();
-    response.cookies.delete(cookieName);
+    clearCookie(response.cookies, cookieName, APP_URL);
     return withCsp(response);
   }
 }
