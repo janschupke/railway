@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ExternalLink, Info } from "lucide-react";
@@ -78,18 +78,39 @@ export function ContainerRow({
   const [mounted, setMounted] = useState(false);
   const panelId = useId();
 
+  /*
+   * Which way the panel is currently travelling.
+   *
+   * `mounted && !expanded` is TWO different states — one frame into opening, and one
+   * transition away from closed — and without this ref the backstop below could not tell
+   * them apart. It assumed closing, so a machine that delayed the frames past the timer
+   * ran `setMounted(false)` on a panel that was opening; the rAF then set `expanded`
+   * true against an unmounted panel and the row stuck there, `aria-expanded="true"` over
+   * a `hidden` region with no way back short of a reload. A ref rather than state
+   * because it must be readable inside the frame callback without re-running it.
+   */
+  const intent = useRef<"open" | "closed">("closed");
+
   const toggle = () => {
     if (expanded) {
+      intent.current = "closed";
       setExpanded(false);
       return;
     }
+    intent.current = "open";
     setMounted(true);
     /*
      * Two frames, not one. The first commits `mounted` — `hidden` comes off at
      * grid-rows 0fr — and the second flips to 1fr with a start value the transition can
      * interpolate from. Collapsing needs no equivalent: the panel is already laid out.
      */
-    requestAnimationFrame(() => requestAnimationFrame(() => setExpanded(true)));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        // A close that landed while these frames were queued wins; opening now would
+        // re-expand a panel the user has already dismissed.
+        if (intent.current === "open") setExpanded(true);
+      }),
+    );
   };
 
   /*
@@ -98,7 +119,7 @@ export function ContainerRow({
    * therefore in the tab order — invisible, and focusable.
    */
   useEffect(() => {
-    if (expanded || !mounted) return;
+    if (expanded || !mounted || intent.current === "open") return;
     const timer = setTimeout(() => setMounted(false), 400);
     return () => clearTimeout(timer);
   }, [expanded, mounted]);

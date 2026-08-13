@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Container } from "@/lib/railway/types";
@@ -151,6 +151,46 @@ describe("ContainerRow", () => {
      * what a purely visual collapse would have quietly lost.
      */
     await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+  });
+
+  it("does not strand the panel when the frames land after the backstop", async () => {
+    /*
+     * Found by the suite failing under load, then reproduced by shrinking the backstop.
+     *
+     * Opening mounts the panel and schedules two animation frames to flip it open. The
+     * interrupted-transition backstop sees `mounted && !expanded` — which is also what
+     * one frame into opening looks like — and on a machine that delayed those frames
+     * past 400ms it unmounted a panel that was on its way in. The rAF then set
+     * `expanded` against an unmounted panel, leaving the row claiming
+     * aria-expanded="true" over a `hidden` region: a log pane that could not be opened
+     * again without a reload.
+     *
+     * fireEvent rather than userEvent because userEvent schedules its own timers, and
+     * the whole point here is to control which timer runs first.
+     */
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb) => frames.push(cb));
+    vi.useFakeTimers();
+
+    try {
+      renderRow();
+      fireEvent.click(disclosure());
+
+      // The backstop window elapses while the frames are still queued.
+      act(() => void vi.advanceTimersByTime(1_000));
+      // Only now do they arrive. Twice: the outer frame only schedules the inner one.
+      act(() => void frames.splice(0).forEach((cb) => cb(0)));
+      act(() => void frames.splice(0).forEach((cb) => cb(0)));
+
+      expect(disclosure()).toHaveAttribute("aria-expanded", "true");
+      // getByRole ignores hidden subtrees, so finding it *is* the assertion.
+      expect(screen.getByRole("log")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      raf.mockRestore();
+    }
   });
 
   it("explains itself instead of streaming when there is no deployment", async () => {
