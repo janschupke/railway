@@ -183,7 +183,15 @@ function drawSkyline(
   ctx.restore();
 }
 
-/** The back wall and roof of a shed. Its front is a drawable, so a train can go inside. */
+/**
+ * The back wall of a shed, which is the only part of one nothing can get in front of.
+ *
+ * The front wall **and the roof** are drawables instead, so a train can stand inside. The
+ * roof used to be here, and being baked meant being painted before the front wall — so the
+ * wall, which stands `SHED.eaves` behind the roof's fascia, was drawn over it and left its
+ * own lit top face showing as a pale band between the two. That was the rest of "the roof
+ * isn't attached to the walls".
+ */
 function shedBackBoxes(structure: Extract<SceneStructure, { kind: "shed" }>) {
   const half = structure.depth / 2;
   return [
@@ -191,15 +199,6 @@ function shedBackBoxes(structure: Extract<SceneStructure, { kind: "shed" }>) {
       at: [0, half - SHED.wallThickness, 0] as const,
       size: [structure.length, SHED.wallThickness, structure.height] as const,
       fill: "structure" as const,
-    },
-    {
-      at: [-SHED.eaves, -half - SHED.eaves, structure.height] as const,
-      size: [
-        structure.length + SHED.eaves * 2,
-        structure.depth + SHED.eaves * 2,
-        SHED.roofThickness,
-      ] as const,
-      fill: "structureTrim" as const,
     },
   ];
 }

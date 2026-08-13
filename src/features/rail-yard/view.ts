@@ -153,6 +153,29 @@ export const toScreenX = (view: ViewTransform, x: number, y: number = 0): number
 export const toScreenY = (view: ViewTransform, y: number, z: number = 0): number =>
   view.originY - y * VIEW.TILT * view.scale - z * view.scale;
 
+/**
+ * How far a world point is from the camera, along the direction the camera looks.
+ *
+ * The third row of the projection, and the one that was missing. `toScreenX` and `toScreenY`
+ * say where a point lands; this says which of two points that land on each other is in front,
+ * which is the whole of a painter's algorithm.
+ *
+ * It falls out of the other two. A step that changes neither `sx` nor `sy` moves a point
+ * along the **view ray** `v = (-SHEAR, 1, -TILT)`: the first component cancels the shear in
+ * `sx` and the third cancels the tilt in `sy`. Depth is the coordinate along that ray, which
+ * is `p . v` — larger further away, because a road further back has a larger `y`.
+ *
+ * Both other terms matter and both were dropped. `z` is why a spreader was painted behind the
+ * container hanging off it and a belt deck over the box being lowered onto it: the sort read
+ * their depth as equal because they stand at the same place on the ground. `x` is why the
+ * shear was carrying the eye east while the sort still believed the camera was square on.
+ *
+ * Unscaled, and deliberately: this orders things, it does not place them, and a scale factor
+ * that multiplies every key changes no comparison.
+ */
+export const viewDepth = (x: number, y: number, z: number = 0): number =>
+  y - x * VIEW.SHEAR - z * VIEW.TILT;
+
 export const toWorldX = (view: ViewTransform, x: number, y: number = 0): number =>
   (x - view.offsetX) / view.scale - y * VIEW.SHEAR;
 

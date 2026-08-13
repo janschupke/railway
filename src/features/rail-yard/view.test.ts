@@ -8,6 +8,7 @@ import {
   toWorldX,
   toWorldY,
   trackBandHeight,
+  viewDepth,
 } from "./view";
 
 const scene = RAIL_YARD_SCENE;
@@ -208,5 +209,56 @@ describe("trackBandHeight", () => {
   it("takes the tilt it is given", () => {
     // fitView passes the real one; a caller sweeping tilts is how the constant was chosen.
     expect(trackBandHeight(scene, 1)).toBeGreaterThan(trackBandHeight(scene, 0.2));
+  });
+});
+
+describe("viewDepth", () => {
+  const view = fitView(scene, { ...DESKTOP, height: 800 })!;
+
+  it("is constant along the view ray, which is where the projection is blind", () => {
+    /*
+     * The defining property. Stepping by `t * (-SHEAR, 1, -TILT)` moves a point nowhere on
+     * screen, so two points a step apart are the two the painter's algorithm has to choose
+     * between — and the only thing that separates them is this.
+     */
+    const from = [640, 90, 20] as const;
+    for (const t of [-40, -3, 7, 120]) {
+      const to = [
+        from[0] - t * VIEW.SHEAR,
+        from[1] + t,
+        from[2] - t * VIEW.TILT,
+      ] as const;
+
+      expect(toScreenX(view, to[0], to[1])).toBeCloseTo(
+        toScreenX(view, from[0], from[1]),
+      );
+      expect(toScreenY(view, to[1], to[2])).toBeCloseTo(
+        toScreenY(view, from[1], from[2]),
+      );
+
+      // Same pixel, different distance — and the sign says which of the two is in front.
+      const step = viewDepth(...to) - viewDepth(...from);
+      expect(Math.sign(step)).toBe(Math.sign(t));
+    }
+  });
+
+  it("puts a taller thing in front of a shorter one standing in the same place", () => {
+    /*
+     * The whole of "the crane's magnet has a z-index problem". The spreader and the box in
+     * its jaws stand at one point on the ground, so a key that reads only depth calls them
+     * equal and insertion order decides — which drew a container's lit top face across the
+     * spreader holding it.
+     */
+    expect(viewDepth(1230, 184, 40)).toBeLessThan(viewDepth(1230, 184, 8));
+  });
+
+  it("puts an easterly thing in front of a westerly one on the same road", () => {
+    // The shear carries the eye east, so east is nearer. This was in the old sort as a
+    // tiebreak on x, which is the one part of it that happened to be right.
+    expect(viewDepth(1400, 92, 0)).toBeLessThan(viewDepth(1200, 92, 0));
+  });
+
+  it("still puts the back of the yard behind the front of it", () => {
+    expect(viewDepth(940, TRACK.ROAD_PITCH * 4)).toBeGreaterThan(viewDepth(940, 0));
   });
 });

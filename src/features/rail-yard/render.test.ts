@@ -1,16 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { createFakeContext, type FakeContext } from "@/test/fake-canvas-2d";
-import { LOCOMOTIVE, SHED, TRACK, VIEW } from "./config";
+import {
+  CONTAINER,
+  CONVEYOR,
+  CRANE,
+  GANTRY,
+  LOCOMOTIVE,
+  SHED,
+  TRACK,
+  VIEW,
+  WAGON,
+  YARD,
+} from "./config";
 import { composeStaticLayer } from "./draw-scene";
 import { drawBox, visibleFaces, type Face } from "./draw-box";
 import { buildGraph } from "./graph";
+import type { Pose } from "./geometry";
 import { RAIL_YARD_TOKENS, FREIGHT_TOKENS, type YardPalette } from "./palette";
 import { createRng } from "./rng";
 import { RAIL_YARD_SCENE, type SceneStructure } from "./scene";
 import { createWorld, step, type WorldState } from "./simulation";
-import { fitView, toScreenY, type ViewTransform } from "./view";
-import { YARD } from "./config";
-import { drawFrame, shedFrontBoxes } from "./render";
+import {
+  fitView,
+  toScreenY,
+  toWorldX,
+  toWorldY,
+  viewDepth,
+  type ViewTransform,
+} from "./view";
+import { boxDepth, drawFrame, shedSortedBoxes } from "./render";
 
 /**
  * A palette of distinguishable placeholders.
@@ -41,6 +59,24 @@ function yard(steps = 0): WorldState {
 
 const numbers = (recorder: FakeContext) =>
   recorder.ops.flatMap((entry) => entry.args.filter((arg) => typeof arg === "number"));
+
+const SHED_STRUCTURE = RAIL_YARD_SCENE.structures.find(
+  (structure): structure is Extract<SceneStructure, { kind: "shed" }> =>
+    structure.kind === "shed",
+)!;
+
+const GANTRY_STRUCTURE = RAIL_YARD_SCENE.structures.find(
+  (structure): structure is Extract<SceneStructure, { kind: "gantry" }> =>
+    structure.kind === "gantry",
+)!;
+
+/** The plane a shed's front wall stands in — half its depth in front of its road. */
+const shedFrontY = (): number =>
+  RAIL_YARD_SCENE.roads.find((road) => road.id === SHED_STRUCTURE.road)!.y -
+  SHED_STRUCTURE.depth / 2;
+
+/** A structure's pose: standing still, facing east. Structures do not have headings. */
+const at = (x: number, y: number): Pose => ({ x, y, angle: 0 });
 
 describe("visibleFaces", () => {
   /*
@@ -318,27 +354,30 @@ describe("drawFrame", () => {
     expect(at(0)).not.toEqual(at(0.9));
   });
 
-  it("draws the far roads before the near ones, so a train can go behind a shed", () => {
-    /*
-     * Depth sorting per *drawable*, not per train — a rake straddling a crossover has half
-     * its wagons on one road and half on the next, and they have to sort against other
-     * traffic independently of the engine pulling them. This is also what lets a shed's
-     * front wall occlude a locomotive standing inside it.
-     */
+  it("draws the far vehicles before the near ones, so a train can go behind a shed", () => {
     /*
      * Asserted on the contact shadows, because they are the one thing drawn flat on the
-     * ground: their screen y is a pure function of depth with no height mixed into it, so a
-     * non-decreasing run of them *is* the sort. Reading it off the bodies instead compares
-     * roofs against wheels and says nothing. The tolerance covers a vehicle on a crossover,
-     * whose shadow sits a few units off its own sort key.
+     * ground: a shadow's screen position inverts exactly back to the world point it was
+     * drawn at, so the order they were painted in is readable from the recording. Reading it
+     * off the bodies instead compares roofs against wheels and says nothing.
+     *
+     * The claim is about `viewDepth`, not about screen y. Screen y alone was what this used
+     * to check, and it held only because the sort ignored both the shear and the height —
+     * once a near thing east of a far thing can be drawn later, a run of shadows climbing
+     * the screen is no longer what "sorted" means.
      */
-    const ys = frame(yard(600))
+    const shadows = frame(yard(600))
       .opsOf("ellipse")
-      .map((entry) => entry.args[1] as number);
-    expect(ys.length).toBeGreaterThan(3);
+      .map((entry) => {
+        const y = toWorldY(view, entry.args[1] as number);
+        return viewDepth(toWorldX(view, entry.args[0] as number, y), y);
+      });
+    expect(shadows.length).toBeGreaterThan(3);
 
-    for (let index = 1; index < ys.length; index++) {
-      expect(ys[index]!, `shadow ${index}`).toBeGreaterThanOrEqual(ys[index - 1]! - 6);
+    for (let index = 1; index < shadows.length; index++) {
+      expect(shadows[index]!, `shadow ${index}`).toBeLessThanOrEqual(
+        shadows[index - 1]! + 0.01,
+      );
     }
   });
 
@@ -346,29 +385,65 @@ describe("drawFrame", () => {
     /*
      * The direct regression test for "roofs aren't attached to walls".
      *
-     * The front wall's boxes are measured from the front plane, which is where the
-     * drawable's pose already puts them — and they were also measured from the shed's
-     * centre, so the offset went on twice and the wall stood a whole depth in front of the
-     * building it belongs to. What you saw was a roof with a strip of open ground under it.
+     * The wall's boxes are measured from the front plane, which is where the drawable's pose
+     * already puts them — they were also measured from the shed's centre, so the offset went
+     * on twice and the wall stood a whole depth in front of the building it belongs to.
      *
      * Checked in world units rather than on screen, because that is where the mistake is:
      * the eaves oversail the wall by `SHED.eaves` and by nothing else.
      */
-    const shed = RAIL_YARD_SCENE.structures.find(
-      (structure): structure is Extract<SceneStructure, { kind: "shed" }> =>
-        structure.kind === "shed",
-    )!;
-    const road = RAIL_YARD_SCENE.roads.find((one) => one.id === shed.road)!;
+    const boxes = shedSortedBoxes(SHED_STRUCTURE);
+    const roof = boxes.find((box) => box.order === "over")!;
+    const walls = boxes.filter((box) => box !== roof);
 
-    const wallFront = road.y - shed.depth / 2;
-    const roofFront = road.y - shed.depth / 2 - SHED.eaves;
-    expect(wallFront - roofFront).toBe(SHED.eaves);
+    expect(walls.every((box) => box.at[1] === 0)).toBe(true);
+    expect(Math.max(...walls.map((box) => box.at[2] + box.size[2]))).toBe(
+      SHED_STRUCTURE.height,
+    );
 
-    // And the wall really is drawn there: a lintel top at the roof's underside, so the two
-    // meet rather than one hanging over a gap.
-    const boxes = shedFrontBoxes(shed);
-    expect(boxes.every((box) => box.at[1] === 0)).toBe(true);
-    expect(Math.max(...boxes.map((box) => box.at[2] + box.size[2]))).toBe(shed.height);
+    // The roof starts where the walls stop, and oversails them by the eaves on every side.
+    expect(roof.at[2]).toBe(SHED_STRUCTURE.height);
+    expect(roof.at[0]).toBe(-SHED.eaves);
+    expect(roof.at[1]).toBe(-SHED.eaves);
+    expect(roof.size[1]).toBe(SHED_STRUCTURE.depth + SHED.eaves * 2);
+  });
+
+  it("draws a shed's roof after the wall it rests on", () => {
+    /*
+     * And the ordering half of the same defect. The roof was baked into the static layer, so
+     * the front wall — which stands `SHED.eaves` *behind* the roof's fascia — was painted
+     * over it, and the wall's own lit top face showed through as a pale band. `order: "over"`
+     * is what makes a roof win against everything it spans.
+     */
+    const pose = at(SHED_STRUCTURE.at, shedFrontY());
+    const boxes = shedSortedBoxes(SHED_STRUCTURE);
+    const roof = boxes.find((box) => box.order === "over")!;
+    const lintel = boxes.find((box) => box.order === undefined)!;
+
+    // Nearer the camera is a smaller depth, and nearer is painted later.
+    expect(boxDepth(pose, roof)).toBeLessThan(boxDepth(pose, lintel));
+  });
+
+  it("frames a locomotive standing inside it, doorway and all", () => {
+    /*
+     * "Front pillars too low", and "engines render behind the wall" — one defect. The wall
+     * stands half a shed's depth in front of the road, and depth costs `VIEW.TILT` of screen
+     * height, so a doorway level with the top of an engine is a doorway the engine is drawn
+     * above. At 40 the lintel came down twenty units into the cab.
+     *
+     * Measured on screen, because that is the only place the mistake exists: in world units
+     * a 40-unit doorway clears a 35-unit locomotive perfectly well.
+     */
+    const road = RAIL_YARD_SCENE.roads.find((one) => one.id === SHED_STRUCTURE.road)!;
+    const lintelUnderside = toScreenY(view, shedFrontY(), SHED.doorHeight);
+    const engineTop = toScreenY(
+      view,
+      road.y + LOCOMOTIVE.width / 2,
+      LOCOMOTIVE.chimney!.top,
+    );
+
+    // Screen y grows downward, so the lintel has to be the higher of the two.
+    expect(lintelUnderside).toBeLessThan(engineTop);
   });
 
   it("keeps the locomotive legible at the smallest scale it will ever be drawn", () => {
@@ -408,5 +483,116 @@ describe("drawFrame", () => {
       if (aspects.size === 3) break;
     }
     expect([...aspects].sort()).toEqual(["caution", "go", "stop"]);
+  });
+});
+
+describe("boxDepth", () => {
+  /*
+   * The painter's sort key, and the whole of five reported defects. Every one of them was a
+   * pair of solids that overlap on screen being ordered by a rule that could not tell them
+   * apart, so this is asserted on pairs rather than on numbers.
+   */
+  const PORTAL_X = GANTRY_STRUCTURE.travel[0];
+  const beltY = (
+    RAIL_YARD_SCENE.structures.find((one) => one.kind === "conveyor") as Extract<
+      SceneStructure,
+      { kind: "conveyor" }
+    >
+  ).at[1];
+
+  it("puts the higher of two boxes standing in one place in front", () => {
+    /*
+     * "The crane magnet has a z-index problem". The spreader and the container in its jaws
+     * share a portal x and a trolley y, so a key that reads depth alone called them equal
+     * and insertion order decided — which painted the container's lit top face over the
+     * spreader holding it.
+     */
+    const pose = at(PORTAL_X, beltY);
+    const carried = {
+      at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, CRANE.TRAVEL_Z],
+      size: CONTAINER.size,
+      fill: "cargo",
+    } as const;
+    const spreader = {
+      at: [
+        -GANTRY.spreaderLength / 2,
+        -GANTRY.spreaderDepth / 2,
+        CRANE.TRAVEL_Z + CONTAINER.size[2],
+      ],
+      size: [GANTRY.spreaderLength, GANTRY.spreaderDepth, GANTRY.spreaderHeight],
+      fill: "metal",
+    } as const;
+
+    expect(boxDepth(pose, spreader)).toBeLessThan(boxDepth(pose, carried));
+  });
+
+  it("takes a wagon's containers with the wagon rather than by their own height", () => {
+    // Sanity on the ordinary case: two boxes on one flat still sort bottom up.
+    const pose = at(1280, TRACK.ROAD_PITCH * 2);
+    const [deck] = WAGON.boxes.slice(-1);
+    const container = {
+      at: CONTAINER.at,
+      size: CONTAINER.size,
+      fill: "cargo",
+    } as const;
+    expect(boxDepth(pose, container, WAGON.length)).toBeLessThan(
+      boxDepth(pose, deck!, WAGON.length),
+    );
+  });
+
+  it("a canopy wins against the whole of what it spans", () => {
+    /*
+     * The gantry beam against the leg holding up its near end. Both are keyed at the portal's
+     * own x, so depth is all that separates them — and the beam's centre is half the portal's
+     * span behind the leg, which is why a centre key painted the leg's lit top face across
+     * two thirds of the beam's near end.
+     */
+    const span = GANTRY_STRUCTURE.far - GANTRY_STRUCTURE.near;
+    const beam = {
+      at: [-GANTRY.beamWidth / 2, -span - GANTRY.legDepth / 2, GANTRY.height],
+      size: [GANTRY.beamWidth, span + GANTRY.legDepth, GANTRY.beamHeight],
+      fill: "structureTrim",
+      order: "over",
+    } as const;
+    const leg = {
+      at: [-GANTRY.legWidth / 2, -GANTRY.legDepth / 2, 0],
+      size: [GANTRY.legWidth, GANTRY.legDepth, GANTRY.height],
+      fill: "structureTrim",
+    } as const;
+
+    const beamPose = at(PORTAL_X, GANTRY_STRUCTURE.far);
+    expect(boxDepth(beamPose, beam)).toBeLessThan(
+      boxDepth(at(PORTAL_X, GANTRY_STRUCTURE.near), leg),
+    );
+    // And without the flag it loses, which is the defect this replaced.
+    expect(boxDepth(beamPose, { ...beam, order: undefined })).toBeGreaterThan(
+      boxDepth(at(PORTAL_X, GANTRY_STRUCTURE.near), leg),
+    );
+  });
+
+  it("a floor loses against everything standing on it", () => {
+    /*
+     * The belt deck against a container the crane is lowering onto its head slot. The deck
+     * runs most of a thousand units east of the head, so its centre sits well in front of the
+     * box — it was painted over the container, which reappeared the moment it was released
+     * and became belt freight drawn later. That was the flicker.
+     */
+    const head = at(1230, beltY);
+    const deck = {
+      at: [-CONVEYOR.PITCH / 2, -CONVEYOR.WIDTH / 2, 0],
+      size: [670 + CONVEYOR.PITCH, CONVEYOR.WIDTH, CONVEYOR.DECK_Z],
+      fill: "structureTrim",
+      order: "under",
+    } as const;
+    const freight = {
+      at: [-CONTAINER.size[0] / 2, -CONTAINER.size[1] / 2, CONVEYOR.DECK_Z],
+      size: CONTAINER.size,
+      fill: "cargo",
+    } as const;
+
+    expect(boxDepth(head, deck)).toBeGreaterThan(boxDepth(head, freight));
+    expect(boxDepth(head, { ...deck, order: undefined })).toBeLessThan(
+      boxDepth(head, freight),
+    );
   });
 });

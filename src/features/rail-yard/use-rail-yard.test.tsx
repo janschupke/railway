@@ -104,12 +104,23 @@ function harness({
     measure: () => ({ width: 896, height: 800, dpr: 1 }),
   };
 
-  /** Advances the injected clock, running whatever frames were scheduled. */
-  const advance = (by: number, from = 0) => {
+  /**
+   * Runs the next `count` scheduled frames, stepping the injected clock by `by` for each.
+   *
+   * Two of them is one painted frame: `start` schedules a priming callback that does nothing
+   * but read the clock, and the tick that draws is the one after it.
+   *
+   * A count rather than "drain the queue", which is what this was. A raf loop reschedules
+   * itself from inside the callback, so the queue never empties and every call ran the
+   * five-hundred-frame runaway guard to its end — a test asserting that the static layer is
+   * composed twice spent three seconds painting fifteen hundred frames to find out. Nothing
+   * here asserts anything about the five hundredth.
+   */
+  const advance = (by: number, count = 2, from = 0) => {
     let now = from;
-    let guard = 0;
-    while (frames.length > 0 && guard++ < 500) {
-      const next = frames.shift()!;
+    for (let index = 0; index < count; index++) {
+      const next = frames.shift();
+      if (!next) break;
       now += by;
       next(now);
     }

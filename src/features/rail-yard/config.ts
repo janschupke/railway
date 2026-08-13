@@ -358,6 +358,23 @@ export type Box = {
   readonly at: readonly [x: number, y: number, z: number];
   readonly size: readonly [length: number, width: number, height: number];
   readonly fill: PaletteKey | "cargo";
+  /**
+   * How to order a box that is too long to be ordered by a point.
+   *
+   * The painter's sort keys every box on the distance of its own centre, which is right for
+   * anything roughly as deep as it is wide — every solid in the yard but three. A gantry beam
+   * spans both legs, a shed roof spans both walls, and a belt deck spans the whole line of
+   * freight standing on it: their centres sit behind things they are in front of, and in
+   * front of things they are behind.
+   *
+   * So they say which way they resolve. `over` keys on the box's **nearest** corner and wins
+   * against everything it spans — a canopy. `under` keys on its **furthest** and loses to all
+   * of it — a floor. Both are properties of the object rather than tuning: nothing at the
+   * belt is behind the belt, and nothing under a roof is above it.
+   *
+   * Omitted, and the centre decides. That is the case for every other box in the scene.
+   */
+  readonly order?: "over" | "under";
 };
 
 export type VehicleSpec = {
@@ -388,8 +405,20 @@ export const LOCOMOTIVE: VehicleSpec = {
     { at: [59, -3, 4], size: [3, 6, 4], fill: "metal" }, // front coupling
     { at: [0, -11, 3], size: [62, 22, 4], fill: "metal" }, // frame
     { at: [2, -10, 7], size: [58, 20, 11], fill: "loco" }, // body
-    { at: [8, -10, 18], size: [20, 20, 13], fill: "loco" }, // cab
-    { at: [9, -10, 22], size: [18, 20, 6], fill: "locoTrim" }, // glazing band
+    /*
+     * The cab, in three courses with the glazing between them.
+     *
+     * It was one 13-tall box with a 6-tall trim box inside it, and a box inside another box
+     * is not a thing this walker can draw: every box gets a top face, so the band's dark lit
+     * top was painted straight across the cab's side three units under the real roof. What
+     * you saw was a black roof at the wrong height, which is exactly what it was.
+     *
+     * Three courses stack instead of nesting, and the one above covers the top face of the
+     * one below — a top face and the box standing on it project to the same outline.
+     */
+    { at: [8, -10, 18], size: [20, 20, 4], fill: "loco" }, // cab, below the glass
+    { at: [8, -10, 22], size: [20, 20, 6], fill: "locoTrim" }, // glazing band
+    { at: [8, -10, 28], size: [20, 20, 3], fill: "loco" }, // cab roof
     { at: [34, -8, 18], size: [24, 16, 9], fill: "loco" }, // hood
     { at: [43, -3, 27], size: [6, 6, 8], fill: "metal" }, // stack
   ],
@@ -435,8 +464,22 @@ export const CONTAINER = {
  */
 export const SHED = {
   wallThickness: 4,
-  /** Height the doorways reach; the lintel is everything above it. */
-  doorHeight: 40,
+  /**
+   * Height the doorways reach; the lintel is everything above it.
+   *
+   * Sized in **screen** terms rather than world ones, which is why it is so much taller than
+   * the locomotive it has to frame. The front wall stands half a shed's depth in front of the
+   * road, and depth costs `VIEW.TILT` of screen height, so a doorway level with the top of an
+   * engine is a doorway the engine's cab is drawn above. What it has to clear is the far top
+   * corner of the tallest thing on the road:
+   *
+   *     LOCOMOTIVE.chimney.top + (depth / 2 + width / 2) * VIEW.TILT = 35 + 26.4 = 61.4
+   *
+   * It was 40, so the lintel came down twenty units into the locomotive standing inside and
+   * cut the cab off — "front pillars too low", and the same defect again as "engines render
+   * behind the wall". render.test.ts checks the clearance rather than the number.
+   */
+  doorHeight: 64,
   /** Width of a pier between two doorways, world units. */
   pierWidth: 12,
   roofThickness: 5,

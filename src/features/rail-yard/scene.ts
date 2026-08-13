@@ -393,7 +393,10 @@ export const RAIL_YARD_SCENE: RailScene = {
       at: 380,
       length: 220,
       depth: 74,
-      height: 68,
+      // Tall enough that the lintel over a 64-unit doorway is still a lintel. See
+      // SHED.doorHeight for why the doorway is measured against the screen rather than
+      // against the locomotive.
+      height: 82,
       bays: 2,
     },
     /*
