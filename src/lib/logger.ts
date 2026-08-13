@@ -169,6 +169,68 @@ function emit(
 }
 
 /**
+ * Every event name this app emits.
+ *
+ * `subsystem.thing.outcome`, dotted and low-cardinality. It becomes pino's `msg`, which
+ * is what a Loki label and an OTel Body both want — and a label's whole value is that
+ * the set of values is small and known. errors-and-logging.md said so and nothing
+ * checked it: `event: string` accepted prose, a template literal, or an id, and the
+ * first person to write `log.info(\`stream \${id} closed\`)` would have turned a label
+ * into a cardinality explosion with no review signal at all.
+ *
+ * A union rather than a lint rule, because this is a question tsc can answer exactly.
+ * Adding a name here is one line and is visible in a diff, which is the review the rule
+ * was asking for.
+ */
+export type LogEvent =
+  | "action"
+  | "action.session_expired"
+  | "auth.callback.failed"
+  | "auth.callback.token_exchange_failed"
+  | "auth.login.started"
+  | "auth.logout.rejected"
+  | "auth.redirect.anonymous"
+  | "auth.session.cleared"
+  | "auth.session.created"
+  | "auth.session.refresh_failed"
+  | "auth.session.refresh_raced"
+  | "auth.session.refreshed"
+  | "auth.session.unreadable"
+  | "container.create_rejected"
+  | "container.created"
+  | "container.destroy_refused"
+  | "container.destroy_skipped"
+  | "container.destroyed"
+  | "dashboard"
+  | "dashboard.render"
+  | "dashboard.selection_dropped"
+  | "health.env_invalid"
+  | "proxy.env_invalid"
+  | "railway.deploymentPoll"
+  | "railway.deployment.fallback_logs"
+  | "railway.deployment.fallback_logs_failed"
+  | "railway.deployment.not_found"
+  | "railway.deployment.poll_failed"
+  | "railway.deployment.poll_recovered"
+  | "railway.deployment.unsettled"
+  | "railway.logBackfill"
+  | "railway.logStream"
+  | "railway.logStream.truncated"
+  | "railway.projects"
+  | "railway.projects.source_failed"
+  | "railway.request"
+  | "railway.request.retry"
+  | "railway.variables_failed"
+  | "render.failed"
+  | "stream.closed"
+  | "stream.opened"
+  | "stream.rejected"
+  | "watch.closed"
+  | "watch.opened"
+  | "watch.poll_failed"
+  | "watch.rejected";
+
+/**
  * The logging surface.
  *
  * `event` is a dotted, low-cardinality name — `auth.session.refreshed`,
@@ -177,12 +239,12 @@ function emit(
  * string to parse.
  */
 export const log = {
-  debug: <T extends LogFields<T>>(event: string, fields?: T) =>
+  debug: <T extends LogFields<T>>(event: LogEvent, fields?: T) =>
     emit("debug", event, fields),
-  info: <T extends LogFields<T>>(event: string, fields?: T) =>
+  info: <T extends LogFields<T>>(event: LogEvent, fields?: T) =>
     emit("info", event, fields),
-  warn: <T extends LogFields<T>>(event: string, fields?: T) =>
+  warn: <T extends LogFields<T>>(event: LogEvent, fields?: T) =>
     emit("warn", event, fields),
-  error: <T extends LogFields<T>>(event: string, fields?: T) =>
+  error: <T extends LogFields<T>>(event: LogEvent, fields?: T) =>
     emit("error", event, fields),
 };

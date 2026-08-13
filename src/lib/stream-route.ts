@@ -1,8 +1,7 @@
 import "server-only";
 
 import { requestContext, runWithRequestContext } from "@/lib/log/context";
-import { log } from "@/lib/logger";
-import type { LogFields } from "@/lib/logger";
+import { log, type LogEvent, type LogFields } from "@/lib/logger";
 
 /**
  * Shared pieces of the two SSE route handlers.
@@ -33,7 +32,7 @@ import type { LogFields } from "@/lib/logger";
  * cost the user a slot.
  */
 export function closeStream(
-  event: string,
+  event: LogEvent,
   release: () => void,
   fields: LogFields<Record<string, string | number | undefined>>,
 ): void {

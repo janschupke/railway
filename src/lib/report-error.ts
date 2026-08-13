@@ -1,5 +1,5 @@
 import { newIncidentId } from "@/lib/incident";
-import { log } from "@/lib/logger";
+import { log, type LogEvent } from "@/lib/logger";
 import { RailwayApiError } from "@/lib/railway/errors";
 import type { MessageDescriptor, MessageKey } from "@/lib/messages";
 
@@ -26,7 +26,7 @@ import type { MessageDescriptor, MessageKey } from "@/lib/messages";
  * through the logger's error serializer and arrive as fields under `err`.
  */
 export function reportError(
-  scope: string,
+  scope: LogEvent,
   error: unknown,
   fallback: MessageKey,
 ): MessageDescriptor {

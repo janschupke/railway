@@ -23,7 +23,7 @@ describe("log", () => {
   });
 
   it("stamps the resource fields an OTel collector maps onto service.*", () => {
-    log.info("probe");
+    log.info("railway.request");
     const record = only();
 
     expect(record.service).toBe("container-console");
@@ -34,7 +34,7 @@ describe("log", () => {
   it("emits a string level and an epoch-ms time, both left at pino's defaults", () => {
     // Grafana reads `level` as a label and `time` with a UnixMs stage; the OTel bridge
     // reads `msg` as the body. Not overriding these is the readiness work.
-    log.warn("probe");
+    log.warn("railway.request");
     const record = only();
 
     expect(record.level).toBe("warn");
@@ -43,7 +43,7 @@ describe("log", () => {
   });
 
   it("drops pid and hostname, which Railway already stamps", () => {
-    log.info("probe");
+    log.info("railway.request");
     expect(Object.keys(only())).not.toContain("pid");
     expect(Object.keys(only())).not.toContain("hostname");
   });
@@ -68,7 +68,7 @@ describe("log", () => {
     });
 
     it("omits the fields entirely outside a scope", () => {
-      log.info("probe");
+      log.info("railway.request");
       expect(Object.keys(only())).not.toContain("request_id");
     });
   });
@@ -119,7 +119,7 @@ describe("log", () => {
 
     it("redacts a credential passed under a known key name", () => {
       // The backstop, not the control — it catches one level. Worth proving it is armed.
-      log.info("probe", { access_token: "AT-CANARY" });
+      log.info("railway.request", { access_token: "AT-CANARY" });
 
       expect(rawLogLines().join("")).not.toContain("AT-CANARY");
     });
@@ -134,7 +134,7 @@ describe("log", () => {
      * that silently permits an object is worse than none.
      */
     // @ts-expect-error — fails the build if this ever starts type-checking.
-    log.info("probe", { session: { accessToken: "AT-CANARY" } });
+    log.info("railway.request", { session: { accessToken: "AT-CANARY" } });
 
     /*
      * And when the type is bypassed — as it is here — the second layer catches this
@@ -148,7 +148,7 @@ describe("log", () => {
 
   it("honours the level threshold", () => {
     // LOG_LEVEL is "debug" in tests, so trace must be the one that is dropped.
-    log.debug("kept");
+    log.debug("railway.request");
     expect(logRecords()).toHaveLength(1);
   });
 });
