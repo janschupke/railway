@@ -13,8 +13,9 @@ the two disagree, the ADR is the record and this file is stale — fix it.
 ## What the app is
 
 One Next.js 16 App Router application. A visitor signs into **their own** Railway account
-over OIDC, picks or creates a project and environment, and creates or destroys Docker-image
-services with live build and deploy logs streamed into the browser.
+over OIDC, picks or creates a project and environment, and creates, stops, restarts,
+redeploys and destroys Docker-image services with live build and deploy logs streamed into
+the browser.
 
 Single package — not a monorepo. `pnpm-workspace.yaml` exists only to carry `allowBuilds`
 toggles; there is no `packages:` list. That is not a reason to move to npm: `allowBuilds` is
@@ -98,14 +99,26 @@ because `src/proxy.ts` compiles into its own chunk graph (see the boundary note 
 Two copies means the same token spent twice, which is the failure the map exists to
 prevent.
 
-## The app only ever destroys services it created
+## The app only ever acts on services it created
 
 Railway services carry no arbitrary metadata, so the **name prefix is the ownership
-marker** — `MANAGED_PREFIX`, default `spun-`, in `src/lib/railway/managed.ts`. Every
-destructive path goes through `isManagedName`. A user could forge the prefix by renaming a
-service in Railway's own dashboard; that is an accepted trade, because the blast radius is
-bounded by the OAuth scopes they granted and the prefix is visible in Railway's UI rather
-than hidden metadata.
+marker** — `MANAGED_PREFIX`, default `spun-`, in `src/lib/railway/managed.ts`. Every path
+that changes a container that already exists goes through `isManagedName`. A user could
+forge the prefix by renaming a service in Railway's own dashboard; that is an accepted
+trade, because the blast radius is bounded by the OAuth scopes they granted and the prefix
+is visible in Railway's UI rather than hidden metadata.
+
+That is four verbs now — destroy, stop, restart, redeploy — and they share **one** guard:
+`withManagedContainer` in `src/app/dashboard/actions.ts` parses the three ids, re-reads the
+container list from Railway, and refuses before the verb's own callback runs. A second copy
+of that check is the thing to refuse in review, because the weaker copy is the one that
+would ship. `src/lib/railway/mutation-callsites.test.ts` asserts the shape structurally:
+each mutation is reachable from that file and nowhere else, `!target.managed` appears in it
+exactly once, and every mutation call sits below it.
+
+**The deployment id is derived, never posted.** A lifecycle action reads it off the
+container it just re-derived ownership from, so a forged deployment id is refused by the
+same mechanism a forged service id is.
 
 **Changing `MANAGED_PREFIX` after containers exist orphans them.** They stay in Railway and
 become read-only in this app. Say so if you ever propose changing it.

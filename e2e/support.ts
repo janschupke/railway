@@ -260,6 +260,38 @@ export async function openDestroyDialog(page: Page, name: string) {
 }
 
 /**
+ * Runs one of a row's reversible actions, from its trigger to its confirmation.
+ *
+ * Separate from `openDestroyDialog` because the two confirmations are deliberately not the
+ * same: this one has no field to type into, so the readiness signal is the confirm button
+ * rather than the input, and the layer gate is what keeps an Escape from being swallowed.
+ *
+ * The trigger and the confirm button are matched separately on purpose — "Stop" and "Stop
+ * container" are two controls, and a loose match would click whichever the dialog painted
+ * first.
+ */
+export async function runRowAction(
+  page: Page,
+  name: string,
+  action: "Stop" | "Restart" | "Redeploy",
+) {
+  await onlyVisible(
+    row(page, name).getByRole("button", { name: new RegExp(`^${action}$`) }),
+  ).click();
+
+  const dialog = onlyVisible(page.getByRole("alertdialog"));
+  await expect(dialog).toBeVisible();
+  const confirm = dialog.getByRole("button", {
+    name: new RegExp(`^${action} container$`, "i"),
+  });
+  await expect(confirm).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+}
+
+/**
  * Picks a preset and submits.
  *
  * The image control is one editable combobox now, so this opens the list, picks, and

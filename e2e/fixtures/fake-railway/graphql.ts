@@ -275,6 +275,18 @@ export function execute(
       return { data: { serviceInstanceDeployV2: store.addDeployment(serviceId).id } };
     }
 
+    case "DeploymentStop": {
+      const deployment = store.stopDeployment(variables.id as string);
+      if (!deployment) return { errors: [{ message: "Deployment not found" }] };
+      return { data: { deploymentStop: true } };
+    }
+
+    case "DeploymentRestart": {
+      const deployment = store.restartDeployment(variables.id as string);
+      if (!deployment) return { errors: [{ message: "Deployment not found" }] };
+      return { data: { deploymentRestart: true } };
+    }
+
     case "ServiceDelete": {
       const id = variables.id as string;
       const service = store.services.get(id);

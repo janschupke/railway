@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * origin and land the browser on another.
  *
  * Asserted structurally rather than per handler, in the idiom of
- * `lib/railway/destroy-callsites.test.ts`: the rule is about every file of a shape, and
+ * `lib/railway/mutation-callsites.test.ts`: the rule is about every file of a shape, and
  * the next route handler is the one that will forget it. `src/proxy.ts` is deliberately
  * out of scope — middleware emits a Location relative to the request it saw, which is
  * why its `new URL(…, request.url)` calls never reached a browser as an absolute URL.

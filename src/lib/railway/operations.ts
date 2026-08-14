@@ -25,6 +25,10 @@ import type {
   DeploymentLogsQueryVariables,
   DeploymentQuery,
   DeploymentQueryVariables,
+  DeploymentRestartMutation,
+  DeploymentRestartMutationVariables,
+  DeploymentStopMutation,
+  DeploymentStopMutationVariables,
   EnvironmentCreateMutation,
   EnvironmentCreateMutationVariables,
   ProjectCreateMutation,
@@ -360,6 +364,57 @@ export const SERVICE_DELETE_MUTATION: TypedDocument<
   }
 `;
 
+/**
+ * Stop the deployment a service is currently running.
+ *
+ * Reversible, which is the whole reason it is here: the service, its variables and its
+ * deployment history survive, and SERVICE_DEPLOY_MUTATION above brings it back. That is
+ * what separates it from `serviceDelete`, after which Railway retains no record the
+ * container existed.
+ *
+ * Railway answers a Boolean and nothing else, so the app learns what stopping did from the
+ * next read of PROJECT_QUERY rather than from this response.
+ */
+export const DEPLOYMENT_STOP_MUTATION: TypedDocument<
+  DeploymentStopMutation,
+  DeploymentStopMutationVariables
+> = /* GraphQL */ `
+  mutation DeploymentStop($id: String!) {
+    deploymentStop(id: $id)
+  }
+`;
+
+/**
+ * Restart the container of a deployment that is already running, in place.
+ *
+ * The deployment id does not change, which is the property the row depends on: an open log
+ * pane is subscribed to that id, so a restart continues in the pane the user is already
+ * watching. A redeploy would make a new deployment and leave them watching the old one.
+ *
+ * Three neighbouring mutations are deliberately absent, and none of them is an oversight:
+ *
+ *   - `deploymentRedeploy(id)` returns a fresh `Deployment!` from an existing one, and is
+ *     what "redeploy" would obviously be built on. The app redeploys through
+ *     `serviceInstanceDeployV2` instead, because that is the only call that also works for
+ *     a service with NO deployment — the orphan `createContainer` leaves behind when
+ *     Railway refuses the first deploy, which is exactly the row that most needs the
+ *     control. One path, one document, one code branch.
+ *   - `deploymentRollback(id)` deploys a previous deployment. Choosing which one is a UI
+ *     this app does not have, and rolling back to an image tag the user cannot see would
+ *     be the least legible thing on the dashboard.
+ *   - `deploymentRemove(id)` erases a stopped deployment's record. Nothing in the UI offers
+ *     it, and it is the one lifecycle call that destroys something `serviceDelete` does not
+ *     already take.
+ */
+export const DEPLOYMENT_RESTART_MUTATION: TypedDocument<
+  DeploymentRestartMutation,
+  DeploymentRestartMutationVariables
+> = /* GraphQL */ `
+  mutation DeploymentRestart($id: String!) {
+    deploymentRestart(id: $id)
+  }
+`;
+
 export const DEPLOYMENT_QUERY: TypedDocument<
   DeploymentQuery,
   DeploymentQueryVariables
@@ -541,15 +596,21 @@ export const OPTIONAL_FIELDS: Array<{
   field: string;
   note: string;
 }> = [
-  {
-    root: "Mutation",
-    field: "deploymentStop",
-    note: "spin-down stays destroy-only",
-  },
+  /*
+   * `deploymentStop` used to sit here, with the note "spin-down stays destroy-only". It is
+   * a document now — see DEPLOYMENT_STOP_MUTATION — so its withdrawal fails the schema job
+   * rather than being reported, which is the difference between a capability the app wants
+   * and one it depends on.
+   */
   {
     root: "Mutation",
     field: "deploymentRemove",
-    note: "spin-down stays destroy-only",
+    note: "a stopped deployment's record cannot be erased, only the whole service",
+  },
+  {
+    root: "Mutation",
+    field: "deploymentRollback",
+    note: "a container can be restarted and redeployed, but never rolled back",
   },
   {
     root: "Mutation",

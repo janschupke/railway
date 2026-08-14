@@ -18,8 +18,8 @@ import {
 import { railwayServiceUrl } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ContainerActions } from "./container-actions";
 import { ContainerMetricsReadout } from "./container-metrics";
-import { DestroyContainerDialog } from "./destroy-container-dialog";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
@@ -324,12 +324,18 @@ export function ContainerRow({
         </Text>
 
         {container.managed ? (
-          <DestroyContainerDialog
+          /*
+           * `state` rather than `container.state`: the stream is fresher than the last
+           * server render, and a row that has just finished deploying must offer Stop
+           * rather than the Redeploy its stale status would have earned.
+           */
+          <ContainerActions
             serviceId={container.serviceId}
             displayName={container.displayName}
+            deploymentId={container.deploymentId}
+            state={state}
             projectId={projectId}
             environmentId={environmentId}
-            disabled={state === "removing"}
           />
         ) : (
           /*

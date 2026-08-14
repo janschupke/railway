@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * integration tests — but the *next* one is one forgotten line away from being public,
  * and no existing test would notice: they test the surfaces that exist.
  *
- * So this asserts the call graph, in the same shape as destroy-callsites.test.ts. A new
+ * So this asserts the call graph, in the same shape as mutation-callsites.test.ts. A new
  * route or action either reaches requireSession, or it appears in PUBLIC below with a
  * reason written next to it. Both outcomes are visible in a diff, which is the point.
  *

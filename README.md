@@ -6,8 +6,8 @@ Spin containers up and down in **your own** Railway projects, from a browser.
 only ever acts on that account's own projects.
 
 Sign in with Railway, pick which projects to share on Railway's consent screen, choose a
-project and environment, and create or destroy Docker-image services — with live build
-and deploy logs streamed while it happens.
+project and environment, and create Docker-image services — then stop, restart, redeploy
+or destroy them — with live build and deploy logs streamed while it happens.
 
 ---
 
@@ -241,11 +241,19 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   validated against Railway's schema, `payload { error reason detail skipped }` included, and
   `pnpm codegen` refuses to generate a type for a selection Railway no longer offers.
 
-- **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
-  API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been
-  built. Offering it means a second confirm path, a fourth container state the dashboard
-  can act on, and deciding what "spin up" does to a stopped service; the UI promises
-  nothing it does not do.
+- **A container can be stopped, restarted, redeployed and destroyed — and never rolled
+  back.** Stop is `deploymentStop`, restart is `deploymentRestart`, and redeploy is
+  `serviceInstanceDeployV2` rather than the obvious `deploymentRedeploy`: that one takes a
+  deployment id, and a service whose first deploy Railway refused has none — which is
+  exactly the row most in need of the control. `deploymentRollback` and `deploymentRemove`
+  stay in `OPTIONAL_FIELDS`, reported by `verify:schema` and sent by nothing. Rollback needs
+  a UI for choosing which deployment to go back to, over image tags the user cannot see
+  here; `deploymentRemove` erases a stopped deployment's record, which is the one lifecycle
+  call that destroys something `serviceDelete` does not already take. The three that are
+  built are all reversible, so they confirm with a sentence and two buttons rather than the
+  destroy dialog's typed name — friction is priced in what it protects. What "spin up" does
+  to a stopped service is nothing: it creates, the duplicate-name check refuses a second
+  container by that name, and the row's own **Redeploy** is the way back.
 - **SSE pins a client to one replica**, so this is a single-replica app today. Two pieces
   of module state say so out loud: the stream cap in `lib/stream-slots.ts` and the
   idempotency map in `lib/idempotency.ts`. See below.
@@ -296,7 +304,8 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   once there is more than one instance.
 - **An audit log** of spin-up/spin-down per user — now half done. The events are recorded
   (`container.created`, `container.create_failed`, `container.create_replayed`,
-  `container.destroyed`, `container.destroy_refused`, with the
+  `container.destroyed`, `container.stopped`, `container.restarted`,
+  `container.redeployed` and a `…_refused` per verb, with the
   subject and the ids), and the field set is deliberately the shape a table would take, so
   the remaining work is a parse rather than a re-instrumentation. What a database adds is
   retention beyond the log window and a query the user can run themselves.
@@ -329,17 +338,24 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 1. Sign in. Railway's consent screen should list your projects — select at least one.
 2. Spin up `redis:7-alpine`. The row should move Queued → Building → Deploying →
    Running, with build output streaming in the expanded log pane.
-3. Destroy it (type the container name to confirm) and check it disappears from the
+3. **Stop it.** The badge should settle at **Removed** while the row stays on the
+   dashboard — the service, its variables and its history are all still on Railway. The
+   row's controls change with it: Stop and Restart give way to Redeploy. Press that and it
+   should come back Queued → Building → Deploying → Running. Then press **Restart** on the
+   running container with its log pane open: the pane keeps filling, because a restart
+   keeps the same deployment rather than starting a new one.
+4. Destroy it (type the container name to confirm) and check it disappears from the
    Railway dashboard too.
-4. **Token expiry:** leave the tab open past the hour, or rewind `expiresAt` in the
+5. **Token expiry:** leave the tab open past the hour, or rewind `expiresAt` in the
    session cookie, then perform an action. It should succeed — the proxy refreshes and
    rotates transparently.
-5. **Ownership:** create a service in the Railway dashboard directly. It appears here as
-   _Not managed here_, with no destroy control.
-6. **The way out:** click any container's name — every row, not only the broken ones —
+6. **Ownership:** create a service in the Railway dashboard directly. It appears here as
+   _Not managed here_, with no lifecycle controls at all — no stop, restart, redeploy or
+   destroy.
+7. **The way out:** click any container's name — every row, not only the broken ones —
    and confirm it opens that service on Railway in a new tab. The chevron beside it is
    the log panel's disclosure; check it still expands from the keyboard.
-7. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
+8. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
    **Failed** rather than spinning forever, and that expanding the row explains the
    failure and repeats **Open in Railway**. Do not expect build logs here: an image source
    performs no build, and a pull that never resolves may write nothing to either log
@@ -361,7 +377,7 @@ version of each:
 | [ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)       | Token refresh runs in the proxy layer                                     | Access tokens live one hour and refresh tokens rotate on every use; Server Components can read cookies but not write them, so refresh runs in `src/proxy.ts` before the render                                 |
 | [ADR-3](docs/adr/0003-sse-downstream-websocket-upstream.md)           | SSE downstream, WebSocket upstream                                        | Railway genuinely pushes log lines over GraphQL subscriptions, but App Router route handlers cannot accept WebSocket upgrades and the data only flows one way                                                  |
 | [ADR-4](docs/adr/0004-no-database.md)                                 | No database                                                               | Railway holds the state; mirroring it would only create drift                                                                                                                                                  |
-| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)       | The app only destroys what it created                                     | This tool deletes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every delete                                         |
+| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)       | The app only destroys what it created                                     | This tool changes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every destroy, stop, restart and redeploy            |
 | [ADR-6](docs/adr/0006-docker-images-only.md)                          | Docker images only; GitHub sources are a stated limitation                | Repo sources silently require _the signed-in user's_ Railway account to have the GitHub app installed with access to that repo — something this app cannot provision on their behalf                           |
 | [ADR-7](docs/adr/0007-the-url-is-the-state.md)                        | The URL is the state; there is no client store                            | Project, environment and filters are search params, so the dashboard is linkable and the server does the fetching; there is no client fetch, so there is no client cache to reconcile                          |
 | [ADR-8](docs/adr/0008-a-hand-rolled-graphql-client-not-apollo.md)     | A hand-rolled GraphQL client, not Apollo                                  | All of `src/lib/railway/` is server-only, so Apollo's normalized cache and browser hooks have nothing to attach to — and a cache would be actively wrong for a live view of infrastructure                     |
@@ -757,9 +773,12 @@ survive, because neither is derivable from a document:
   refusal degrades a readout rather than breaking the app. A validation error inside those is
   reported and does not fail the run. That is a product decision, not a fact about the schema.
 - `OPTIONAL_FIELDS` — capabilities Railway does not document and this app does not use, with
-  what the app cannot do without each. As of 2026-08-14 `deploymentStop`, `deploymentRemove`,
-  `serviceInstanceUpdate` and `variableUpsert` all exist; see Limitations for why spin-down is
-  destroy-only regardless. No document mentions them, so no derivation can find them.
+  what the app cannot do without each. As of 2026-08-14 `deploymentRemove`,
+  `deploymentRollback`, `serviceInstanceUpdate` and `variableUpsert` all exist and none is
+  sent; see Limitations for why. No document mentions them, so no derivation can find them.
+  `deploymentStop` used to be listed here and is a document now, which is the whole
+  distinction this list draws: a capability the app wants is reported, a capability it
+  depends on fails the run.
 
 It also prints every **deprecated** field the app selects, which found two on the first run
 and both are load-bearing: `User.projects` (_"This field will not return anything anymore, go

@@ -231,7 +231,15 @@ export const environmentCreateSchema = z.object({
     .max(LIMITS.ENVIRONMENT_NAME_MAX, "validation.environmentNameTooLong"),
 });
 
-export const spinDownSchema = z.object({
+/**
+ * One container, named by the three ids every lifecycle action posts.
+ *
+ * Was `spinDownSchema`, when destroy was the only thing that could be done to a container
+ * that already exists. Stop, restart and redeploy send exactly the same three fields —
+ * nothing about a lifecycle request is per-verb, because the deployment id is read back
+ * from Railway rather than accepted from the browser.
+ */
+export const containerActionSchema = z.object({
   projectId: railwayId("validation.projectRequired"),
   environmentId: railwayId("validation.environmentRequired"),
   serviceId: railwayId("validation.serviceRequired"),

@@ -7,8 +7,11 @@ import { describeActionError, isField, type ActionResult } from "@/lib/action-re
 import { runOnce, type Retainable } from "@/lib/idempotency";
 import {
   createContainer,
+  deployService,
   destroyContainer,
   getProjectContainers,
+  restartDeployment,
+  stopDeployment,
   /*
    * Aliased because the exported actions below are the same two verbs. The repo's other
    * actions dodge this by being named for the UI rather than the API — spinUp calls
@@ -26,12 +29,13 @@ import { resolveVariables } from "@/lib/railway/secrets";
 import {
   VALIDATION_KEYS,
   VALIDATION_VALUES,
+  containerActionSchema,
   environmentCreateSchema,
   projectCreateSchema,
-  spinDownSchema,
   spinUpSchema,
 } from "@/lib/validation";
 import type { MessageKey, Translate } from "@/lib/messages";
+import type { Container } from "@/lib/railway/types";
 
 /**
  * Server Actions resolve copy themselves.
@@ -496,19 +500,67 @@ async function addEnvironment(formData: FormData): Promise<ActionResult> {
   }
 }
 
-export async function spinDown(
-  _prev: ActionResult | null,
+/**
+ * The event names one lifecycle verb writes, spelled out rather than built.
+ *
+ * `subsystem.thing.outcome`, from a closed set, and as literals so that grepping the log
+ * store for `container.stop_refused` finds the line that emits it — which a template over
+ * the verb would not. See .ai/rules/errors-and-logging.md on why the cardinality here is
+ * the point.
+ */
+const LIFECYCLE_EVENTS = {
+  destroy: {
+    skipped: "container.destroy_skipped",
+    refused: "container.destroy_refused",
+    done: "container.destroyed",
+  },
+  stop: {
+    skipped: "container.stop_skipped",
+    refused: "container.stop_refused",
+    done: "container.stopped",
+  },
+  restart: {
+    skipped: "container.restart_skipped",
+    refused: "container.restart_refused",
+    done: "container.restarted",
+  },
+  redeploy: {
+    skipped: "container.redeploy_skipped",
+    refused: "container.redeploy_refused",
+    done: "container.redeployed",
+  },
+} as const;
+
+type LifecycleVerb = keyof typeof LIFECYCLE_EVENTS;
+
+/**
+ * The ownership boundary, for every action that changes a container that already exists.
+ *
+ * One helper rather than four copies, and the reason is the reason the rule exists at all:
+ * a second implementation of "re-derive ownership from Railway's own response" is a second
+ * chance to get it subtly wrong, and nothing in the types would notice. Everything a
+ * lifecycle verb does differently happens inside `run`, after this has already decided the
+ * caller may act on this service. `mutation-callsites.test.ts` asserts there is exactly one
+ * `!target.managed` in this file and that every infrastructure-changing call sits below it.
+ *
+ * The deployment id is deliberately not a form field. It comes off `target`, which is
+ * Railway's answer to this request — the client posts a service id and nothing else is
+ * trusted, exactly as ownership is not.
+ */
+async function withManagedContainer(
+  verb: LifecycleVerb,
   formData: FormData,
+  run: (context: {
+    accessToken: string;
+    projectId: string;
+    environmentId: string;
+    target: Container;
+  }) => Promise<ActionResult>,
 ): Promise<ActionResult> {
-  return withRequestScope("spinDown", { trustInboundId: true }, () =>
-    destroy(formData),
-  );
-}
-
-async function destroy(formData: FormData): Promise<ActionResult> {
   const t = await getTranslations();
+  const events = LIFECYCLE_EVENTS[verb];
 
-  const parsed = spinDownSchema.safeParse({
+  const parsed = containerActionSchema.safeParse({
     projectId: formField(formData, "projectId"),
     environmentId: formField(formData, "environmentId"),
     serviceId: formField(formData, "serviceId"),
@@ -524,12 +576,12 @@ async function destroy(formData: FormData): Promise<ActionResult> {
 
     /*
      * Re-derive ownership server-side. The client sends a service id and nothing else
-     * is trusted: if the service was not created by this app, the delete is refused
+     * is trusted: if the service was not created by this app, the mutation is refused
      * here even though the user's own token would happily perform it.
      *
      * Uncancellable for the same reason as the read in `create` above — see
      * `containerList` in ./data.ts. It is also the read this app would least want to give
-     * a deadline to: a signal that fired here would have to refuse the destroy, never
+     * a deadline to: a signal that fired here would have to refuse the action, never
      * fall through to one, so it buys a new failure mode for a check that must not fail
      * open.
      */
@@ -541,7 +593,7 @@ async function destroy(formData: FormData): Promise<ActionResult> {
     const target = containers.find((c) => c.serviceId === serviceId);
 
     if (!target) {
-      log.info("container.destroy_skipped", {
+      log.info(events.skipped, {
         reason: "gone",
         project_id: projectId,
         service_id: serviceId,
@@ -552,11 +604,11 @@ async function destroy(formData: FormData): Promise<ActionResult> {
     if (!target.managed) {
       /*
        * The ownership boundary refusing a request, at warn because it should never
-       * happen through the UI — the destroy control is only rendered for managed
-       * services. Silent, this was indistinguishable from a UI bug; named, it is the
-       * difference between a stale page and someone posting service ids by hand.
+       * happen through the UI — these controls are only rendered for managed services.
+       * Silent, this was indistinguishable from a UI bug; named, it is the difference
+       * between a stale page and someone posting service ids by hand.
        */
-      log.warn("container.destroy_refused", {
+      log.warn(events.refused, {
         reason: "unmanaged",
         project_id: projectId,
         service_id: serviceId,
@@ -564,20 +616,150 @@ async function destroy(formData: FormData): Promise<ActionResult> {
       return { ok: false, error: t("actions.notManaged") };
     }
 
-    await destroyContainer(accessToken, serviceId);
-
-    // The other half of the audit trail. After this, Railway has no record it existed.
-    log.info("container.destroyed", {
-      project_id: projectId,
-      environment_id: environmentId,
-      service_id: serviceId,
-      service_name: target.rawName,
-    });
-
-    revalidatePath("/dashboard");
-    return { ok: true, message: t("actions.destroyed", { name: target.displayName }) };
+    return await run({ accessToken, projectId, environmentId, target });
   } catch (error) {
     const { key, values } = describeActionError(error);
     return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
   }
+}
+
+/**
+ * The audit line every lifecycle verb writes when it has changed something.
+ *
+ * The same field set `container.created` uses, because these change billable
+ * infrastructure too and the question asked of the log afterwards is the same one: who did
+ * what, to which service, where.
+ */
+function logLifecycle(
+  verb: LifecycleVerb,
+  context: {
+    projectId: string;
+    environmentId: string;
+    target: Container;
+  },
+  extra: { deployment_id?: string | null } = {},
+): void {
+  log.info(LIFECYCLE_EVENTS[verb].done, {
+    project_id: context.projectId,
+    environment_id: context.environmentId,
+    service_id: context.target.serviceId,
+    service_name: context.target.rawName,
+    ...extra,
+  });
+}
+
+export async function spinDown(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("spinDown", { trustInboundId: true }, () =>
+    withManagedContainer("destroy", formData, async (context) => {
+      /*
+       * Resolved here rather than handed down from the helper, for the reason `attempt`
+       * gives one screen up: next-intl caches per request so the second call is free, and
+       * passing it would mean naming the type `getTranslations()` actually returns — which
+       * is wider than the `Translator` alias, since that one is the namespaced overload.
+       */
+      const t = await getTranslations();
+
+      await destroyContainer(context.accessToken, context.target.serviceId);
+
+      // The other half of the audit trail. After this, Railway has no record it existed.
+      logLifecycle("destroy", context);
+
+      revalidatePath("/dashboard");
+      return {
+        ok: true,
+        message: t("actions.destroyed", { name: context.target.displayName }),
+      };
+    }),
+  );
+}
+
+export async function stopContainer(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("stopContainer", { trustInboundId: true }, () =>
+    withManagedContainer("stop", formData, async (context) => {
+      const t = await getTranslations();
+      const { deploymentId } = context.target;
+      /*
+       * Nothing to stop is a state the UI does not offer — the control is gated on the row
+       * having a deployment — so this is the stale-page case, and it says so rather than
+       * sending Railway an id it does not have.
+       */
+      if (!deploymentId) {
+        return { ok: false, error: t("actions.nothingRunning") };
+      }
+
+      await stopDeployment(context.accessToken, deploymentId);
+
+      logLifecycle("stop", context, { deployment_id: deploymentId });
+
+      revalidatePath("/dashboard");
+      return {
+        ok: true,
+        message: t("actions.stopped", { name: context.target.displayName }),
+      };
+    }),
+  );
+}
+
+export async function restartContainer(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("restartContainer", { trustInboundId: true }, () =>
+    withManagedContainer("restart", formData, async (context) => {
+      const t = await getTranslations();
+      const { deploymentId } = context.target;
+      if (!deploymentId) {
+        return { ok: false, error: t("actions.nothingRunning") };
+      }
+
+      await restartDeployment(context.accessToken, deploymentId);
+
+      /*
+       * The deployment id is recorded although it does not change — that is the point of
+       * restart rather than redeploy, and a record that names it is what lets an operator
+       * line this up with the log stream the user was watching at the time.
+       */
+      logLifecycle("restart", context, { deployment_id: deploymentId });
+
+      revalidatePath("/dashboard");
+      return {
+        ok: true,
+        message: t("actions.restarted", { name: context.target.displayName }),
+      };
+    }),
+  );
+}
+
+export async function redeployContainer(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("redeployContainer", { trustInboundId: true }, () =>
+    withManagedContainer("redeploy", formData, async (context) => {
+      const t = await getTranslations();
+      /*
+       * No deployment id needed, which is why this is the app's only redeploy path: a
+       * service whose first deploy Railway refused has none, and it is exactly the row a
+       * user most wants this control on. See deployService in lib/railway/api.ts.
+       */
+      const deploymentId = await deployService(context.accessToken, {
+        serviceId: context.target.serviceId,
+        environmentId: context.environmentId,
+      });
+
+      logLifecycle("redeploy", context, { deployment_id: deploymentId });
+
+      revalidatePath("/dashboard");
+      return {
+        ok: true,
+        message: t("actions.redeployed", { name: context.target.displayName }),
+      };
+    }),
+  );
 }

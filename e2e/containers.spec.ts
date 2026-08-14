@@ -2,6 +2,7 @@ import {
   addVariable,
   button,
   disclosure,
+  dismissWithEscape,
   expect,
   field,
   fixtureServices,
@@ -11,6 +12,7 @@ import {
   openDestroyDialog,
   railwayLink,
   row,
+  runRowAction,
   seedServices,
   setTabVisibility,
   settled,
@@ -155,6 +157,113 @@ test.describe("container lifecycle", () => {
 
     await expect(toast(page, "Destroyed cache")).toBeVisible();
     await expect(row(page, "cache")).toHaveCount(0);
+  });
+
+  test("stops a running container and brings it back with Redeploy", async ({
+    page,
+  }) => {
+    /*
+     * The round trip the whole feature exists for, and the only place it can be proven end
+     * to end: the controls a row offers are derived from a status that arrives over SSE,
+     * so a component test can assert the derivation but never that the status the browser
+     * actually receives drives it.
+     *
+     * Stopping settles the deployment at REMOVED in the fixture, which is what Railway's
+     * own dashboard reports for a stopped deployment — and it is terminal in this app's
+     * state machine, so the stream closes rather than polling for the duration ceiling.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await runRowAction(page, "cache", "Stop");
+
+    await expect(toast(page, "Stopped cache")).toBeVisible();
+    await expect(cache.getByText("Removed")).toBeVisible({ timeout: 20_000 });
+
+    // The row survives the stop — that is the difference from Destroy — and the control it
+    // now offers is the way back.
+    await expect(
+      onlyVisible(cache.getByRole("button", { name: /^stop$/i })),
+    ).toHaveCount(0);
+
+    await runRowAction(page, "cache", "Redeploy");
+
+    await expect(toast(page, "Redeploying cache")).toBeVisible();
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("restarts a running container without leaving its log stream", async ({
+    page,
+  }) => {
+    /*
+     * Restart keeps the deployment id, which is what separates it from Redeploy — so the
+     * panel the user already has open keeps filling rather than being stranded on a
+     * deployment nobody is watching. Asserted through the pane rather than through the id,
+     * because the id is not on screen and the output is what the person actually sees.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+
+    await runRowAction(page, "cache", "Restart");
+
+    await expect(toast(page, "Restarting cache")).toBeVisible();
+    await expect(cache.getByRole("log")).toBeVisible();
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("confirms a reversible action without asking for the container name", async ({
+    page,
+  }) => {
+    /*
+     * The second confirm path, stated as the difference it is meant to be. Stopping is
+     * reversible and carries a sentence and two buttons; destroying is not and still costs
+     * a typed name. If these two dialogs ever converge, one of them is wrong.
+     */
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    await onlyVisible(
+      row(page, "cache").getByRole("button", { name: /^stop$/i }),
+    ).click();
+
+    const dialog = onlyVisible(page.getByRole("alertdialog"));
+    await expect(dialog).toContainText("Stop cache?");
+    await expect(dialog.getByRole("textbox")).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: /^stop container$/i }),
+    ).toBeEnabled();
+
+    await dismissWithEscape(page, dialog);
+    await expect(dialog).toBeHidden();
+    // Dismissed means nothing happened: the container is still running.
+    await expect(row(page, "cache").getByText("Running")).toBeVisible();
+  });
+
+  test("offers no lifecycle controls for a service it did not create", async ({
+    page,
+  }) => {
+    /*
+     * The ownership rule covers every verb now, not just destroy, and this is its UI half.
+     * The server half — that a forged serviceId reaches no mutation — is proven per verb in
+     * actions.integration.test.ts.
+     */
+    const postgres = row(page, "postgres");
+    await expect(postgres).toBeVisible();
+
+    for (const action of [/^stop$/i, /^restart$/i, /^redeploy$/i]) {
+      await expect(
+        onlyVisible(postgres.getByRole("button", { name: action })),
+      ).toHaveCount(0);
+    }
   });
 
   test("offers no destroy control for a service it did not create", async ({

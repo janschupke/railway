@@ -9,6 +9,8 @@ import {
   DEPLOYMENT_EVENTS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
+  DEPLOYMENT_RESTART_MUTATION,
+  DEPLOYMENT_STOP_MUTATION,
   ENVIRONMENT_CREATE_MUTATION,
   PROJECTS_PERSONAL_QUERY,
   PROJECTS_WORKSPACE_QUERY,
@@ -46,7 +48,6 @@ import type {
   WorkspaceSpend,
 } from "./types";
 import type { Refusable, TypedDocument } from "./typed-document";
-import type { ServiceInstanceDeployV2Mutation } from "./graphql.generated";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
@@ -434,30 +435,85 @@ export async function createContainer(
    * this discards from the user's sentence — auth, rate limit, outage — is entirely
    * preserved in the record below, incident id included.
    */
-  let deployed: ServiceInstanceDeployV2Mutation;
+  let deploymentId: string | null;
   try {
-    deployed = await gql(
-      SERVICE_DEPLOY_MUTATION,
+    deploymentId = await deployService(
+      accessToken,
       { serviceId, environmentId: params.environmentId },
-      { accessToken, operationName: "ServiceInstanceDeployV2", signal },
+      signal,
     );
   } catch (error) {
     log.warn("railway.deploy_failed", { service_id: serviceId, error });
     return { serviceId, deploymentId: null, outcome: "deploy_failed" };
   }
 
-  return {
-    serviceId,
-    /*
-     * `?? null` on a field the schema calls `String!`, kept deliberately. This value is the
-     * id the row's log stream keys on, and the whole point of preferring
-     * `serviceInstanceDeployV2` over `serviceInstanceDeploy` was getting an id back — a
-     * Railway that answered null anyway would take the stream down at the first property
-     * access rather than degrade to "no logs for this deployment".
-     */
-    deploymentId: deployed.serviceInstanceDeployV2 ?? null,
-    outcome: "deployed",
-  };
+  return { serviceId, deploymentId, outcome: "deployed" };
+}
+
+/**
+ * Deploy a service instance, and hand back the id of the deployment that starts.
+ *
+ * Two callers, and they are the same operation seen from either end of a container's life:
+ * `createContainer` above sends it to start a service that has just been registered, and
+ * the redeploy action sends it to start one that is stopped, failed, or was created and
+ * never deployed. That last case is why this is the app's only redeploy path —
+ * `deploymentRedeploy` takes a deployment id, and the orphan a refused first deploy leaves
+ * behind has none. See DEPLOYMENT_RESTART_MUTATION for the rest of that argument.
+ *
+ * Uncaught here on purpose: `createContainer` has to distinguish "no service exists" from
+ * "a billable service exists and is not running", and the action has a different sentence
+ * again. Both catch what suits them.
+ */
+export async function deployService(
+  accessToken: string,
+  params: { serviceId: string; environmentId: string },
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const deployed = await gql(
+    SERVICE_DEPLOY_MUTATION,
+    { serviceId: params.serviceId, environmentId: params.environmentId },
+    { accessToken, operationName: "ServiceInstanceDeployV2", signal },
+  );
+  /*
+   * `?? null` on a field the schema calls `String!`, kept deliberately. This value is the
+   * id the row's log stream keys on, and the whole point of preferring
+   * `serviceInstanceDeployV2` over `serviceInstanceDeploy` was getting an id back — a
+   * Railway that answered null anyway would take the stream down at the first property
+   * access rather than degrade to "no logs for this deployment".
+   */
+  return deployed.serviceInstanceDeployV2 ?? null;
+}
+
+/**
+ * Stop a running deployment. The service, its variables and its history survive.
+ *
+ * Takes a deployment id the caller read back from Railway rather than one a browser sent —
+ * the ownership check in the action is what makes that true, and it is the same rule
+ * `destroyContainer` sits behind.
+ */
+export async function stopDeployment(
+  accessToken: string,
+  deploymentId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await gql(
+    DEPLOYMENT_STOP_MUTATION,
+    { id: deploymentId },
+    { accessToken, operationName: "DeploymentStop", signal },
+  );
+}
+
+/** Restart a deployment's container in place, keeping the deployment and its log stream. */
+export async function restartDeployment(
+  accessToken: string,
+  deploymentId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await gql(
+    DEPLOYMENT_RESTART_MUTATION,
+    { id: deploymentId },
+    { accessToken, operationName: "DeploymentRestart", signal },
+  );
 }
 
 export async function destroyContainer(

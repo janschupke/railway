@@ -262,6 +262,18 @@ export type ServiceDeleteMutationVariables = Exact<{
 
 export type ServiceDeleteMutation = { serviceDelete: boolean };
 
+export type DeploymentStopMutationVariables = Exact<{
+  id: string;
+}>;
+
+export type DeploymentStopMutation = { deploymentStop: boolean };
+
+export type DeploymentRestartMutationVariables = Exact<{
+  id: string;
+}>;
+
+export type DeploymentRestartMutation = { deploymentRestart: boolean };
+
 export type DeploymentQueryVariables = Exact<{
   id: string;
 }>;

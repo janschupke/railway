@@ -5,6 +5,11 @@ import type { Container, ContainerMetrics } from "@/lib/railway/types";
 
 vi.mock("@/app/dashboard/actions", () => ({
   spinDown: vi.fn(async () => ({ ok: true, message: "Destroyed" })),
+  // The row's action slot holds every lifecycle verb now; each is imported eagerly by
+  // container-actions.tsx, so a partial mock fails at import rather than at call time.
+  stopContainer: vi.fn(async () => ({ ok: true, message: "Stopped" })),
+  restartContainer: vi.fn(async () => ({ ok: true, message: "Restarting" })),
+  redeployContainer: vi.fn(async () => ({ ok: true, message: "Redeploying" })),
 }));
 
 const streamState = {

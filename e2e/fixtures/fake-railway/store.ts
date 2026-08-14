@@ -340,6 +340,45 @@ export class Store {
     return deployment;
   }
 
+  /**
+   * What `deploymentStop` does here: the deployment settles at REMOVED and stays there.
+   *
+   * REMOVED rather than SLEEPING, because that is what Railway's own dashboard shows for a
+   * deployment that was stopped — SLEEPING is its app-sleep feature, which this app does
+   * not turn on. Both are terminal in the app's state machine either way, so the stream
+   * closes rather than polling on; that is the property the fixture is here to exercise.
+   *
+   * The service survives, which is the whole difference from ServiceDelete: its row stays
+   * on the dashboard, and redeploying it is what a spec goes on to do next.
+   */
+  stopDeployment(deploymentId: string): Deployment | null {
+    const deployment = this.deployments.get(deploymentId);
+    if (!deployment) return null;
+    deployment.status = "REMOVED";
+    deployment.updatedAt = new Date().toISOString();
+    // Past the end of both progressions, so tick() leaves it where it was put.
+    deployment.step = Math.max(PROGRESSION.length, FAILING_PROGRESSION.length);
+    return deployment;
+  }
+
+  /**
+   * What `deploymentRestart` does here: the same deployment walks back to DEPLOYING and
+   * the ticker carries it to SUCCESS again, writing fresh log lines on the way.
+   *
+   * The id does not change, which is the property under test — a log pane already open on
+   * this deployment must keep streaming rather than be left on a deployment nobody is
+   * watching. A fixture that minted a new id here could not tell the two apart.
+   */
+  restartDeployment(deploymentId: string): Deployment | null {
+    const deployment = this.deployments.get(deploymentId);
+    if (!deployment) return null;
+    deployment.status = "DEPLOYING";
+    deployment.updatedAt = new Date().toISOString();
+    // One before SUCCESS, so the next tick settles it and the transition is observable.
+    deployment.step = PROGRESSION.indexOf("DEPLOYING");
+    return deployment;
+  }
+
   /** Advances every in-flight deployment one step and appends a log line. */
   tick(): void {
     for (const deployment of this.deployments.values()) {

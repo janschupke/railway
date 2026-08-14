@@ -32,8 +32,15 @@ vi.mock("@/lib/auth/server", () => ({
   requireSession: () => requireSession(),
 }));
 
-const { spinUp, spinDown, createProject, createEnvironment } =
-  await import("./actions");
+const {
+  spinUp,
+  spinDown,
+  stopContainer,
+  restartContainer,
+  redeployContainer,
+  createProject,
+  createEnvironment,
+} = await import("./actions");
 const { __resetIdempotency } = await import("@/lib/idempotency");
 const { newIdempotencyKey } = await import("@/lib/random-id");
 const { SessionExpiredError } = await import("@/lib/auth/refresh");
@@ -48,7 +55,17 @@ afterAll(() => server.close());
 
 /** One project, one environment, one managed service and one that this app did not create. */
 function projectWith(
-  services: Array<{ id: string; name: string }> = [
+  services: Array<{
+    id: string;
+    name: string;
+    /**
+     * A service Railway reports with no deployment at all.
+     *
+     * The orphan a refused first deploy leaves behind, which is a real row on the dashboard
+     * and the one the redeploy action exists to rescue — so it has to be expressible here.
+     */
+    undeployed?: boolean;
+  }> = [
     { id: "svc_managed", name: "spun-cache" },
     { id: "svc_foreign", name: "postgres" },
   ],
@@ -71,12 +88,14 @@ function projectWith(
                     id: `si_${s.id}`,
                     environmentId: "e1",
                     source: { image: "redis:7-alpine", repo: null },
-                    latestDeployment: {
-                      id: `dep_${s.id}`,
-                      status: "SUCCESS",
-                      createdAt: "2026-08-01T00:00:00Z",
-                      updatedAt: "2026-08-01T00:00:00Z",
-                    },
+                    latestDeployment: s.undeployed
+                      ? null
+                      : {
+                          id: `dep_${s.id}`,
+                          status: "SUCCESS",
+                          createdAt: "2026-08-01T00:00:00Z",
+                          updatedAt: "2026-08-01T00:00:00Z",
+                        },
                   },
                 },
               ],
@@ -514,7 +533,7 @@ describe("spinUp", () => {
     expect(result).toEqual({
       ok: false,
       error:
-        "Created cache, but Railway refused to deploy it. Destroy it and try again.",
+        "Created cache, but Railway refused to deploy it. Redeploy it from its row, or destroy it and start again.",
     });
     expect(record("container.created")).toMatchObject({
       project_id: "p1",
@@ -691,7 +710,7 @@ describe("spinUp", () => {
       const expected = {
         ok: false,
         error:
-          "Created cache, but Railway refused to deploy it. Destroy it and try again.",
+          "Created cache, but Railway refused to deploy it. Redeploy it from its row, or destroy it and start again.",
       };
 
       await expect(spinUp(null, data)).resolves.toEqual(expected);
@@ -881,7 +900,7 @@ describe("spinDown", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: "This service was not created here, so it cannot be destroyed here.",
+      error: "This service was not created here, so this app cannot act on it.",
     });
     expect(deleteCalls).toBe(0);
   });
@@ -961,6 +980,278 @@ describe("spinDown", () => {
       error: expect.stringMatching(
         /^Railway refused this operation .* Reference [0-9a-f]{8}\.$/,
       ),
+    });
+  });
+});
+
+/**
+ * Stop, restart and redeploy.
+ *
+ * They post the same three ids `spinDown` does and run through the same ownership
+ * re-derivation, so the cases that matter are per verb rather than shared: which mutation
+ * reaches Railway, which deployment id it carries, and that an unmanaged service reaches
+ * none of them. The refusal test is repeated for each deliberately — it is the one property
+ * this whole feature is bounded by, and a shared helper asserting it once would let a verb
+ * be added that skips the guard while the suite stayed green.
+ */
+describe("container lifecycle", () => {
+  const actionForm = (serviceId: string, environmentId = "e1") =>
+    form({ projectId: "p1", environmentId, serviceId });
+
+  describe("stopContainer", () => {
+    it("stops the deployment Railway reported, not one the client sent", async () => {
+      const stopped: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", ({ variables }) => {
+          stopped.push(variables.id as string);
+          return HttpResponse.json({ data: { deploymentStop: true } });
+        }),
+      );
+
+      /*
+       * A deployment id is posted alongside the service id and is expected to be ignored:
+       * the action reads the id off the container it just re-derived ownership from, which
+       * is the same rule that stops a forged serviceId working.
+       */
+      const data = actionForm("svc_managed");
+      data.append("deploymentId", "dep_someone_elses");
+
+      const result = await stopContainer(null, data);
+
+      expect(result).toEqual({ ok: true, message: "Stopped cache" });
+      expect(stopped).toEqual(["dep_svc_managed"]);
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    });
+
+    it("refuses to stop a service it did not create", async () => {
+      let stopCalls = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () => {
+          stopCalls += 1;
+          return HttpResponse.json({ data: { deploymentStop: true } });
+        }),
+      );
+
+      const result = await stopContainer(null, actionForm("svc_foreign"));
+
+      expect(result).toEqual({
+        ok: false,
+        error: "This service was not created here, so this app cannot act on it.",
+      });
+      expect(stopCalls).toBe(0);
+      expect(record("container.stop_refused")).toMatchObject({
+        reason: "unmanaged",
+        service_id: "svc_foreign",
+      });
+    });
+
+    it("records what it stopped", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () =>
+          HttpResponse.json({ data: { deploymentStop: true } }),
+        ),
+      );
+
+      await stopContainer(null, actionForm("svc_managed"));
+
+      // The audit trail this action shares with create and destroy: stopping changes what
+      // is billed, so the record names the service and the deployment.
+      expect(record("container.stopped")).toMatchObject({
+        project_id: "p1",
+        environment_id: "e1",
+        service_id: "svc_managed",
+        service_name: "spun-cache",
+        deployment_id: "dep_svc_managed",
+      });
+    });
+
+    it("says so when the service has no deployment to stop", async () => {
+      // No DeploymentStop handler: onUnhandledRequest is "error", so an attempted
+      // mutation fails the case rather than being asserted for.
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-cache", undeployed: true },
+            ]),
+          }),
+        ),
+      );
+
+      const result = await stopContainer(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({
+        ok: false,
+        error:
+          "That container has no deployment to act on. Reload the page and try again.",
+      });
+    });
+
+    it("reports a service that has already gone and refreshes the list", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+      );
+
+      const result = await stopContainer(null, actionForm("svc_missing"));
+
+      expect(result).toEqual({ ok: false, error: "That container no longer exists." });
+      expect(record("container.stop_skipped")).toMatchObject({ reason: "gone" });
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    });
+
+    it("propagates a refused stop as a readable message", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () =>
+          HttpResponse.json({ errors: [{ message: "Deployment is locked" }] }),
+        ),
+      );
+
+      const result = await stopContainer(null, actionForm("svc_managed"));
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(
+          /^Railway refused this operation .* Reference [0-9a-f]{8}\.$/,
+        ),
+      });
+      expect(JSON.stringify(result)).not.toContain("Deployment is locked");
+    });
+  });
+
+  describe("restartContainer", () => {
+    it("restarts the deployment in place", async () => {
+      const restarted: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentRestart", ({ variables }) => {
+          restarted.push(variables.id as string);
+          return HttpResponse.json({ data: { deploymentRestart: true } });
+        }),
+      );
+
+      const result = await restartContainer(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({ ok: true, message: "Restarting cache" });
+      /*
+       * The same deployment id, which is the whole difference between this and redeploy:
+       * a log pane already subscribed to it keeps streaming rather than being left on a
+       * deployment nobody is looking at.
+       */
+      expect(restarted).toEqual(["dep_svc_managed"]);
+      expect(record("container.restarted")).toMatchObject({
+        service_id: "svc_managed",
+        deployment_id: "dep_svc_managed",
+      });
+    });
+
+    it("refuses to restart a service it did not create", async () => {
+      let restartCalls = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentRestart", () => {
+          restartCalls += 1;
+          return HttpResponse.json({ data: { deploymentRestart: true } });
+        }),
+      );
+
+      const result = await restartContainer(null, actionForm("svc_foreign"));
+
+      expect(result).toMatchObject({ ok: false });
+      expect(restartCalls).toBe(0);
+    });
+  });
+
+  describe("redeployContainer", () => {
+    it("deploys the service instance and records the new deployment", async () => {
+      const deployed: Array<Record<string, unknown>> = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("ServiceInstanceDeployV2", ({ variables }) => {
+          deployed.push(variables);
+          return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_fresh" } });
+        }),
+      );
+
+      const result = await redeployContainer(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({ ok: true, message: "Redeploying cache" });
+      expect(deployed[0]).toMatchObject({
+        serviceId: "svc_managed",
+        environmentId: "e1",
+      });
+      // The new id, not the old one — this is the record that says which deployment the
+      // row is about to stream.
+      expect(record("container.redeployed")).toMatchObject({
+        service_id: "svc_managed",
+        deployment_id: "dep_fresh",
+      });
+    });
+
+    it("redeploys a service whose first deploy Railway refused", async () => {
+      /*
+       * The case that decided which mutation backs this action. `deploymentRedeploy` takes
+       * a deployment id and this service has none, so the only call that can rescue the
+       * orphan is `serviceInstanceDeployV2` — which is what spin-up's own
+       * "Redeploy it from its row" sentence promises.
+       */
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-cache", undeployed: true },
+            ]),
+          }),
+        ),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_first" } }),
+        ),
+      );
+
+      const result = await redeployContainer(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({ ok: true, message: "Redeploying cache" });
+    });
+
+    it("refuses to redeploy a service it did not create", async () => {
+      let deployCalls = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("ServiceInstanceDeployV2", () => {
+          deployCalls += 1;
+          return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_x" } });
+        }),
+      );
+
+      const result = await redeployContainer(null, actionForm("svc_foreign"));
+
+      expect(result).toMatchObject({ ok: false });
+      expect(deployCalls).toBe(0);
+    });
+
+    it("refuses an owned service posted against another environment", async () => {
+      /*
+       * Ownership is derived per environment, and this action sends an environment id to
+       * Railway — so a service that has no instance in the environment submitted is
+       * unknown here, and the action refuses rather than deploying it somewhere the user
+       * was not looking.
+       */
+      let deployCalls = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("ServiceInstanceDeployV2", () => {
+          deployCalls += 1;
+          return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_x" } });
+        }),
+      );
+
+      const result = await redeployContainer(null, actionForm("svc_managed", "e2"));
+
+      expect(result).toEqual({ ok: false, error: "That container no longer exists." });
+      expect(deployCalls).toBe(0);
     });
   });
 });

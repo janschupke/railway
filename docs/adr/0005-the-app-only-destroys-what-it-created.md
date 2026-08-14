@@ -16,9 +16,29 @@ renamed to `spun-…` in Railway's dashboard is indistinguishable from one this 
 created. `managed.test.ts` pins that as deliberate rather than leaving it to be
 "fixed" silently.
 
-`destroyContainer` itself checks nothing — the guard lives in its one caller, which is a
-property of the call graph that no type defends. `destroy-callsites.test.ts` asserts it:
-one caller, and the ownership check above the delete inside it.
+`destroyContainer` itself checks nothing — the guard lives in its callers, which is a
+property of the call graph that no type defends. `mutation-callsites.test.ts` asserts it:
+one calling module, and the ownership check above the mutation inside it.
+
+## Amended by T-486: four verbs, one guard
+
+Stop, restart and redeploy change a container that already exists, so each is bounded by
+the same rule and the title now reads narrower than the decision. Three consequences worth
+recording, because each was a choice rather than a consequence:
+
+- **The re-derivation is shared, not repeated.** `withManagedContainer` parses the ids,
+  re-reads the container list and refuses before any verb's own work runs. Four copies of
+  "find the service, refuse an unmanaged one" would be four chances to write a subtly
+  weaker one, and the weak copy is the one that ships. The callsite test asserts
+  `!target.managed` appears exactly once in the actions module.
+- **The deployment id is derived rather than posted.** Stop and restart need one, and it
+  comes off the container Railway just described — not from the form. Otherwise the
+  ownership check would guard the service while the mutation acted on an id the browser
+  chose, which is the same hole one layer down.
+- **Reversible actions confirm differently.** Destroy still costs a typed container name;
+  stopping does not. Friction is priced in what it protects, and spending it on a
+  reversible action is how people learn to type container names — which is the habit the
+  destroy dialog depends on them not having.
 
 ---
 

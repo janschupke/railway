@@ -214,6 +214,21 @@ export type LogEvent =
   | "container.destroy_refused"
   | "container.destroy_skipped"
   | "container.destroyed"
+  /*
+   * The rest of the lifecycle, in the same three shapes destroy has: refused by the
+   * ownership boundary, skipped because the service had already gone, or done. Every
+   * `.done` line here records a change to billable infrastructure, which is the reason
+   * they are `info` rather than `debug` — see actions.ts.
+   */
+  | "container.redeploy_refused"
+  | "container.redeploy_skipped"
+  | "container.redeployed"
+  | "container.restart_refused"
+  | "container.restart_skipped"
+  | "container.restarted"
+  | "container.stop_refused"
+  | "container.stop_skipped"
+  | "container.stopped"
   | "dashboard"
   | "dashboard.metrics_failed"
   | "dashboard.render"
