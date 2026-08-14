@@ -51,7 +51,7 @@ export async function ContainerSection({
     );
   }
 
-  const { containers, error, metrics, spend } = await loadContainers(
+  const { containers, error, metrics, volumes, spend } = await loadContainers(
     projectId,
     environmentId,
   );
@@ -82,6 +82,7 @@ export async function ContainerSection({
           environmentId={environmentId}
           heading={t("containersHeading")}
           metrics={metrics}
+          volumes={volumes}
         />
       )}
 

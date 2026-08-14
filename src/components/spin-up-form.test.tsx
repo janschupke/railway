@@ -429,9 +429,14 @@ describe("SpinUpForm", () => {
       await addRow(user, "MY_FLAG", "on");
       await pickPreset(user, /PostgreSQL/);
 
-      // Seeded rows go first, so the user row moves down rather than away.
+      /*
+       * Seeded rows go first, so the user row moves down rather than away — and postgres
+       * seeds two of them since T-491: the credential, and the PGDATA that its volume mount
+       * makes necessary.
+       */
       expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
-      expect(screen.getByLabelText("Variable name 2")).toHaveValue("MY_FLAG");
+      expect(screen.getByLabelText("Variable name 2")).toHaveValue("PGDATA");
+      expect(screen.getByLabelText("Variable name 3")).toHaveValue("MY_FLAG");
     });
 
     it("submits the rows as two parallel lists, skipping the blank one", async () => {
@@ -468,8 +473,12 @@ describe("SpinUpForm", () => {
 
       await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
       const formData = spinUp.mock.calls[0]![1];
-      expect(formData.getAll("variableKey")).toEqual(["POSTGRES_PASSWORD"]);
-      expect(formData.getAll("variableValue")).toEqual([""]);
+      expect(formData.getAll("variableKey")).toEqual(["POSTGRES_PASSWORD", "PGDATA"]);
+      // Blank asks the catalog to mint; the literal beside it travels as itself.
+      expect(formData.getAll("variableValue")).toEqual([
+        "",
+        "/var/lib/postgresql/data/pgdata",
+      ]);
     });
 
     it("shows a row-attributed error next to the row, not as a toast", async () => {
@@ -532,7 +541,8 @@ describe("SpinUpForm", () => {
 
       await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
       expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
-      expect(screen.queryByLabelText("Variable name 2")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Variable name 2")).toHaveValue("PGDATA");
+      expect(screen.queryByLabelText("Variable name 3")).not.toBeInTheDocument();
     });
   });
   describe("the image existence check", () => {
@@ -628,5 +638,75 @@ describe("SpinUpForm", () => {
       expect(warning()).not.toBeInTheDocument();
       expect(image()).toHaveAttribute("aria-invalid", "true");
     });
+  });
+});
+
+describe("what the image does with data", () => {
+  /*
+   * Three cases, two sentences. A preset the catalog knows keeps state names its mount
+   * path; an image matching no preset says the app does not know where it stores data; and
+   * a preset the catalog knows keeps nothing says nothing at all — a warning there would be
+   * noise on nginx and would teach people to skip the one that matters.
+   */
+  const pickPreset = async (user: UserEvent, name: RegExp) => {
+    await user.click(screen.getByRole("button", { name: "Show preset images" }));
+    await user.click(screen.getByRole("option", { name }));
+  };
+
+  it("names the mount path for an image that keeps state", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickPreset(user, /PostgreSQL/);
+
+    expect(
+      screen.getByText(
+        "Data written to /var/lib/postgresql/data is kept on a volume and survives restarts.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about a preset the catalog knows keeps nothing", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickPreset(user, /Nginx/);
+
+    expect(screen.queryByText(/kept on a volume/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/does not know where/i)).not.toBeInTheDocument();
+  });
+
+  it("warns for an image it has never heard of, which gets no volume", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "couchdb:3");
+
+    expect(
+      screen.getByText(/does not know where this image stores data/i),
+    ).toBeVisible();
+  });
+
+  it("follows the repository rather than the tag, like every other preset lookup", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "postgres:17");
+
+    expect(
+      screen.getByText(/\/var\/lib\/postgresql\/data is kept on a volume/),
+    ).toBeVisible();
+  });
+
+  it("says nothing while the field is empty", async () => {
+    // A warning about an image nobody has chosen yet is a warning about nothing.
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+
+    expect(screen.queryByText(/does not know where/i)).not.toBeInTheDocument();
   });
 });

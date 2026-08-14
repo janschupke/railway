@@ -37,6 +37,19 @@ export type PresetVariable =
    */
   | { name: string; generate: "password" };
 
+/**
+ * Where an image keeps the data that has to outlive its container.
+ *
+ * A Railway volume is attached to a service and mounted at one path, so this is the whole
+ * of it — there is no size here because `VolumeCreateInput` has no size member and Railway
+ * provisions at the deployer's plan default (500 MB on the accounts this was probed
+ * against). See `createContainer` in ./railway/api.ts.
+ */
+export type PresetVolume = {
+  /** Absolute path inside the container. */
+  mountPath: string;
+};
+
 export type Preset = {
   /** The image reference. Also the option value, and what lands in FormData. */
   value: string;
@@ -44,6 +57,15 @@ export type Preset = {
   groupKey: PresetGroupKey;
   /** Environment the image needs to boot. Absent for images that boot bare. */
   variables?: readonly PresetVariable[];
+  /**
+   * Absent means the catalog asserts this image keeps nothing worth keeping — nginx
+   * serving a baked-in document root, whoami answering from memory — and NOT "we did not
+   * get round to it". The spin-up form reads that distinction: a preset with no volume
+   * says nothing, while an image matching no preset at all says the app does not know
+   * where it stores data. Adding an entry here without checking the image would turn a
+   * statement into a guess.
+   */
+  volume?: PresetVolume;
 };
 
 /**
@@ -56,9 +78,22 @@ export type Preset = {
  * required" is satisfied by supplying it rather than by avoiding the image.
  *
  * Every entry here must either boot bare or carry the variables that make it boot.
+ *
+ * And every entry that writes state must carry a `volume`. Until T-491 none did, so five
+ * of these — six, counting rabbitmq, which the ticket did not — took a generated
+ * credential, accepted data, and lost it the next time the container moved. An image whose
+ * storage was not checked belongs in neither camp: leave it out of the catalog rather than
+ * guess a mount path for it.
  */
 export const PRESETS: readonly Preset[] = [
-  { value: "redis:7-alpine", labelKey: "redis", groupKey: "cache" },
+  {
+    value: "redis:7-alpine",
+    labelKey: "redis",
+    groupKey: "cache",
+    // The RDB snapshot path, and where an appendonly file would go too.
+    volume: { mountPath: "/data" },
+  },
+  // No volume, and that is the image: memcached holds everything in memory by design.
   { value: "memcached:1-alpine", labelKey: "memcached", groupKey: "cache" },
 
   { value: "nginx:alpine", labelKey: "nginx", groupKey: "web" },
@@ -70,19 +105,41 @@ export const PRESETS: readonly Preset[] = [
     value: "postgres:16-alpine",
     labelKey: "postgres",
     groupKey: "database",
-    variables: [{ name: "POSTGRES_PASSWORD", generate: "password" }],
+    variables: [
+      { name: "POSTGRES_PASSWORD", generate: "password" },
+      /*
+       * Coupled to the `mountPath` below, and it is the mount that makes it necessary.
+       *
+       * The official image runs `initdb` into `$PGDATA` and refuses a directory that is
+       * not empty. A freshly provisioned volume is an ext4 filesystem with `lost+found`
+       * in it, so mounting at the default `/var/lib/postgresql/data` turns the first boot
+       * into `directory "/var/lib/postgresql/data" exists but is not empty` and a restart
+       * loop — the exact failure the preset catalog exists to prevent. Pointing PGDATA at
+       * a subdirectory of the mount gives initdb an empty directory it creates itself.
+       *
+       * An editable row rather than a hidden variable, on the same argument as
+       * MONGO_INITDB_ROOT_USERNAME below: the editor shows what will be set. Change one of
+       * these two and you must change the other.
+       */
+      { name: "PGDATA", value: "/var/lib/postgresql/data/pgdata" },
+    ],
+    volume: { mountPath: "/var/lib/postgresql/data" },
   },
   {
     value: "mysql:8",
     labelKey: "mysql",
     groupKey: "database",
     variables: [{ name: "MYSQL_ROOT_PASSWORD", generate: "password" }],
+    // No PGDATA-style dance needed: the entrypoint looks for its own `mysql` subdirectory
+    // rather than requiring the datadir to be empty, so `lost+found` does not stop it.
+    volume: { mountPath: "/var/lib/mysql" },
   },
   {
     value: "mariadb:11",
     labelKey: "mariadb",
     groupKey: "database",
     variables: [{ name: "MARIADB_ROOT_PASSWORD", generate: "password" }],
+    volume: { mountPath: "/var/lib/mysql" },
   },
   {
     value: "mongo:7",
@@ -92,6 +149,7 @@ export const PRESETS: readonly Preset[] = [
       { name: "MONGO_INITDB_ROOT_USERNAME", value: "root" },
       { name: "MONGO_INITDB_ROOT_PASSWORD", generate: "password" },
     ],
+    volume: { mountPath: "/data/db" },
   },
 
   {
@@ -102,7 +160,16 @@ export const PRESETS: readonly Preset[] = [
       { name: "RABBITMQ_DEFAULT_USER", value: "admin" },
       { name: "RABBITMQ_DEFAULT_PASS", generate: "password" },
     ],
+    /*
+     * The sixth stateful preset, and T-491 named five. Durable queues, exchange and
+     * binding definitions and the Mnesia database all live here — a broker that loses them
+     * on restart silently drops messages a publisher was told were safe, which is a worse
+     * failure than an empty database because nothing about it looks broken.
+     */
+    volume: { mountPath: "/var/lib/rabbitmq" },
   },
+  // Core NATS is in-memory; JetStream would need a volume, and enabling it needs an
+  // argument this app cannot pass (ADR-6: image and environment, no command override).
   { value: "nats:2-alpine", labelKey: "nats", groupKey: "queue" },
 ] as const;
 
@@ -137,6 +204,21 @@ export function presetFor(image: string): Preset | undefined {
   return PRESETS.find(
     (preset) => repositoryOf(preset.value).toLowerCase() === repository,
   );
+}
+
+/**
+ * Where this image's data has to be kept, or undefined.
+ *
+ * Undefined answers two different questions the same way, and the callers have to tell
+ * them apart themselves: the catalog knows this image stores nothing (memcached), or the
+ * catalog has never heard of this image at all (`couchdb:3`). `presetFor` is what
+ * separates them — see the note on `Preset.volume`.
+ *
+ * Repository-matched like everything else here, so `postgres:17` mounts where
+ * `postgres:16-alpine` does.
+ */
+export function presetVolumeFor(image: string): PresetVolume | undefined {
+  return presetFor(image)?.volume;
 }
 
 /** A catalog default, in the shape the environment editor holds a row in. */

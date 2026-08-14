@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { ContainerMetrics, ContainerState } from "@/lib/railway/types";
+import type {
+  ContainerMetrics,
+  ContainerState,
+  ContainerVolume,
+} from "@/lib/railway/types";
 import { ContainerMetricsReadout } from "./container-metrics";
 
 const usage = (over: Partial<ContainerMetrics> = {}): ContainerMetrics => ({
@@ -17,6 +21,7 @@ const renderReadout = (
   render(
     <ContainerMetricsReadout
       metrics={usage()}
+      volume={undefined}
       state={"running" as ContainerState}
       deployedAt={new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()}
       name="cache"
@@ -99,5 +104,48 @@ describe("ContainerMetricsReadout", () => {
     // numbers in a panel that may hold several.
     renderReadout();
     expect(screen.getByLabelText("Resource use for cache")).toBeInTheDocument();
+  });
+});
+
+describe("the volume readout", () => {
+  const volume = (over: Partial<ContainerVolume> = {}): ContainerVolume => ({
+    serviceId: "svc_1",
+    volumeId: "vol_1",
+    mountPath: "/var/lib/postgresql/data",
+    sizeMB: 500,
+    currentSizeMB: 12,
+    ...over,
+  });
+
+  it("says where the data lives and how much of the volume it uses", () => {
+    renderReadout({ volume: volume() });
+
+    expect(screen.getByText("Volume")).toBeInTheDocument();
+    expect(
+      screen.getByText("/var/lib/postgresql/data · 12 MB of 500 MB"),
+    ).toBeInTheDocument();
+  });
+
+  it("switches to gigabytes on a volume large enough to need them", () => {
+    renderReadout({ volume: volume({ sizeMB: 5000, currentSizeMB: 2400 }) });
+    expect(screen.getByText(/2\.4 GB of 5\.0 GB/)).toBeInTheDocument();
+  });
+
+  it("renders an untouched volume as a real zero rather than an em dash", () => {
+    // The volume exists and nothing has been written to it yet. That is a fact, unlike an
+    // absent metrics sample — which is Railway saying nothing and renders as a dash.
+    renderReadout({ volume: volume({ currentSizeMB: 0 }) });
+    expect(screen.getByText(/0 MB of 500 MB/)).toBeInTheDocument();
+  });
+
+  it("says nothing at all for a container with no volume", () => {
+    /*
+     * Absent rather than em-dashed, on the argument uptime already makes: most containers
+     * here keep nothing, and a permanent "Volume —" on every nginx row would read as a
+     * broken readout rather than one that does not apply. It is also how a refused
+     * EnvironmentVolumes read renders, which is the honest rendering of not knowing.
+     */
+    renderReadout({ volume: undefined });
+    expect(screen.queryByText("Volume")).not.toBeInTheDocument();
   });
 });

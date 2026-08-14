@@ -13,10 +13,12 @@ import {
   type Container,
   type ContainerMetrics,
   type ContainerState,
+  type ContainerVolume,
   type LogPhase,
 } from "@/lib/railway/types";
 import { railwayServiceUrl } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
+import { useVolumeSize } from "@/hooks/use-volume-size";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
 import { ContainerMetricsReadout } from "./container-metrics";
@@ -63,6 +65,7 @@ export function ContainerRow({
   projectId,
   environmentId,
   metrics,
+  volume,
 }: {
   container: Container;
   projectId: string;
@@ -73,11 +76,19 @@ export function ContainerRow({
    * Undefined means Railway reported nothing for this service, which the readout renders.
    */
   metrics: ContainerMetrics | undefined;
+  /**
+   * Off `Container` for the same reason `metrics` is: `currentSizeMB` grows as the database
+   * is written to, and the watch fingerprint hashes containers. Undefined means this
+   * container has no volume — or that the read was refused, which the row renders the same
+   * way and the destroy dialog degrades to keeping the data.
+   */
+  volume: ContainerVolume | undefined;
 }) {
   const t = useTranslations("containers");
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const refresh = useThrottledRefresh();
+  const sized = useVolumeSize();
   const [expanded, setExpanded] = useState(false);
   /*
    * Outlives `expanded` by one transition, because `hidden` is `display: none` and
@@ -337,6 +348,13 @@ export function ContainerRow({
             state={state}
             projectId={projectId}
             environmentId={environmentId}
+            /*
+             * Undefined when the container has no volume, which is what makes the destroy
+             * dialog render no checkbox and post no field. Formatted here rather than
+             * inside the dialog so that the two places stating this volume's size — the
+             * readout below and the confirmation — go through one hook.
+             */
+            volumeSize={volume && sized(volume.sizeMB)}
           />
         ) : (
           /*
@@ -471,6 +489,7 @@ export function ContainerRow({
                 */}
                 <ContainerMetricsReadout
                   metrics={metrics}
+                  volume={volume}
                   state={state}
                   deployedAt={container.deployedAt}
                   name={container.displayName}

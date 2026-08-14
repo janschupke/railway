@@ -31,6 +31,8 @@ import type {
   DeploymentStopMutationVariables,
   EnvironmentCreateMutation,
   EnvironmentCreateMutationVariables,
+  EnvironmentVolumesQuery,
+  EnvironmentVolumesQueryVariables,
   ProjectCreateMutation,
   ProjectCreateMutationVariables,
   ProjectMetricsQuery,
@@ -61,6 +63,10 @@ import type {
   VariableCollectionUpsertMutationVariables,
   VariableDeleteMutation,
   VariableDeleteMutationVariables,
+  VolumeCreateMutation,
+  VolumeCreateMutationVariables,
+  VolumeDeleteMutation,
+  VolumeDeleteMutationVariables,
 } from "./graphql.generated";
 import type { TypedDocument } from "./typed-document";
 
@@ -437,6 +443,120 @@ export const SERVICE_DELETE_MUTATION: TypedDocument<
 `;
 
 /**
+ * Attach a persistent volume to a service that has just been created.
+ *
+ * The five presets that carry a generated credential — six with rabbitmq — wrote to a
+ * container filesystem that is discarded every time the container moves, so a database
+ * spun up here accepted data and lost it. This is the mutation that stops that; the mount
+ * path per image is catalog metadata (`Preset.volume` in lib/presets.ts).
+ *
+ * `environmentId` is sent explicitly and always. The schema's own description is the reason:
+ * `null` deploys the volume to no environment and **`undefined` deploys it to every
+ * environment in the project**, so omitting the member for a service in one environment
+ * would silently provision billable storage in all of the others.
+ *
+ * `id name` and nothing else, though `Volume` also offers `createdAt`, `project` and a
+ * deprecated `volumeInstances`. `name` is selected purely so the create path can record what
+ * Railway called it: it names the volume after the service — `spun-pg` gets `spun-pg-volume`
+ * — which is what makes the ownership prefix reach the volume without this app renaming
+ * anything. See VOLUME_DELETE_MUTATION for what that buys.
+ *
+ * `VolumeCreateInput` also carries `region`, which is not sent: Railway places the volume in
+ * the service's own region by default, and an app that let those diverge would be offering a
+ * latency footgun with no UI to explain it.
+ *
+ * There is no size member on the input at all — Railway provisions at the deployer's plan
+ * default (500 MB when this was probed) — so this app cannot offer a size and does not
+ * pretend to. README Limitations says so.
+ */
+export const VOLUME_CREATE_MUTATION: TypedDocument<
+  VolumeCreateMutation,
+  VolumeCreateMutationVariables
+> = /* GraphQL */ `
+  mutation VolumeCreate($input: VolumeCreateInput!) {
+    volumeCreate(input: $input) {
+      id
+      name
+    }
+  }
+`;
+
+/**
+ * Delete a volume, and with it everything written to it.
+ *
+ * Reached from exactly one place — the destroy action, below the ownership check, and only
+ * when the confirmation dialog's checkbox said so. `mutation-callsites.test.ts` asserts that
+ * structurally, the same way it does for `serviceDelete`.
+ *
+ * The ownership argument is ADR-13 and it is worth restating here, because this is the call
+ * that acts on it: a volume's owner is **the service it is mounted on**, not its name. This
+ * app creates a volume only as a step of creating a service, the service carries the
+ * `MANAGED_PREFIX` marker, and `withManagedContainer` has already re-derived that from
+ * Railway's own response before this document is ever sent. Matching on the volume's own
+ * name would be weaker, not stronger: Railway's auto-name is derived from the service's, so
+ * it would be the same claim read through one more indirection — and a volume whose service
+ * was renamed in Railway's dashboard would become undeletable from here for no gain.
+ *
+ * Railway answers a Boolean. Deletion is asynchronous behind it, so the row learns what
+ * happened from the next read rather than from this response.
+ */
+export const VOLUME_DELETE_MUTATION: TypedDocument<
+  VolumeDeleteMutation,
+  VolumeDeleteMutationVariables
+> = /* GraphQL */ `
+  mutation VolumeDelete($volumeId: String!) {
+    volumeDelete(volumeId: $volumeId)
+  }
+`;
+
+/**
+ * The volumes mounted in one environment, so a row can say where its data lives.
+ *
+ * `environment.volumeInstances`, never `volume.volumeInstances` — the latter is
+ * `@deprecated` upstream in favour of this one for "properly scoped access control", and
+ * `verify:schema` would print the deprecation on every run.
+ *
+ * A separate document rather than a selection on PROJECT_QUERY, for the reason that document
+ * states at length: it is polled every WATCH_POLL_MS for the life of every open watcher, so a
+ * withdrawn or refused field inside it is a rejection on every tick, which the watch loop
+ * reads as transient and backs off from. Here the same withdrawal costs one readout. It is
+ * read through `gqlPartial` and carries a DEGRADING_OPERATIONS entry to match.
+ *
+ * `serviceId` is the join, and it is nullable on the schema — a volume whose service was
+ * deleted keeps its instance and answers a serviceId that no longer resolves. The mapper
+ * drops those rather than trying to render them, because this app has no orphan-volume UI
+ * and inventing one here would be a feature hiding inside a mapper.
+ *
+ * `currentSizeMB` is a Float that moves under the reader. It is selected deliberately — it
+ * is the number the destroy dialog needs in order to say how much data is about to go — and
+ * it is why `ContainerVolume` is keyed beside the container list rather than merged onto
+ * `Container`, whose hash decides whether every open tab reloads. See the docblock on
+ * `ContainerMetrics` in ./types.ts, which records what happened the first time.
+ */
+export const ENVIRONMENT_VOLUMES_QUERY: TypedDocument<
+  EnvironmentVolumesQuery,
+  EnvironmentVolumesQueryVariables
+> = /* GraphQL */ `
+  query EnvironmentVolumes($id: String!) {
+    environment(id: $id) {
+      id
+      volumeInstances {
+        edges {
+          node {
+            id
+            volumeId
+            serviceId
+            mountPath
+            sizeMB
+            currentSizeMB
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
  * Stop the deployment a service is currently running.
  *
  * Reversible, which is the whole reason it is here: the service, its variables and its
@@ -722,6 +842,20 @@ export const DEGRADING_OPERATIONS: Array<{ operationName: string; note: string }
     operationName: "ProjectMetrics",
     note: "container rows show no CPU, memory or uptime, and the list shows no usage total",
   },
+  /*
+   * Where a container's data lives, for the row and for the destroy dialog's checkbox.
+   *
+   * Losing it must not cost the app any correctness, and it does not: the destroy action
+   * re-reads volumes with its own request, below the ownership check, so the decision about
+   * what to delete is never taken from this read. What a withdrawal costs is the readout and
+   * the checkbox — and the checkbox's absence means the flag is not sent, which means the
+   * volume is kept and the toast says it was kept. The conservative branch is the one that
+   * degrades to, which is the property that made it safe to make this optional at all.
+   */
+  {
+    operationName: "EnvironmentVolumes",
+    note: "container rows show no volume, and destroy keeps the data instead of offering the choice",
+  },
 ];
 
 /**
@@ -771,6 +905,32 @@ export const OPTIONAL_FIELDS: Array<{
     root: "Mutation",
     field: "variableUpsert",
     note: "no per-key fallback if variableCollectionUpsert is withdrawn",
+  },
+  /*
+   * Renaming a volume, which this app deliberately does not do.
+   *
+   * T-491 planned to send it: create the volume, then stamp the service's managed name onto
+   * it so the ownership prefix reached the volume too. Probing the live API made it
+   * unnecessary — `volumeCreate` already names the volume after the service it attaches to,
+   * so `spun-pg` gets `spun-pg-volume` with no second call, and a rename could only ever
+   * write the name Railway had already derived. It stays listed because that is a Railway
+   * behaviour rather than a documented guarantee: if the auto-name changes, this is the
+   * mutation that would put the prefix back.
+   */
+  {
+    root: "Mutation",
+    field: "volumeUpdate",
+    note: "a volume keeps the name Railway derives from its service, which is what carries the prefix",
+  },
+  /*
+   * Changing where a volume is mounted, or moving it to another service, after creation.
+   * Absent from the app for the reason the edit form states about images: a mount path that
+   * moves under a running database is a data-loss shape, not an edit.
+   */
+  {
+    root: "Mutation",
+    field: "volumeInstanceUpdate",
+    note: "a volume's mount path is fixed at creation and the edit form cannot offer it",
   },
 ];
 

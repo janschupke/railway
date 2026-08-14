@@ -3,6 +3,7 @@ import {
   toContainerState,
   type Container,
   type ContainerMetrics,
+  type ContainerVolume,
   type RailwayProject,
   type WorkspaceSpend,
 } from "./types";
@@ -225,6 +226,56 @@ export function toContainerMetrics(
 
     existing.sampledAt = Math.max(existing.sampledAt ?? 0, point.ts);
     byService[serviceId] = existing;
+  }
+
+  return byService;
+}
+
+export type VolumeInstanceNode = {
+  id: string;
+  volumeId: string;
+  serviceId: string | null;
+  mountPath: string;
+  sizeMB: number;
+  currentSizeMB: number;
+};
+
+/**
+ * The volumes in one environment, keyed by the service each is mounted on.
+ *
+ * Keyed the same way and for the same reasons as `toContainerMetrics` above: it crosses the
+ * RSC boundary as plain JSON, and `noUncheckedIndexedAccess` makes a lookup
+ * `ContainerVolume | undefined`, which is precisely the row's "this container has no
+ * volume" state rather than a branch a component has to remember.
+ *
+ * Two shapes are dropped on the way through, and neither is an error:
+ *
+ *   - **A null `serviceId`.** The field is nullable on the schema and a volume outlives the
+ *     service it was mounted on, so this is an orphan — most often one left behind by a
+ *     destroy where the user chose to keep the data. Real, billable, and not something this
+ *     app has any surface for: it lists containers, and an orphan volume is not one. Railway's
+ *     own project page is where it is visible, and README Limitations says so.
+ *   - **A second volume on a service already seen.** Railway permits several, this app
+ *     creates exactly one, and the first wins. Rendering "2 volumes" in a row that offers
+ *     one mount path would be the readout describing a service this app did not create the
+ *     way it describes one it did.
+ */
+export function toContainerVolumes(
+  instances: VolumeInstanceNode[],
+): Record<string, ContainerVolume> {
+  const byService: Record<string, ContainerVolume> = {};
+
+  for (const instance of instances) {
+    const serviceId = instance.serviceId;
+    if (!serviceId || byService[serviceId]) continue;
+
+    byService[serviceId] = {
+      serviceId,
+      volumeId: instance.volumeId,
+      mountPath: instance.mountPath,
+      sizeMB: instance.sizeMB,
+      currentSizeMB: instance.currentSizeMB,
+    };
   }
 
   return byService;

@@ -16,7 +16,7 @@ destroys Docker-image services with live build and deploy logs streamed into the
 There is no database, no client store, and the visitor's token never leaves the server.
 
 All detailed rules live in [`.ai/rules/`](.ai/rules/) — the single source of truth. The
-reasoning behind each decision lives in [`docs/adr/`](docs/adr/README.md) (eleven ADRs)
+reasoning behind each decision lives in [`docs/adr/`](docs/adr/README.md) (fourteen ADRs)
 and [SECURITY.md](SECURITY.md) (the OWASP review, the findings, and the accepted risks). Read
 the relevant rule before touching auth, the design tokens, the log stream, or a CI gate.
 
@@ -49,7 +49,7 @@ Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 - **Never log** a token, `Error.cause`, an email, the sealed cookie, or container stdout. Never render upstream failure text — route it through `reportError`.
 - **`src/components/**` and `src/hooks/**` may not import** `lib/auth/session|refresh|server` or `lib/logger` / `lib/log/*`. Pass what the component needs as a prop.
 - **Every tuned number goes in `src/lib/constants.ts`**, in its group, with a rationale comment.
-- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input. **Projects and environments are created but never deleted**, so they carry no prefix and `projectDelete`/`environmentDelete` are absent from `operations.ts` entirely.
+- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input. **A volume's owner is its service**, so the same check gates deleting it; destroy asks whether the data goes too and names the outcome either way (ADR-14). **Projects and environments are created but never deleted**, so they carry no prefix and `projectDelete`/`environmentDelete` are absent from `operations.ts` entirely.
 - **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.

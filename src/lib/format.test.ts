@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatMemoryGb, formatUptime, formatVcpu, relativeTime } from "./format";
+import {
+  formatMemoryGb,
+  formatUptime,
+  formatVcpu,
+  formatVolumeMb,
+  relativeTime,
+} from "./format";
 
 describe("relativeTime", () => {
   afterEach(() => vi.useRealTimers());
@@ -92,6 +98,28 @@ describe("formatMemoryGb", () => {
 
   it("renders a real zero in megabytes rather than as nothing", () => {
     expect(formatMemoryGb(0, "en")).toEqual({ value: "0", unit: "mb" });
+  });
+});
+
+describe("formatVolumeMb", () => {
+  /*
+   * The unit conversion exists as its own entry point because the two figures come off the
+   * same API in different units — `MEMORY_USAGE_GB` and `VolumeInstance.sizeMB` — and a
+   * component dividing inline is a component that can divide by 1024 next time.
+   */
+  it("reads Railway's megabytes and picks the same units as memory does", () => {
+    expect(formatVolumeMb(500, "en")).toEqual({ value: "500", unit: "mb" });
+    expect(formatVolumeMb(5000, "en")).toEqual({ value: "5.0", unit: "gb" });
+  });
+
+  it("renders an untouched volume as a real zero", () => {
+    // `currentSizeMB` is genuinely 0 before anything is written, and that is the useful
+    // reading — unlike an absent metrics sample, which must never become a zero.
+    expect(formatVolumeMb(0, "en")).toEqual({ value: "0", unit: "mb" });
+  });
+
+  it("returns null for an absent value", () => {
+    expect(formatVolumeMb(null, "en")).toBeNull();
   });
 });
 

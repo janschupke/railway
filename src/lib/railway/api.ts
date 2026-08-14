@@ -5,6 +5,8 @@ import { log } from "@/lib/logger";
 // The one rule this layer shares with the form: a name the schema refuses on the way in is
 // a name there is no point drawing a row for on the way out.
 import { RESERVED_VARIABLE_PREFIX } from "@/lib/validation";
+// The catalog decides which images get a volume and where it mounts; this layer sends it.
+import { presetVolumeFor } from "@/lib/presets";
 import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
 import {
@@ -15,6 +17,7 @@ import {
   DEPLOYMENT_RESTART_MUTATION,
   DEPLOYMENT_STOP_MUTATION,
   ENVIRONMENT_CREATE_MUTATION,
+  ENVIRONMENT_VOLUMES_QUERY,
   PROJECTS_PERSONAL_QUERY,
   PROJECTS_WORKSPACE_QUERY,
   PROJECT_CREATE_MUTATION,
@@ -28,6 +31,8 @@ import {
   SERVICE_VARIABLES_QUERY,
   VARIABLE_COLLECTION_UPSERT_MUTATION,
   VARIABLE_DELETE_MUTATION,
+  VOLUME_CREATE_MUTATION,
+  VOLUME_DELETE_MUTATION,
 } from "./operations";
 import { pickFailureReason, type DeploymentFailure } from "./failure-reason";
 /*
@@ -40,6 +45,7 @@ import { pickFailureReason, type DeploymentFailure } from "./failure-reason";
 import {
   nodes,
   toContainerMetrics,
+  toContainerVolumes,
   toContainers,
   toProject,
   toProjects,
@@ -49,6 +55,7 @@ import {
 import type {
   Container,
   ContainerMetrics,
+  ContainerVolume,
   LogLine,
   RailwayEnvironment,
   RailwayProject,
@@ -290,6 +297,44 @@ export async function getProjectMetrics(
 }
 
 /**
+ * The volumes mounted in one environment, keyed by service.
+ *
+ * Two callers, wanting the same facts for different reasons. The dashboard reads it beside
+ * the container list so a row can say where its data lives and the destroy dialog can offer
+ * to take the data with it. `spinDown` reads it again, server-side, at the moment it acts —
+ * because the browser is not trusted with a volume id any more than it is with ownership.
+ *
+ * Partial, and degrading: `EnvironmentVolumes` is in DEGRADING_OPERATIONS, so a refusal
+ * answers `{}` rather than throwing. That is safe in both callers precisely because the
+ * empty answer is the conservative one — no readout, no checkbox, and a destroy that keeps
+ * the data and says so.
+ *
+ * One caveat with a real window on it: Railway lists a volume instance a few seconds after
+ * `volumeCreate` returns (about three, measured). A container destroyed inside that window
+ * has a volume this read cannot see yet, so the data is kept — which the toast states, so
+ * the outcome is wrong-but-visible rather than silent. README Limitations says so too.
+ */
+export async function getEnvironmentVolumes(
+  accessToken: string,
+  environmentId: string,
+  signal?: AbortSignal,
+): Promise<Record<string, ContainerVolume>> {
+  const { data, errors } = await gqlPartial(
+    ENVIRONMENT_VOLUMES_QUERY,
+    { id: environmentId },
+    { accessToken, operationName: "EnvironmentVolumes", signal },
+  );
+
+  for (const error of errors) {
+    // Debug for the reason getProjectMetrics states above: this runs on every dashboard
+    // render, and a readout the app degrades out of by design is not an incident.
+    log.debug("railway.volumes.refused", { environment_id: environmentId, error });
+  }
+
+  return toContainerVolumes(nodes(data?.environment?.volumeInstances));
+}
+
+/**
  * A new personal project, with whatever environment Railway created alongside it.
  *
  * Returns the mapped `RailwayProject` rather than the raw node so the caller can select it
@@ -355,12 +400,12 @@ export async function createContainer(
   /**
    * What happened after `serviceCreate` returned.
    *
-   * Both failure values mean the same thing to the caller — the service exists and is not
-   * running — but they are different sentences to a user and different lines in the audit
-   * log, so they are not collapsed into a boolean. Reaching any of the three means a
+   * All three failure values mean the same thing to the caller — the service exists and is
+   * not running — but they are different sentences to a user and different lines in the
+   * audit log, so they are not collapsed into a boolean. Reaching any of the four means a
    * service was created; only a throw from this function means none was.
    */
-  outcome: "deployed" | "variables_failed" | "deploy_failed";
+  outcome: "deployed" | "volume_failed" | "variables_failed" | "deploy_failed";
 }> {
   const created = await gql(
     SERVICE_CREATE_MUTATION,
@@ -376,6 +421,72 @@ export async function createContainer(
   );
 
   const serviceId = created.serviceCreate.id;
+
+  /*
+   * The volume BEFORE the deploy, and before the variables, for a reason the variables note
+   * below only half covers.
+   *
+   * A first deploy without the mount runs the image's own initialisation against the
+   * container filesystem — `initdb`, `mongod --repair`, RabbitMQ writing a fresh Mnesia
+   * schema. Attaching the volume afterwards mounts an empty filesystem *over the top* of
+   * that work, so the second deployment comes up as an empty database with a password the
+   * user was already told about. It looks exactly like the data loss this ticket exists to
+   * fix, and it would happen on the very first container.
+   *
+   * Only for an image the catalog knows keeps state. A bare image gets no volume: this app
+   * cannot guess where an arbitrary container writes, and a volume mounted at the wrong path
+   * is billable storage that stays empty while the data still vanishes.
+   */
+  const volume = presetVolumeFor(params.image);
+  if (volume) {
+    try {
+      const attached = await gql(
+        VOLUME_CREATE_MUTATION,
+        {
+          input: {
+            projectId: params.projectId,
+            /*
+             * Always sent, never omitted. Per the schema's own description, `undefined`
+             * deploys the volume to EVERY environment in the project — so leaving it out
+             * for a service that lives in one would quietly provision billable storage in
+             * all the others.
+             */
+            environmentId: params.environmentId,
+            serviceId,
+            mountPath: volume.mountPath,
+          },
+        },
+        { accessToken, operationName: "VolumeCreate", signal },
+      );
+
+      /*
+       * Recorded because it is the ownership marker, and this app did not write it.
+       * Railway derives the volume's name from the service's — `spun-pg` gets
+       * `spun-pg-volume` — so the MANAGED_PREFIX reaches the volume without a rename. See
+       * ADR-13, and OPTIONAL_FIELDS on `volumeUpdate` for what happens if that changes.
+       */
+      log.info("railway.volume_created", {
+        service_id: serviceId,
+        volume_id: attached.volumeCreate.id,
+        volume_name: attached.volumeCreate.name,
+        mount_path: volume.mountPath,
+      });
+    } catch (error) {
+      /*
+       * Does not deploy, on the same argument as the variables branch below: a stateful
+       * container that comes up healthy and silently discards every write is worse than an
+       * un-deployed service the dashboard shows and the user can destroy. This is the whole
+       * defect T-491 was raised for, and deploying here would reintroduce it on the one path
+       * that knows it is happening.
+       */
+      log.warn("railway.volume_failed", {
+        service_id: serviceId,
+        mount_path: volume.mountPath,
+        error,
+      });
+      return { serviceId, deploymentId: null, outcome: "volume_failed" };
+    }
+  }
 
   /*
    * Variables BEFORE the deploy, never after.
@@ -726,6 +837,31 @@ export async function destroyContainer(
     SERVICE_DELETE_MUTATION,
     { id: serviceId },
     { accessToken, operationName: "ServiceDelete", signal },
+  );
+}
+
+/**
+ * Delete a volume and everything written to it.
+ *
+ * Separate from `destroyContainer` rather than folded into it, and that is the shape of the
+ * decision rather than a preference: Railway does not cascade — a `serviceDelete` leaves the
+ * volume behind as billable storage, which was probed rather than assumed — so deleting the
+ * data is a second act the user has to be offered. `spinDown` asks; this performs.
+ *
+ * Checks nothing itself, exactly as `destroyContainer` checks nothing. The guard is the
+ * `MANAGED_PREFIX` re-derivation in the one caller, and `mutation-callsites.test.ts` is what
+ * holds that property — a call graph no type defends. See ADR-13 for why a volume's owner is
+ * the service it is mounted on.
+ */
+export async function deleteVolume(
+  accessToken: string,
+  volumeId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await gql(
+    VOLUME_DELETE_MUTATION,
+    { volumeId },
+    { accessToken, operationName: "VolumeDelete", signal },
   );
 }
 

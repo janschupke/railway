@@ -1,6 +1,6 @@
 # Decisions
 
-Thirteen architectural decision records, extracted from
+Fourteen architectural decision records, extracted from
 [the README](../../README.md#decisions), which carries the summary table.
 
 1. [ADR-1 — Railway OIDC directly, not an auth vendor](0001-railway-oidc-directly-not-an-auth-vendor.md)
@@ -16,3 +16,4 @@ Thirteen architectural decision records, extracted from
 11. [ADR-11 — pnpm stays, and the migration was priced rather than assumed](0011-pnpm-stays.md)
 12. [ADR-12 — Idempotency keys on create, and a repeat is replayed rather than rejected](0012-idempotency-keys-replay-rather-than-reject.md)
 13. [ADR-13 — The origin is the request, not a variable](0013-the-origin-is-the-request-not-a-variable.md)
+14. [ADR-14 — A volume belongs to the service that mounts it](0014-a-volume-belongs-to-the-service-that-mounts-it.md)

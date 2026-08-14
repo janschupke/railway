@@ -175,6 +175,32 @@ export type ContainerMetrics = {
 };
 
 /**
+ * The volume one container's data is written to.
+ *
+ * Kept out of `Container` for exactly the reason `ContainerMetrics` above is, and the
+ * argument is worth reading there before moving this: `fingerprint()` hashes a
+ * `Container[]` to decide whether to tell every open tab to refresh, and `currentSizeMB`
+ * grows as the database is written to. A byte counter inside that hash would announce a
+ * change on every poll forever, at two Railway round trips a time — which is the bug the
+ * `updatedAt` exclusion in watch-fingerprint.ts had to be written to avoid. Keyed beside
+ * the list instead, where `fingerprint` cannot see it.
+ *
+ * `mountPath` and `sizeMB` are stable and would be safe in the hash; splitting one type in
+ * two to put them there would trade a real structural guarantee for nothing.
+ */
+export type ContainerVolume = {
+  serviceId: string;
+  /** What `volumeDelete` takes. Not the volume *instance* id, which is per environment. */
+  volumeId: string;
+  /** Absolute path inside the container, as the preset catalog asked for it. */
+  mountPath: string;
+  /** Provisioned size. Railway's plan default; this app cannot set it. */
+  sizeMB: number;
+  /** In use right now. Moves under the reader — see above. */
+  currentSizeMB: number;
+};
+
+/**
  * Current-period spend, for the workspace a project belongs to.
  *
  * The scope is in the type name on purpose. This figure covers every service in the

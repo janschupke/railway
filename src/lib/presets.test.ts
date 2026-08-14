@@ -7,6 +7,7 @@ import {
   PRESETS,
   presetFor,
   presetVariableDefaults,
+  presetVolumeFor,
   repositoryOf,
 } from "./presets";
 import {
@@ -146,6 +147,9 @@ describe("presetVariableDefaults", () => {
      */
     expect(presetVariableDefaults("postgres:17")).toEqual([
       { name: "POSTGRES_PASSWORD", value: "", generated: true },
+      // Not a credential, and it is here because the volume is: see the note in the catalog
+      // on why mounting at the image's own default PGDATA is a boot failure.
+      { name: "PGDATA", value: "/var/lib/postgresql/data/pgdata", generated: false },
     ]);
   });
 
@@ -162,6 +166,72 @@ describe("presetVariableDefaults", () => {
   });
 
   it("matches on the repository, like presetFor", () => {
-    expect(presetVariableDefaults("postgres")).toHaveLength(1);
+    expect(presetVariableDefaults("postgres")).toHaveLength(2);
+  });
+});
+
+describe("presetVolumeFor", () => {
+  /*
+   * The list is asserted rather than derived from PRESETS, which is the point: a preset that
+   * writes state and carries no volume is the defect T-491 fixed, and deriving the
+   * expectation from the catalog would make this test agree with whatever the catalog says
+   * next. Adding a stateful image means adding it here too, deliberately.
+   */
+  it("covers every image that keeps state, and nothing else", () => {
+    const withVolume = PRESETS.filter((preset) => preset.volume).map((p) => p.value);
+    expect(withVolume.toSorted()).toEqual([
+      "mariadb:11",
+      "mongo:7",
+      "mysql:8",
+      "postgres:16-alpine",
+      "rabbitmq:3-management",
+      "redis:7-alpine",
+    ]);
+  });
+
+  it("mounts at an absolute path", () => {
+    for (const preset of PRESETS) {
+      if (!preset.volume) continue;
+      // A relative mount path is accepted by the schema and silently useless: Railway would
+      // resolve it against the image's WORKDIR, which the catalog does not know.
+      expect(preset.volume.mountPath.startsWith("/"), preset.value).toBe(true);
+      expect(preset.volume.mountPath.endsWith("/"), preset.value).toBe(false);
+    }
+  });
+
+  it("matches on the repository, so a different tag still gets its volume", () => {
+    expect(presetVolumeFor("postgres:17")).toEqual({
+      mountPath: "/var/lib/postgresql/data",
+    });
+    expect(presetVolumeFor("redis")).toEqual({ mountPath: "/data" });
+  });
+
+  /*
+   * The two undefineds a caller has to tell apart, pinned side by side because the spin-up
+   * note is built on the difference: an image the catalog knows keeps nothing says nothing,
+   * and an image it has never heard of warns. `presetFor` is what separates them.
+   */
+  it("is undefined both for a stateless preset and for an unknown image", () => {
+    expect(presetVolumeFor("nginx:alpine")).toBeUndefined();
+    expect(presetFor("nginx:alpine")).toBeDefined();
+
+    expect(presetVolumeFor("couchdb:3")).toBeUndefined();
+    expect(presetFor("couchdb:3")).toBeUndefined();
+  });
+
+  /*
+   * PGDATA and the mount path are one decision written in two places, and the catalog says
+   * so. This is what fails if someone changes one of them.
+   */
+  it("points postgres's PGDATA at a subdirectory of its own mount", () => {
+    const postgres = presetFor("postgres:16-alpine");
+    const mountPath = postgres?.volume?.mountPath;
+    const pgdata = postgres?.variables?.find((v) => v.name === "PGDATA");
+
+    expect(mountPath).toBeDefined();
+    expect(pgdata).toBeDefined();
+    expect(pgdata && "value" in pgdata ? pgdata.value : "").toMatch(
+      new RegExp(`^${mountPath}/.+`),
+    );
   });
 });

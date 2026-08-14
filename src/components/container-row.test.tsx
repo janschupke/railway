@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Container, ContainerMetrics } from "@/lib/railway/types";
+import type { Container, ContainerMetrics, ContainerVolume } from "@/lib/railway/types";
 
 vi.mock("@/app/dashboard/actions", () => ({
   spinDown: vi.fn(async () => ({ ok: true, message: "Destroyed" })),
@@ -71,7 +71,11 @@ async function expand(user: ReturnType<typeof userEvent.setup>, name = "cache") 
 }
 
 /** Mirrors the dashboard layout, which owns both providers. */
-const renderRow = (over: Partial<Container> = {}, metrics?: ContainerMetrics) =>
+const renderRow = (
+  over: Partial<Container> = {},
+  metrics?: ContainerMetrics,
+  volume?: ContainerVolume,
+) =>
   render(
     <ToastProvider>
       <TooltipProvider>
@@ -81,6 +85,7 @@ const renderRow = (over: Partial<Container> = {}, metrics?: ContainerMetrics) =>
             projectId="p1"
             environmentId="e1"
             metrics={metrics}
+            volume={volume}
           />
         </ul>
       </TooltipProvider>

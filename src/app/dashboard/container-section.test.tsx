@@ -51,6 +51,7 @@ const renderSection = async (
     containers,
     error: null,
     metrics: {},
+    volumes: {},
     spend: null,
     ...over,
   });

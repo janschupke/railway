@@ -79,6 +79,26 @@ export type Service = {
   variables: Record<string, string>;
 };
 
+/**
+ * A volume, flattened.
+ *
+ * Railway models this as a `Volume` with a `VolumeInstance` per environment, and the app
+ * reads only the instance — so the fixture keeps one record carrying both ids rather than
+ * two tables it would never join differently. `serviceId` is nullable for the state that
+ * matters most here: the orphan a destroy leaves behind when the user keeps the data.
+ */
+export type Volume = {
+  id: string;
+  instanceId: string;
+  name: string;
+  projectId: string;
+  environmentId: string;
+  serviceId: string | null;
+  mountPath: string;
+  sizeMB: number;
+  currentSizeMB: number;
+};
+
 const PROGRESSION = ["QUEUED", "BUILDING", "DEPLOYING", "SUCCESS"] as const;
 const FAILING_PROGRESSION = ["QUEUED", "BUILDING", "FAILED"] as const;
 
@@ -162,6 +182,21 @@ export type Faults = {
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
   /**
+   * `volumeCreate` is refused, stranding a stateful service before its deploy.
+   *
+   * The branch this exists for is the one that must NOT deploy: a database whose volume
+   * Railway refused would come up looking healthy and lose everything written to it.
+   */
+  volumeCreateFail: boolean;
+  /**
+   * `environment.volumeInstances` is refused, as it would be for an unscoped token.
+   *
+   * Separate from `volumeCreateFail` because they break opposite halves: this one leaves
+   * every volume in place and blinds the app to them, so the row shows no volume and the
+   * destroy dialog offers no choice — which must keep the data rather than silently drop it.
+   */
+  volumesFail: boolean;
+  /**
    * `metrics` is refused, as it would be for a token the project scope does not cover.
    *
    * Separate from `workspaceFail` for the reason `rejectPersonal` and `rejectWorkspaces`
@@ -220,6 +255,8 @@ const DEFAULT_FAULTS: Faults = {
   refreshFails: false,
   accessTokenTtl: 3600,
   deploymentsFail: false,
+  volumeCreateFail: false,
+  volumesFail: false,
   logPhase: "both",
   failureField: "error",
   deploymentEventsFail: false,
@@ -269,6 +306,7 @@ export class Store {
 
   services = new Map<string, Service>();
   deployments = new Map<string, Deployment>();
+  volumes = new Map<string, Volume>();
 
   /**
    * Variables the environment sets for every service in it.
@@ -477,6 +515,7 @@ export class Store {
   reset(): void {
     this.services.clear();
     this.deployments.clear();
+    this.volumes.clear();
     this.projects = seedProjects();
     this.faults = { ...DEFAULT_FAULTS };
     this.sharedVariables = { SHARED_TOKEN: "shared-value" };
@@ -491,6 +530,59 @@ export class Store {
 
   servicesIn(projectId: string): Service[] {
     return [...this.services.values()].filter((s) => s.projectId === projectId);
+  }
+
+  /**
+   * Attach a volume to a service, the way `volumeCreate` does.
+   *
+   * The name is derived from the service's rather than passed in, because that is the
+   * Railway behaviour the app now depends on: a service called `spun-pg` gets a volume
+   * called `spun-pg-volume`, which is how the ownership prefix reaches the volume without
+   * the app renaming anything. A fixture that let the caller choose would leave that
+   * untested and passing. See ADR-13.
+   *
+   * `sizeMB: 500` is Railway's observed plan default, and `currentSizeMB: 0` is what an
+   * unwritten volume answers — both fixed rather than random so a spec can assert the
+   * rendered figure instead of a regex, the same rule `metricsFor` follows.
+   */
+  addVolume(input: {
+    projectId: string;
+    environmentId: string;
+    serviceId: string;
+    mountPath: string;
+  }): Volume {
+    const service = this.services.get(input.serviceId);
+    const volume: Volume = {
+      id: this.id("vol"),
+      instanceId: this.id("volinst"),
+      name: `${service?.name ?? "volume"}-volume`,
+      projectId: input.projectId,
+      environmentId: input.environmentId,
+      serviceId: input.serviceId,
+      mountPath: input.mountPath,
+      sizeMB: 500,
+      currentSizeMB: 0,
+    };
+    this.volumes.set(volume.id, volume);
+    return volume;
+  }
+
+  volumesIn(environmentId: string): Volume[] {
+    return [...this.volumes.values()].filter((v) => v.environmentId === environmentId);
+  }
+
+  /**
+   * Detach a volume from a service that is going away, without deleting it.
+   *
+   * This is the behaviour probing the live API turned up and the whole reason destroy has a
+   * choice to offer: `serviceDelete` does NOT cascade. The volume survives as billable
+   * storage with a `serviceId` that no longer resolves, which is exactly the orphan the
+   * mapper drops and the toast warns about.
+   */
+  orphanVolumesOf(serviceId: string): void {
+    for (const volume of this.volumes.values()) {
+      if (volume.serviceId === serviceId) volume.serviceId = null;
+    }
   }
 
   /**

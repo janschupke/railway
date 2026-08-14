@@ -30,6 +30,8 @@ export async function injectFaults(
     failureField: FailureFieldFault;
     deploymentEventsFail: boolean;
     variablesFail: boolean;
+    volumeCreateFail: boolean;
+    volumesFail: boolean;
     metricsFail: boolean;
     workspaceFail: boolean;
     noWorkspace: boolean;

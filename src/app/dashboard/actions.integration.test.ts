@@ -162,6 +162,32 @@ beforeEach(() => {
   // Retained results are process-global and outlive the call that made them, so without
   // this a case would be served a previous case's container.
   __resetIdempotency();
+
+  /*
+   * `volumeCreate` answering, by default, because since T-491 it is an ordinary step of
+   * creating the image every case in this file uses — redis keeps state, so it takes a
+   * volume before it deploys. A default rather than a line in each case: without one, every
+   * spin-up test would be silently exercising the `volume_failed` branch, and the cases
+   * that mean to test that branch register their own refusal, which MSW ranks above this.
+   */
+  server.use(
+    api.mutation("VolumeCreate", () =>
+      HttpResponse.json({
+        data: { volumeCreate: { id: "vol_1", name: "spun-cache-volume" } },
+      }),
+    ),
+    /*
+     * An environment with no volumes in it, which is what most environments are — and
+     * `spinDown` reads this on every destroy now, not only when the box was ticked, because
+     * the answer decides which sentence is true rather than which one was asked for. The
+     * cases that care about a volume register their own.
+     */
+    api.query("EnvironmentVolumes", () =>
+      HttpResponse.json({
+        data: { environment: { id: "e1", volumeInstances: { edges: [] } } },
+      }),
+    ),
+  );
 });
 
 describe("spinUp", () => {
@@ -296,8 +322,15 @@ describe("spinUp", () => {
 
     await spinUp(null, spinUpForm({ image: "postgres:17" }));
 
-    expect(Object.keys(sent()!)).toEqual(["POSTGRES_PASSWORD"]);
+    /*
+     * PGDATA rides along because postgres now takes a volume: the official image refuses to
+     * initdb into a directory that is not empty, and a freshly provisioned volume has
+     * `lost+found` in it. See the note beside it in the catalog — the variable and the mount
+     * path are one decision written in two places.
+     */
+    expect(Object.keys(sent()!)).toEqual(["POSTGRES_PASSWORD", "PGDATA"]);
     expect(sent()!.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(32);
+    expect(sent()!.PGDATA).toBe("/var/lib/postgresql/data/pgdata");
   });
 
   it("sets the variables the user typed on an image that boots bare", async () => {
@@ -544,7 +577,10 @@ describe("spinUp", () => {
       image: "postgres:16-alpine",
       deployment_id: null,
       outcome: "deploy_failed",
-      variable_names: "POSTGRES_PASSWORD",
+      // PGDATA is catalog-derived too, so it belongs in the closed half of this record —
+      // it arrived with the volume, and the note in the catalog says why the two travel
+      // together.
+      variable_names: "POSTGRES_PASSWORD,PGDATA",
     });
     // The un-deployed service has to appear in the list for the user to destroy it.
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
@@ -981,6 +1017,241 @@ describe("spinDown", () => {
       error: expect.stringMatching(
         /^Railway refused this operation .* Reference [0-9a-f]{8}\.$/,
       ),
+    });
+  });
+
+  describe("the stored data", () => {
+    /* A body rather than a response, so each resolver keeps MSW's contextual typing. */
+    const withVolume = (over: Record<string, unknown> = {}) => ({
+      data: {
+        environment: {
+          id: "e1",
+          volumeInstances: {
+            edges: [
+              {
+                node: {
+                  id: "volinst_1",
+                  volumeId: "vol_1",
+                  serviceId: "svc_managed",
+                  mountPath: "/data",
+                  sizeMB: 500,
+                  currentSizeMB: 4,
+                  ...over,
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    /** The form the dialog posts with the checkbox left checked. */
+    const withDeleteVolume = (serviceId: string) =>
+      form({
+        projectId: "p1",
+        environmentId: "e1",
+        serviceId,
+        deleteData: "on",
+      });
+
+    it("deletes the volume when the box was checked, after the service", async () => {
+      /*
+       * Order is forced by Railway — it refuses to delete a volume still mounted on a live
+       * service — and it is also the order that fails safe. Service first leaves at worst an
+       * orphan the user can see in Railway's dashboard; volume first would at worst wipe the
+       * data under a container that is still running.
+       */
+      const calls: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () => HttpResponse.json(withVolume())),
+        api.mutation("ServiceDelete", () => {
+          calls.push("service");
+          return HttpResponse.json({ data: { serviceDelete: true } });
+        }),
+        api.mutation("VolumeDelete", ({ variables }) => {
+          calls.push(`volume:${variables.volumeId as string}`);
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      const result = await spinDown(null, withDeleteVolume("svc_managed"));
+
+      expect(result).toEqual({
+        ok: true,
+        message: "Destroyed cache and its stored data",
+      });
+      expect(calls).toEqual(["service", "volume:vol_1"]);
+    });
+
+    it("keeps the volume when the box was not checked, and says so", async () => {
+      /*
+       * The sentence is the point, and it is why the volume read is unconditional. A kept
+       * volume is billable storage that disappears from this UI along with its container —
+       * the app lists containers, and an orphan volume is not one — so the outcome that
+       * leaves a charge behind must not be the one that says nothing about it.
+       */
+      let volumeDeletes = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () => HttpResponse.json(withVolume())),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", () => {
+          volumeDeletes += 1;
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      const result = await spinDown(null, downForm("svc_managed"));
+
+      expect(result).toEqual({
+        ok: true,
+        message:
+          "Destroyed cache. Its data volume was kept and is still billed — remove it on Railway.",
+      });
+      expect(volumeDeletes).toBe(0);
+    });
+
+    it("never takes a volume id from the browser", async () => {
+      /*
+       * The client posts a boolean and a service id. A `volumeId` in the FormData is
+       * ignored entirely and the id is read back from Railway — the same rule ownership and
+       * the deployment id follow, and the reason is the same: a form that could name the
+       * volume to delete would be a form that could name somebody else's.
+       */
+      let deleted: string | undefined;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () => HttpResponse.json(withVolume())),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", ({ variables }) => {
+          deleted = variables.volumeId as string;
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      await spinDown(
+        null,
+        form({
+          projectId: "p1",
+          environmentId: "e1",
+          serviceId: "svc_managed",
+          deleteData: "on",
+          volumeId: "vol_someone_elses",
+        }),
+      );
+
+      expect(deleted).toBe("vol_1");
+    });
+
+    it("deletes no volume belonging to another service", async () => {
+      // The join is `volumeInstance.serviceId`, and a volume mounted on a different
+      // container in the same environment is not this container's to take.
+      let volumeDeletes = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () =>
+          HttpResponse.json(withVolume({ serviceId: "svc_other" })),
+        ),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", () => {
+          volumeDeletes += 1;
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      const result = await spinDown(null, withDeleteVolume("svc_managed"));
+
+      expect(volumeDeletes).toBe(0);
+      /*
+       * The plain sentence, not the "kept" one. No volume belongs to THIS container, so
+       * there is nothing of its data left behind to warn about — the other service's volume
+       * is still attached to a container the dashboard lists.
+       */
+      expect(result).toEqual({ ok: true, message: "Destroyed cache" });
+    });
+
+    it("deletes nothing, and claims nothing, when the volume read is refused", async () => {
+      /*
+       * `EnvironmentVolumes` degrades rather than throwing, and the destroy stays correct
+       * through it in two halves. It deletes nothing, which is the conservative one; and it
+       * says only "Destroyed", which is the honest one — with the read refused this app does
+       * not know a volume exists, and claiming one was kept would be a statement it cannot
+       * support. The same branch covers a volume Railway has not finished provisioning.
+       *
+       * README Limitations states what that leaves the user with, because it is a real gap
+       * rather than a tidy one.
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () =>
+          HttpResponse.json({
+            errors: [{ message: "Not Authorized", path: ["environment"] }],
+          }),
+        ),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", () => {
+          throw new Error("there is no volume this action knows about");
+        }),
+      );
+
+      const result = await spinDown(null, withDeleteVolume("svc_managed"));
+
+      expect(result).toEqual({ ok: true, message: "Destroyed cache" });
+    });
+
+    it("records what happened to the data, on both branches", async () => {
+      /*
+       * After `serviceDelete` Railway retains no record the container existed, so this line
+       * is the only place the data's fate survives at all. Written whichever way it went —
+       * a record that only appears on deletion cannot be read as "the volume was kept".
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () => HttpResponse.json(withVolume())),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", () =>
+          HttpResponse.json({ data: { volumeDelete: true } }),
+        ),
+      );
+
+      await spinDown(null, withDeleteVolume("svc_managed"));
+      expect(logRecords().find((r) => r.msg === "container.destroyed")).toMatchObject({
+        service_id: "svc_managed",
+        volume_deleted: true,
+        volume_id: "vol_1",
+      });
+    });
+
+    it("refuses a service it did not create before reading any volume", async () => {
+      // The ownership boundary is above all of this. A forged service id must not even
+      // cause a volume read, let alone a delete.
+      let volumeReads = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("EnvironmentVolumes", () => {
+          volumeReads += 1;
+          return HttpResponse.json(withVolume());
+        }),
+        api.mutation("ServiceDelete", () => {
+          throw new Error("must not delete an unmanaged service");
+        }),
+      );
+
+      const result = await spinDown(null, withDeleteVolume("svc_foreign"));
+
+      expect(result.ok).toBe(false);
+      expect(volumeReads).toBe(0);
     });
   });
 });

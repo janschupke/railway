@@ -354,7 +354,66 @@ export function execute(
       if (!service) return { errors: [{ message: "Service not found" }] };
       store.services.delete(id);
       if (service.deploymentId) store.deployments.delete(service.deploymentId);
+      /*
+       * Detached, NOT deleted. Railway does not cascade — probed, not assumed — and that
+       * single fact is why destroy has a checkbox at all. A fixture that removed the volume
+       * here would make the "keep the data" branch untestable and would agree with an app
+       * that quietly orphaned storage.
+       */
+      store.orphanVolumesOf(id);
       return { data: { serviceDelete: true } };
+    }
+
+    case "VolumeCreate": {
+      if (store.faults.volumeCreateFail) {
+        // Railway's real refusal shape: HTTP 200 with a field-level error.
+        return { errors: [{ message: "Not Authorized" }] };
+      }
+      const input = variables.input as {
+        projectId: string;
+        environmentId: string;
+        serviceId: string;
+        mountPath: string;
+      };
+      if (!store.services.has(input.serviceId)) {
+        return { errors: [{ message: "Service not found" }] };
+      }
+      const volume = store.addVolume(input);
+      return { data: { volumeCreate: { id: volume.id, name: volume.name } } };
+    }
+
+    case "VolumeDelete": {
+      const volumeId = variables.volumeId as string;
+      if (!store.volumes.has(volumeId)) {
+        return { errors: [{ message: "Volume not found" }] };
+      }
+      store.volumes.delete(volumeId);
+      return { data: { volumeDelete: true } };
+    }
+
+    case "EnvironmentVolumes": {
+      // What an unscoped token gets. The app has to degrade to keeping the data, not to
+      // pretending there is none to keep.
+      if (store.faults.volumesFail) return notAuthorized(["environment"]);
+
+      const environmentId = variables.id as string;
+      return {
+        data: {
+          environment: {
+            id: environmentId,
+            volumeInstances: edges(
+              store.volumesIn(environmentId).map((volume) => ({
+                id: volume.instanceId,
+                volumeId: volume.id,
+                serviceId: volume.serviceId,
+                mountPath: volume.mountPath,
+                sizeMB: volume.sizeMB,
+                currentSizeMB: volume.currentSizeMB,
+              })),
+            ),
+          },
+        },
+      };
     }
 
     case "Deployment": {

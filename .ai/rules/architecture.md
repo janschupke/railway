@@ -6,7 +6,7 @@ meta:
 # Architecture
 
 The reasoning behind each decision is argued at length in
-[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-13); the README carries a summary
+[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-14); the README carries a summary
 table under `## Decisions`. This file states what the decisions oblige you to do. When
 the two disagree, the ADR is the record and this file is stale — fix it.
 
@@ -131,7 +131,18 @@ exactly once, and every mutation call sits below it.
 
 **The deployment id is derived, never posted.** A lifecycle action reads it off the
 container it just re-derived ownership from, so a forged deployment id is refused by the
-same mechanism a forged service id is.
+same mechanism a forged service id is. **So is the volume id**: destroy posts a boolean
+(`deleteData`) and reads the volume back from Railway inside the action.
+
+**A volume's owner is the service it is mounted on, not its own name.** This app creates a
+volume only as a step of creating a service, and the prefix check above has already proved
+that service is ours before `deleteVolume` is reachable — so there is no second marker to
+check. Railway names a volume after its service anyway (`spun-pg` → `spun-pg-volume`), which
+is why `volumeUpdate` is in `OPTIONAL_FIELDS` rather than being a document. Destroy asks
+whether the data goes too, defaults to yes, and **names the outcome on both branches** — a
+kept volume is billable storage this UI can no longer show, so it must not be left unsaid.
+[ADR-14](../../docs/adr/0014-a-volume-belongs-to-the-service-that-mounts-it.md) has the rest,
+including why every way of failing to see a volume ends in keeping it.
 
 **A rename cannot escape the prefix, and needs no rule saying so.** The edit verb puts what
 was submitted through `toManagedName` — the same function spin-up uses — which always

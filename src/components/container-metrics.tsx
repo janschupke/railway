@@ -2,14 +2,16 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { formatMemoryGb, formatUptime, formatVcpu } from "@/lib/format";
-import type { ContainerMetrics } from "@/lib/railway/types";
+import { useVolumeSize } from "@/hooks/use-volume-size";
+import type { ContainerMetrics, ContainerVolume } from "@/lib/railway/types";
 import type { ContainerState } from "@/lib/railway/types";
 import { Text } from "./ui/text";
 
 /**
  * What one container is using, above its log pane.
  *
- * Three readouts in a wrapping row rather than a column beside the pane. The pane is a fixed
+ * Up to four readouts in a wrapping row rather than a column beside the pane — two always,
+ * uptime while it is running, and the volume when the container has one. The pane is a fixed
  * 256px and arrives lazily behind a skeleton, so a side-by-side layout would reflow when its
  * chunk lands — a layout shift on a page Lighthouse gates at 0.1 — and would need a
  * breakpoint, where the app declares exactly one in all of src/ and adapts by wrapping
@@ -30,11 +32,14 @@ import { Text } from "./ui/text";
  */
 export function ContainerMetricsReadout({
   metrics,
+  volume,
   state,
   deployedAt,
   name,
 }: {
   metrics: ContainerMetrics | undefined;
+  /** Undefined for a container with no volume, which is most of them. */
+  volume: ContainerVolume | undefined;
   state: ContainerState;
   deployedAt: string | null;
   name: string;
@@ -45,6 +50,9 @@ export function ContainerMetricsReadout({
 
   const cpu = formatVcpu(metrics?.cpuCores ?? null, locale);
   const memory = formatMemoryGb(metrics?.memoryGb ?? null, locale);
+
+  // Shared with the destroy dialog, which renders the same volume's size in its checkbox.
+  const sized = useVolumeSize();
 
   /*
    * Uptime is shown for a running container and nothing else. A failed or removed one has a
@@ -72,6 +80,25 @@ export function ContainerMetricsReadout({
       </Readout>
 
       {uptime !== null && <Readout label={t("uptimeLabel")}>{uptime}</Readout>}
+
+      {/*
+        Absent rather than em-dashed when there is no volume, on the same argument uptime
+        makes above: most containers here keep nothing, and a permanent "Volume —" on every
+        nginx row would read as a readout that is broken rather than one that does not apply.
+
+        It is also the honest rendering of a refused EnvironmentVolumes read, where the app
+        genuinely does not know — and the destroy dialog degrades the same way, to keeping
+        the data.
+      */}
+      {volume !== undefined && (
+        <Readout label={t("volumeLabel")}>
+          {t("volumeValue", {
+            mountPath: volume.mountPath,
+            used: sized(volume.currentSizeMB),
+            size: sized(volume.sizeMB),
+          })}
+        </Readout>
+      )}
     </dl>
   );
 }

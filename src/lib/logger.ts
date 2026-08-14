@@ -254,6 +254,12 @@ export type LogEvent =
   | "dashboard.render"
   | "dashboard.selection_dropped"
   /*
+   * The volumes read behind the container list. Debug, on every render, for the same reason
+   * `dashboard.metrics_failed` is: a readout the app degrades out of by design is not an
+   * incident, and a warn per render is how a log store teaches people to ignore warns.
+   */
+  | "dashboard.volumes_failed"
+  /*
    * Neither has a `.destroyed` counterpart, and that is the design rather than a gap: this
    * app creates projects and environments and never deletes them, which is also why they
    * carry no MANAGED_PREFIX. See actions.ts.
@@ -291,6 +297,22 @@ export type LogEvent =
   | "railway.request"
   | "railway.request.retry"
   | "railway.variables_failed"
+  /*
+   * The volume a stateful preset is given, and the two ways that can go.
+   *
+   * `volume_created` is part of the audit trail rather than a counter: it records the name
+   * Railway derived for the volume, which is what carries the ownership prefix onto it
+   * (ADR-14), so a change in that behaviour shows up here rather than as a volume this app
+   * quietly stops being able to identify. `volume_failed` is warn, and its consequence is
+   * that the service is NOT deployed — a database that came up without its volume would
+   * accept writes and lose them.
+   *
+   * `volumes.refused` is the read, not the write, and sits with `metrics.refused` in both
+   * level and reasoning.
+   */
+  | "railway.volume_created"
+  | "railway.volume_failed"
+  | "railway.volumes.refused"
   | "render.failed"
   | "stream.closed"
   | "stream.opened"

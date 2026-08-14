@@ -142,7 +142,10 @@ test.describe("container lifecycle", () => {
   });
 
   test("destroys a container after typed confirmation", async ({ page }) => {
-    await spinUp(page, "cache");
+    // Nginx rather than the default Redis: this case is about the typed guard, and Redis
+    // keeps state since T-491 — so it would also be exercising the stored-data checkbox and
+    // reporting a different sentence. The volume cases below own that.
+    await spinUp(page, "cache", "Nginx");
     const cache = row(page, "cache");
     await expect(cache).toBeVisible();
 
@@ -158,6 +161,110 @@ test.describe("container lifecycle", () => {
 
     await expect(toast(page, "Destroyed cache")).toBeVisible();
     await expect(row(page, "cache")).toHaveCount(0);
+  });
+
+  test("gives a stateful preset a volume, and says where its data lives", async ({
+    page,
+  }) => {
+    /*
+     * The whole of T-491 in one pass: a database spun up here used to accept data and lose
+     * it the next time the container moved, with nothing in the UI saying so.
+     */
+    await spinUp(page, "db", "PostgreSQL");
+
+    // Said before it is created, on the form, rather than discovered afterwards.
+    await expect(
+      page.getByText(/\/var\/lib\/postgresql\/data is kept on a volume/),
+    ).toBeVisible();
+
+    await disclosure(page, "db").click();
+    await expect(
+      row(page, "db").getByText("/var/lib/postgresql/data · 0 MB of 500 MB"),
+    ).toBeVisible();
+  });
+
+  test("says nothing about a volume for an image that keeps nothing", async ({
+    page,
+  }) => {
+    // The catalog has checked that nginx keeps nothing worth keeping, so it says so by
+    // saying nothing — a warning here is noise that teaches people to skip the real one.
+    await spinUp(page, "web", "Nginx");
+
+    await disclosure(page, "web").click();
+    await expect(row(page, "web").getByText("Volume")).toHaveCount(0);
+  });
+
+  test("takes the stored data with the container by default", async ({ page }) => {
+    await spinUp(page, "db", "PostgreSQL");
+
+    const dialog = await openDestroyDialog(page, "db");
+    const box = dialog.getByRole("checkbox", { name: /stored data/i });
+    await expect(box).toBeChecked();
+    await expect(box).toHaveAccessibleName(/500 MB/);
+
+    await dialog.getByLabel(/type .db. to confirm/i).fill("db");
+    await dialog.getByRole("button", { name: /destroy permanently/i }).click();
+
+    await expect(toast(page, "Destroyed db and its stored data")).toBeVisible();
+    await expect(row(page, "db")).toHaveCount(0);
+  });
+
+  test("keeps the volume when the box is unchecked, and says it is still billed", async ({
+    page,
+  }) => {
+    /*
+     * The sentence is the assertion. A kept volume disappears from this UI along with its
+     * row — the app lists containers, and an orphan volume is not one — so a destroy that
+     * said only "Destroyed db" would be declining to mention a charge it caused.
+     */
+    await spinUp(page, "db", "PostgreSQL");
+
+    const dialog = await openDestroyDialog(page, "db");
+    await dialog.getByRole("checkbox", { name: /stored data/i }).uncheck();
+    await dialog.getByLabel(/type .db. to confirm/i).fill("db");
+    await dialog.getByRole("button", { name: /destroy permanently/i }).click();
+
+    await expect(toast(page, /data volume was kept and is still billed/)).toBeVisible();
+    await expect(row(page, "db")).toHaveCount(0);
+  });
+
+  test("refuses to deploy a database whose volume Railway would not give it", async ({
+    page,
+  }) => {
+    /*
+     * The one branch where not deploying is the feature. A postgres that came up here would
+     * look healthy, accept writes and lose all of them — which is the defect being fixed, so
+     * shipping it on this path would reintroduce it knowingly.
+     */
+    await injectFaults(page, { volumeCreateFail: true });
+    await spinUp(page, "db", "PostgreSQL");
+
+    await expect(toast(page, /refused the volume its data needs/)).toBeVisible();
+    // The service exists and is destroyable, which is the point of not throwing it away.
+    await expect(row(page, "db")).toBeVisible();
+  });
+
+  test("deletes nothing, and claims nothing, when it cannot see the volume", async ({
+    page,
+  }) => {
+    /*
+     * EnvironmentVolumes degrades rather than throwing, and the destroy stays correct
+     * through it in two halves. Nothing is deleted — no checkbox is offered, so nothing is
+     * posted — and the toast says only "Destroyed", because with the read refused this app
+     * does not know a volume exists and must not claim one was kept.
+     */
+    await spinUp(page, "db", "PostgreSQL");
+    await injectFaults(page, { volumesFail: true });
+    await page.reload();
+
+    const dialog = await openDestroyDialog(page, "db");
+    await expect(dialog.getByRole("checkbox", { name: /stored data/i })).toHaveCount(0);
+
+    await dialog.getByLabel(/type .db. to confirm/i).fill("db");
+    await dialog.getByRole("button", { name: /destroy permanently/i }).click();
+
+    await expect(toast(page, "Destroyed db")).toBeVisible();
+    await expect(row(page, "db")).toHaveCount(0);
   });
 
   test("stops a running container and brings it back with Redeploy", async ({
@@ -445,7 +552,14 @@ test.describe("container lifecycle", () => {
     const services = await fixtureServices(page);
     const created = services.find((service) => service.name === "spun-db")!;
 
-    expect(Object.keys(created.variables)).toEqual(["POSTGRES_PASSWORD"]);
+    /*
+     * PGDATA rides along with the credential because postgres now takes a volume: the
+     * official image refuses to initdb into a directory that is not empty, and a freshly
+     * provisioned volume has `lost+found` in it. The catalog says why the two travel
+     * together; what matters here is that the password is still the only secret.
+     */
+    expect(Object.keys(created.variables)).toEqual(["POSTGRES_PASSWORD", "PGDATA"]);
+    expect(created.variables.PGDATA).toBe("/var/lib/postgresql/data/pgdata");
     const password = created.variables.POSTGRES_PASSWORD!;
     expect(password.length).toBeGreaterThanOrEqual(32);
     expect(await page.content()).not.toContain(password);
@@ -494,7 +608,10 @@ test.describe("container lifecycle", () => {
     const services = await fixtureServices(page);
     const created = services.find((service) => service.name === "spun-db")!;
 
-    expect(created.variables).toEqual({ POSTGRES_PASSWORD: "hunter2hunter2" });
+    expect(created.variables).toEqual({
+      POSTGRES_PASSWORD: "hunter2hunter2",
+      PGDATA: "/var/lib/postgresql/data/pgdata",
+    });
     // And the row is back to the catalog's blank default, ready for the next container.
     await expect(page.getByLabel("Variable value 1")).toHaveValue("");
   });
@@ -991,10 +1108,17 @@ test.describe("editing a container", () => {
 
     const dialog = await openEditDialog(page, "db");
 
-    // Listed by name, with an empty cell that says what empty means.
-    const existing = dialog.getByLabel("Variable name 1");
+    /*
+     * Listed by name, with an empty cell that says what empty means.
+     *
+     * Two rows rather than one, and PGDATA first: postgres carries it alongside the
+     * credential since it took a volume, and `readServiceVariableNames` sorts. The secret is
+     * the second row, which is the one whose cell has to be empty.
+     */
+    await expect(dialog.getByLabel("Variable name 1")).toHaveValue("PGDATA");
+    const existing = dialog.getByLabel("Variable name 2");
     await expect(existing).toHaveValue("POSTGRES_PASSWORD");
-    await expect(dialog.getByLabel("Variable value 1")).toHaveValue("");
+    await expect(dialog.getByLabel("Variable value 2")).toHaveValue("");
     // The credential canary, at the one moment it is most likely to have leaked.
     expect(await page.content()).not.toContain(minted);
 
@@ -1022,7 +1146,12 @@ test.describe("editing a container", () => {
         const services = await fixtureServices(page);
         return services.find((s) => s.name === "spun-db")?.variables ?? {};
       })
-      .toEqual({ POSTGRES_PASSWORD: minted });
+      .toEqual({
+        POSTGRES_PASSWORD: minted,
+        // Untouched throughout, like the credential: the editor listed it, nobody edited
+        // it, and an edit must not rewrite what it only displayed.
+        PGDATA: "/var/lib/postgresql/data/pgdata",
+      });
   });
 
   test("never offers to remove a variable the environment shares", async ({ page }) => {

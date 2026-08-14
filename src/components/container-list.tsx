@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { filterContainers, filterKey, hasActiveFilters } from "@/lib/container-filters";
 import { sumContainerMetrics } from "@/lib/container-metrics";
 import { formatMemoryGb, formatVcpu } from "@/lib/format";
-import type { Container, ContainerMetrics } from "@/lib/railway/types";
+import type { Container, ContainerMetrics, ContainerVolume } from "@/lib/railway/types";
 import { useContainerFilters } from "@/hooks/use-container-filters";
 import { useIncrementalList } from "@/hooks/use-incremental-list";
 import { ContainerFilterBar } from "./container-filter-bar";
@@ -37,6 +37,7 @@ export function ContainerList({
   environmentId,
   heading,
   metrics,
+  volumes,
 }: {
   containers: Container[];
   projectId: string;
@@ -44,6 +45,8 @@ export function ContainerList({
   heading: string;
   /** Keyed by service id; empty when Railway refused or had nothing to report. */
   metrics: Record<string, ContainerMetrics>;
+  /** Keyed by service id; only containers that have a volume appear in it. */
+  volumes: Record<string, ContainerVolume>;
 }) {
   const t = useTranslations("dashboard");
   const tFilters = useTranslations("filters");
@@ -189,6 +192,7 @@ export function ContainerList({
                   projectId={projectId}
                   environmentId={environmentId}
                   metrics={metrics[container.serviceId]}
+                  volume={volumes[container.serviceId]}
                 />
               ))}
             </ul>

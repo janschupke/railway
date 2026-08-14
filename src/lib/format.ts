@@ -99,6 +99,26 @@ export function formatMemoryGb(
   };
 }
 
+/**
+ * A volume figure, from the megabytes Railway states volumes in.
+ *
+ * A separate entry point rather than `formatMemoryGb(mb / 1000, locale)` at the call site,
+ * because that division is exactly the kind that drifts: `MEMORY_USAGE_GB` and
+ * `VolumeInstance.sizeMB` are different units on the same API, and a component doing the
+ * conversion inline is a component that can do it with 1024 next time. The unit
+ * discriminant comes back for the same reason it does above — the caller picks a catalog
+ * key with it and cannot concatenate one.
+ *
+ * Not clamped to a minimum: `currentSizeMB` is genuinely 0 on a volume nothing has written
+ * to yet, and "0 MB" is the true and useful reading of that.
+ */
+export function formatVolumeMb(
+  mb: number | null,
+  locale: string,
+): { value: string; unit: "gb" | "mb" } | null {
+  return mb === null ? null : formatMemoryGb(mb / 1000, locale);
+}
+
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;

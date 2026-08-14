@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { env } from "@/env";
 import { getSession } from "@/lib/auth/server";
 import {
+  getEnvironmentVolumes,
   getProjectContainers,
   getProjectMetrics,
   listProjects,
@@ -17,6 +18,7 @@ import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
   ContainerMetrics,
+  ContainerVolume,
   RailwayEnvironment,
   RailwayProject,
   WorkspaceSpend,
@@ -75,6 +77,16 @@ export type ContainerListData = {
    * meant to: the row renders an em dash either way.
    */
   metrics: Record<string, ContainerMetrics>;
+  /**
+   * Where each container keeps its data, for whichever containers have a volume.
+   *
+   * Keyed for the same reason `metrics` is — `currentSizeMB` moves as a database is written
+   * to, and neither the watcher's fingerprint nor the list's filter key may observe a value
+   * like that. Empty when the read was refused, which reads identically to "no container
+   * here has a volume": the row shows nothing extra, and the destroy dialog offers no
+   * choice, which keeps the data.
+   */
+  volumes: Record<string, ContainerVolume>;
   /** Workspace-wide, and null for a personal project or an unscoped token. */
   spend: WorkspaceSpend | null;
 };
@@ -234,7 +246,9 @@ const containerList = cache(
   async (projectId: string, environmentId: string): Promise<ContainerListData> => {
     const session = await getSession();
     // The shell already redirected an anonymous request; this is a guard, not a path.
-    if (!session) return { containers: [], error: null, metrics: {}, spend: null };
+    if (!session) {
+      return { containers: [], error: null, metrics: {}, volumes: {}, spend: null };
+    }
 
     /*
      * Issued alongside the container read, never after it, and caught separately.
@@ -259,6 +273,26 @@ const containerList = cache(
           },
         )
       : Promise.resolve({ metrics: {}, spend: null });
+
+    /*
+     * Third read, issued alongside the other two rather than after either.
+     *
+     * NOT gated on METRICS_POLL_MS, unlike `usage` above, and the difference is what each
+     * one is for. That switch exists to turn off a *polled* readout on a plan whose rate
+     * limit cannot afford it; a volume is a property of the container rather than a sample
+     * of it, and the destroy dialog's offer to delete the data depends on knowing it is
+     * there. Turning the usage readout off must not quietly start orphaning volumes.
+     *
+     * Degrades to `{}`, which is the same value "no container here has a volume" produces —
+     * deliberately, and safe because every consequence of the empty answer is the
+     * conservative one. See DEGRADING_OPERATIONS in lib/railway/operations.ts.
+     */
+    const storage = getEnvironmentVolumes(session.accessToken, environmentId).catch(
+      (error: unknown) => {
+        log.debug("dashboard.volumes_failed", { error });
+        return {} as Record<string, ContainerVolume>;
+      },
+    );
 
     try {
       /*
@@ -287,15 +321,16 @@ const containerList = cache(
         projectId,
         environmentId,
       );
-      return { containers, error: null, ...(await usage) };
+      return { containers, error: null, volumes: await storage, ...(await usage) };
     } catch (error) {
       const t = await getTranslations();
       return {
         containers: [],
         error: describe(t, error, "errors.containersFailed"),
-        // Awaited even on this path so the request cannot outlive the render that started it,
-        // and spread so a spend figure survives a failed container read — the two are
+        // Awaited even on this path so neither request can outlive the render that started
+        // it, and spread so a spend figure survives a failed container read — these are
         // independent reads and the UI shows them in different places.
+        volumes: await storage,
         ...(await usage),
       };
     }

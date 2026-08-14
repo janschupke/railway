@@ -12,7 +12,7 @@ vi.mock("@/app/dashboard/actions", () => ({
 const { DestroyContainerDialog } = await import("./destroy-container-dialog");
 const { ToastProvider } = await import("./ui/toast");
 
-function renderDialog() {
+function renderDialog(props: { volumeSize?: string } = {}) {
   return render(
     <ToastProvider>
       <DestroyContainerDialog
@@ -20,6 +20,7 @@ function renderDialog() {
         displayName="cache"
         projectId="p1"
         environmentId="e1"
+        {...props}
       />
     </ToastProvider>,
   );
@@ -169,5 +170,79 @@ describe("DestroyContainerDialog", () => {
     await waitFor(() =>
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("the stored data", () => {
+  beforeEach(() => {
+    spinDown.mockReset();
+    spinDown.mockResolvedValue({ ok: true, message: "Destroyed cache" });
+    routerMock.refresh.mockClear();
+  });
+
+  /** Fills the confirmation and submits, which is the only way past the guard. */
+  const confirm = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByLabelText(/to confirm/i), "cache");
+    await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
+    await waitFor(() => expect(spinDown).toHaveBeenCalledTimes(1));
+    return spinDown.mock.calls[0]![1];
+  };
+
+  it("offers the choice only when there is data to lose", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(
+      screen.queryByRole("checkbox", { name: /stored data/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the size, so the consequence is a quantity rather than a word", async () => {
+    const user = userEvent.setup();
+    renderDialog({ volumeSize: "500 MB" });
+    await openDialog(user);
+
+    expect(
+      screen.getByRole("checkbox", { name: "Also delete the stored data (500 MB)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("defaults to taking the data with the container", async () => {
+    /*
+     * The volume was created by this app as part of creating this container and holds only
+     * what that container wrote, so the default is the outcome that leaves nothing invisible
+     * behind — a kept volume disappears from this UI along with its row and keeps being
+     * billed. The typed name is still the guard.
+     */
+    const user = userEvent.setup();
+    renderDialog({ volumeSize: "500 MB" });
+    await openDialog(user);
+
+    expect(screen.getByRole("checkbox", { name: /stored data/i })).toBeChecked();
+
+    const formData = await confirm(user);
+    expect(formData.get("deleteData")).toBe("on");
+  });
+
+  it("posts no field at all once the box is unchecked", async () => {
+    // An unchecked checkbox contributes nothing to FormData, which is exactly the shape the
+    // action reads: absent means keep, and keep is what a refused volume read degrades to.
+    const user = userEvent.setup();
+    renderDialog({ volumeSize: "500 MB" });
+    await openDialog(user);
+
+    await user.click(screen.getByRole("checkbox", { name: /stored data/i }));
+    const formData = await confirm(user);
+
+    expect(formData.get("deleteData")).toBeNull();
+  });
+
+  it("says what keeping it costs, rather than leaving it to be inferred", async () => {
+    const user = userEvent.setup();
+    renderDialog({ volumeSize: "500 MB" });
+    const dialog = await openDialog(user);
+
+    expect(dialog).toHaveTextContent(/kept on Railway and continues to be billed/i);
   });
 });

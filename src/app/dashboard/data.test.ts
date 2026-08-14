@@ -5,17 +5,42 @@ const getSession = vi.fn<() => Promise<RailwaySession | null>>();
 const listProjects = vi.fn();
 const getProjectContainers = vi.fn();
 const getProjectMetrics = vi.fn();
+const getEnvironmentVolumes = vi.fn();
 
 vi.mock("@/lib/auth/server", () => ({ getSession: () => getSession() }));
 vi.mock("@/lib/railway/api", () => ({
   listProjects: (...args: unknown[]) => listProjects(...args),
   getProjectContainers: (...args: unknown[]) => getProjectContainers(...args),
   getProjectMetrics: (...args: unknown[]) => getProjectMetrics(...args),
+  getEnvironmentVolumes: (...args: unknown[]) => getEnvironmentVolumes(...args),
 }));
 
 const { loadDashboardShell, loadContainers, managedNames } = await import("./data");
 const { RailwayApiError } = await import("@/lib/railway/errors");
-const { __resetEnv } = await import("@/env");
+/**
+ * `METRICS_POLL_MS`, overridable per test without touching `process.env`.
+ *
+ * It used to be `process.env.METRICS_POLL_MS = "0"` around a try/finally, and that is a
+ * process-global — vitest runs several test files in one process, so the window in which
+ * this file said "metrics are off" was a window in which *other* files' code read a zero
+ * too. `src/app/api/watch/route.integration.test.ts` reads it at stream open, and with a
+ * zero there no `stale` frame is ever due; it failed intermittently, only under
+ * `--coverage`, and looked like a bug in the watch route. A module mock is scoped to this
+ * file, so nothing outside it can observe the override.
+ */
+let metricsPollMs: number | null = null;
+vi.mock("@/env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/env")>();
+  return {
+    ...actual,
+    // null means "whatever the environment says", so every test that does not care about
+    // this reads the real default rather than a number copied into this file.
+    env: () => ({
+      ...actual.env(),
+      ...(metricsPollMs === null ? {} : { METRICS_POLL_MS: metricsPollMs }),
+    }),
+  };
+});
 
 const session: RailwaySession = {
   user: { id: "u1", name: "Ada", email: "ada@example.com" },
@@ -41,6 +66,9 @@ beforeEach(() => {
   getSession.mockReset().mockResolvedValue(session);
   listProjects.mockReset().mockResolvedValue({ viewer: {}, projects, failures: [] });
   getProjectMetrics.mockReset().mockResolvedValue({ metrics: {}, spend: null });
+  getEnvironmentVolumes.mockReset().mockResolvedValue({});
+  // Per test, so an override cannot outlive the case that wanted it.
+  metricsPollMs = null;
   getProjectContainers
     .mockReset()
     .mockResolvedValue({ project: projects[0], containers: [] });
@@ -235,7 +263,13 @@ describe("loadContainers", () => {
 
     const data = await loadContainers("p1", "e1");
 
-    expect(data).toEqual({ containers: [], error: null, metrics: {}, spend: null });
+    expect(data).toEqual({
+      containers: [],
+      error: null,
+      metrics: {},
+      volumes: {},
+      spend: null,
+    });
     expect(getProjectContainers).not.toHaveBeenCalled();
     expect(getProjectMetrics).not.toHaveBeenCalled();
   });
@@ -333,23 +367,96 @@ describe("loadContainers", () => {
 
     it("does not ask for usage at all when metrics are switched off", async () => {
       // METRICS_POLL_MS=0 has to cost zero requests, not merely fewer.
-      process.env.METRICS_POLL_MS = "0";
-      __resetEnv();
-      try {
-        getProjectContainers.mockResolvedValue({
-          project: projects[0],
-          containers: [{ serviceId: "s1" }],
-        });
+      metricsPollMs = 0;
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "s1" }],
+      });
 
-        const data = await loadContainers("p1", "e1");
+      const data = await loadContainers("p1", "e1");
 
-        expect(getProjectMetrics).not.toHaveBeenCalled();
-        expect(data.metrics).toEqual({});
-        expect(data.spend).toBeNull();
-      } finally {
-        delete process.env.METRICS_POLL_MS;
-        __resetEnv();
-      }
+      expect(getProjectMetrics).not.toHaveBeenCalled();
+      expect(data.metrics).toEqual({});
+      expect(data.spend).toBeNull();
+    });
+  });
+
+  describe("volumes", () => {
+    const volume = {
+      svc_1: {
+        serviceId: "svc_1",
+        volumeId: "vol_1",
+        mountPath: "/data",
+        sizeMB: 500,
+        currentSizeMB: 4,
+      },
+    };
+
+    it("returns where each container keeps its data, keyed by service", async () => {
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "svc_1" }],
+      });
+      getEnvironmentVolumes.mockResolvedValue(volume);
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(getEnvironmentVolumes).toHaveBeenCalledWith("token", "e1");
+      expect(data.volumes.svc_1?.mountPath).toBe("/data");
+    });
+
+    it("keeps reading volumes when the usage readout is switched off", async () => {
+      /*
+       * METRICS_POLL_MS exists to turn off a *polled* readout on a plan whose rate limit
+       * cannot afford it. A volume is a property of the container rather than a sample of
+       * it, and the destroy dialog's offer to take the data depends on knowing it is there
+       * — so switching the usage readout off must not quietly start orphaning volumes.
+       */
+      metricsPollMs = 0;
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "svc_1" }],
+      });
+      getEnvironmentVolumes.mockResolvedValue(volume);
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(getProjectMetrics).not.toHaveBeenCalled();
+      expect(getEnvironmentVolumes).toHaveBeenCalledTimes(1);
+      expect(data.volumes.svc_1?.volumeId).toBe("vol_1");
+    });
+
+    it("still returns the containers when the volume read fails", async () => {
+      // Degrades to nothing, which is the same value "no container here has a volume"
+      // produces — and every consequence of it is the conservative one.
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "svc_1" }],
+      });
+      getEnvironmentVolumes.mockRejectedValue(new Error("network"));
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(data.containers).toHaveLength(1);
+      expect(data.error).toBeNull();
+      expect(data.volumes).toEqual({});
+    });
+
+    it("awaits the volume read even when the container read failed", async () => {
+      /*
+       * Not about the value — it is about the request not outliving the render that started
+       * it. An unawaited promise on the error path is a floating rejection, which is how an
+       * optional read takes a process down.
+       */
+      getProjectContainers.mockRejectedValue(
+        new RailwayApiError("boom", { kind: "server" }),
+      );
+      getEnvironmentVolumes.mockResolvedValue(volume);
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(data.containers).toEqual([]);
+      expect(data.volumes.svc_1?.mountPath).toBe("/data");
     });
   });
 });

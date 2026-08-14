@@ -1,5 +1,18 @@
 import { z } from "zod";
-import { isLoopbackHost, isSecureOrLocal } from "@/lib/origin";
+/*
+ * A relative specifier with its extension, and the only one in this file.
+ *
+ * `scripts/verify-schema.ts` reaches this module through Node's type-stripping loader,
+ * which resolves imports exactly as written and knows nothing about the `@/*` alias — so
+ * `@/lib/origin` here made `pnpm verify:schema` exit before it validated a single document,
+ * with ERR_MODULE_NOT_FOUND naming a package that does not exist. The CI `schema` job is
+ * the gate that was silently doing nothing.
+ *
+ * Same fix and same reason as `src/lib/railway/documents.ts`, which is the other module on
+ * that loader's path. `allowImportingTsExtensions` is on and the project never emits, so
+ * this costs nothing on the app side.
+ */
+import { isLoopbackHost, isSecureOrLocal } from "./lib/origin.ts";
 
 /**
  * The origin to use when a request did not carry a usable one.

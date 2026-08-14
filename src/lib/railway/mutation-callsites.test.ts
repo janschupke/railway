@@ -38,6 +38,18 @@ const DECLARATION = path.join("lib", "railway", "api.ts");
  */
 const MUTATIONS = [
   "destroyContainer",
+  /*
+   * Destroy's second half, and the one that is irreversible in a way the others are not: a
+   * deleted service can be recreated, and the data on a deleted volume cannot be recovered
+   * at all. Its ownership argument is ADR-13 — a volume's owner is the service it is mounted
+   * on — so it sits behind exactly the same guard, and the order assertion below is what
+   * keeps it there.
+   *
+   * The confirmation dialog posts `deleteData`, deliberately not named after this symbol: a
+   * form field spelled `deleteVolume` would read as a caller to the blunt search below and
+   * make this test pass for the wrong reason.
+   */
+  "deleteVolume",
   "stopDeployment",
   "restartDeployment",
   /*

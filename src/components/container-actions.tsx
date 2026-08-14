@@ -48,6 +48,7 @@ export function ContainerActions({
   state,
   projectId,
   environmentId,
+  volumeSize,
 }: {
   serviceId: string;
   displayName: string;
@@ -57,6 +58,14 @@ export function ContainerActions({
   state: ContainerState;
   projectId: string;
   environmentId: string;
+  /**
+   * Formatted size of this container's volume, or undefined when it has none.
+   *
+   * Only destroy reads it. It rides through here rather than being looked up in the dialog
+   * because the row already renders the same figure in its readout, and one formatter for
+   * both is what keeps the two from disagreeing about the same volume.
+   */
+  volumeSize?: string;
 }) {
   const actions = availableActions({ state, deploymentId });
 
@@ -96,6 +105,7 @@ export function ContainerActions({
         displayName={displayName}
         projectId={projectId}
         environmentId={environmentId}
+        volumeSize={volumeSize}
         disabled={state === "removing"}
       />
     </div>

@@ -4,11 +4,12 @@ import {
   sortContainers,
   toContainer,
   toContainerMetrics,
+  toContainerVolumes,
   toContainers,
   toProject,
   toWorkspaceSpend,
 } from "./mappers";
-import type { MetricsResultNode, ServiceNode } from "./mappers";
+import type { MetricsResultNode, ServiceNode, VolumeInstanceNode } from "./mappers";
 import type { Container } from "./types";
 
 const service = (overrides: Partial<ServiceNode> = {}): ServiceNode => ({
@@ -246,6 +247,55 @@ describe("toContainerMetrics", () => {
 
   it("returns nothing at all for an empty response", () => {
     expect(toContainerMetrics([])).toEqual({});
+  });
+});
+
+describe("toContainerVolumes", () => {
+  const instance = (over: Partial<VolumeInstanceNode> = {}): VolumeInstanceNode => ({
+    id: "volinst_1",
+    volumeId: "vol_1",
+    serviceId: "svc_1",
+    mountPath: "/var/lib/postgresql/data",
+    sizeMB: 500,
+    currentSizeMB: 12,
+    ...over,
+  });
+
+  it("keys on the service the volume is mounted on", () => {
+    expect(toContainerVolumes([instance()])).toEqual({
+      svc_1: {
+        serviceId: "svc_1",
+        volumeId: "vol_1",
+        mountPath: "/var/lib/postgresql/data",
+        sizeMB: 500,
+        currentSizeMB: 12,
+      },
+    });
+  });
+
+  it("drops an orphan, which is what a kept volume becomes", () => {
+    /*
+     * `serviceId` is nullable on the schema and a volume outlives its service — which is
+     * precisely the state a destroy leaves behind when the user chooses to keep the data.
+     * Real, billable, and not something this app has a surface for: it lists containers.
+     */
+    expect(toContainerVolumes([instance({ serviceId: null })])).toEqual({});
+  });
+
+  it("keeps the first of several on one service", () => {
+    // Railway permits more than one; this app creates exactly one. A row that offers a
+    // single mount path must not describe a service that has two.
+    const volumes = toContainerVolumes([
+      instance({ volumeId: "vol_first" }),
+      instance({ id: "volinst_2", volumeId: "vol_second", mountPath: "/other" }),
+    ]);
+    expect(volumes.svc_1?.volumeId).toBe("vol_first");
+  });
+
+  it("returns nothing at all for an empty response", () => {
+    // Which is also what a refused read degrades to — and every consequence of the empty
+    // answer is the conservative one: no readout, no checkbox, and destroy keeps the data.
+    expect(toContainerVolumes([])).toEqual({});
   });
 });
 

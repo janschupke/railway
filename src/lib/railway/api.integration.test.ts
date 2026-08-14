@@ -5,7 +5,9 @@ import { STREAM } from "@/lib/constants";
 import { logRecords, rawLogLines } from "@/test/log-capture";
 import {
   createContainer,
+  deleteVolume,
   destroyContainer,
+  getEnvironmentVolumes,
   getDeployment,
   getDeploymentFailure,
   getLogs,
@@ -25,6 +27,22 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 const TOKEN = "token";
+
+/**
+ * Railway answering `volumeCreate`.
+ *
+ * Written once because it is now part of creating most of the interesting presets: redis,
+ * postgres, mysql, mariadb, mongo and rabbitmq all attach a volume before they deploy, so a
+ * create test using one of them that does NOT stub this is testing the volume_failed branch
+ * by accident. `onCall` is for the tests that care where in the sequence it lands.
+ */
+const volumeOk = (onCall?: (input: Record<string, unknown>) => void) =>
+  api.mutation("VolumeCreate", ({ variables }) => {
+    onCall?.(variables.input as Record<string, unknown>);
+    return HttpResponse.json({
+      data: { volumeCreate: { id: "vol_1", name: "spun-db-volume" } },
+    });
+  });
 
 /** A project node as Railway nests it, so the connection shape is written once. */
 const node = (id: string, name: string) => ({
@@ -288,6 +306,7 @@ describe("createContainer", () => {
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
       ),
+      volumeOk(),
       api.mutation("ServiceInstanceDeployV2", () =>
         HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
       ),
@@ -321,6 +340,7 @@ describe("createContainer", () => {
           data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
         });
       }),
+      volumeOk(() => calls.push("volume")),
       api.mutation("VariableCollectionUpsert", () => {
         calls.push("variables");
         return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
@@ -339,7 +359,7 @@ describe("createContainer", () => {
       variables: { POSTGRES_PASSWORD: "generated" },
     });
 
-    expect(calls).toEqual(["create", "variables", "deploy"]);
+    expect(calls).toEqual(["create", "volume", "variables", "deploy"]);
     expect(result.outcome).toBe("deployed");
   });
 
@@ -361,6 +381,7 @@ describe("createContainer", () => {
           data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
         }),
       ),
+      volumeOk(),
       api.mutation("VariableCollectionUpsert", ({ variables }) => {
         sent = variables.input as Record<string, unknown>;
         return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
@@ -399,6 +420,7 @@ describe("createContainer", () => {
           data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
         }),
       ),
+      volumeOk(),
       api.mutation("VariableCollectionUpsert", () =>
         HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
       ),
@@ -432,6 +454,7 @@ describe("createContainer", () => {
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
       ),
+      volumeOk(),
       api.mutation("ServiceInstanceDeployV2", () =>
         HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
       ),
@@ -461,13 +484,25 @@ describe("createContainer", () => {
     });
   });
 
-  it("issues no variables call for an image that boots bare", async () => {
+  it("issues neither a variables nor a volume call for an image that boots bare", async () => {
+    /*
+     * nginx rather than redis, and the swap is the point rather than a detail. redis used to
+     * be the bare image here; since T-491 it keeps state, so it takes a volume — and this
+     * test would have been asserting the absence of a call the app now correctly makes.
+     *
+     * Both absences matter, and for the same reason: this app does not know where an
+     * arbitrary image writes, so a volume attached anyway would be billable storage that
+     * stays empty while the data still vanishes.
+     */
     server.use(
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
       ),
       api.mutation("VariableCollectionUpsert", () => {
         throw new Error("no variables should be sent");
+      }),
+      api.mutation("VolumeCreate", () => {
+        throw new Error("no volume should be attached to an image with no preset");
       }),
       api.mutation("ServiceInstanceDeployV2", () =>
         HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
@@ -479,7 +514,7 @@ describe("createContainer", () => {
         projectId: "p1",
         environmentId: "e1",
         name: "spun-x",
-        image: "redis:7-alpine",
+        image: "nginx:alpine",
       }),
     ).resolves.toMatchObject({ outcome: "deployed" });
   });
@@ -491,6 +526,7 @@ describe("createContainer", () => {
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-x" } } }),
       ),
+      volumeOk(),
       api.mutation("ServiceInstanceDeployV2", () =>
         HttpResponse.json({ data: { serviceInstanceDeployV2: null } }),
       ),
@@ -508,6 +544,241 @@ describe("createContainer", () => {
       deploymentId: null,
       outcome: "deployed",
     });
+  });
+});
+
+describe("createContainer, attaching a volume", () => {
+  it("sends the catalog's mount path, scoped to one environment", async () => {
+    /*
+     * `environmentId` is the field to watch. Railway's own description says an ABSENT
+     * environmentId deploys the volume to every environment in the project — so omitting
+     * it for a service that lives in one would provision billable storage in all of them.
+     */
+    let sent: Record<string, unknown> | undefined;
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      volumeOk((input) => {
+        sent = input;
+      }),
+      api.mutation("VariableCollectionUpsert", () =>
+        HttpResponse.json({ data: { variableCollectionUpsert: 1 } }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+      ),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "generated" },
+    });
+
+    expect(sent).toEqual({
+      projectId: "p1",
+      environmentId: "e1",
+      serviceId: "svc_1",
+      mountPath: "/var/lib/postgresql/data",
+    });
+  });
+
+  it("matches the mount path on the repository, so a different tag still gets one", async () => {
+    let sent: Record<string, unknown> | undefined;
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      volumeOk((input) => {
+        sent = input;
+      }),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+      ),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-cache",
+      image: "redis:8",
+    });
+
+    expect(sent).toMatchObject({ mountPath: "/data" });
+  });
+
+  it("declines to deploy a stateful service whose volume was refused", async () => {
+    /*
+     * The branch T-491 exists for, and the one place where NOT deploying is the feature.
+     * A database that came up here would look healthy, accept writes, and lose every one of
+     * them the next time the container moved — which is exactly the defect being fixed. An
+     * un-deployed service is visible, prefixed and destroyable instead.
+     */
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      api.mutation("VolumeCreate", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+      api.mutation("VariableCollectionUpsert", () => {
+        throw new Error("must not configure a service it will not deploy");
+      }),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        throw new Error("must not deploy a stateful service with no volume");
+      }),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "generated" },
+    });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: null,
+      outcome: "volume_failed",
+    });
+
+    const failure = logRecords().find((r) => r.msg === "railway.volume_failed");
+    expect(failure).toMatchObject({
+      service_id: "svc_1",
+      mount_path: "/var/lib/postgresql/data",
+    });
+  });
+
+  it("records the name Railway derived, because that is what carries the prefix", async () => {
+    /*
+     * This app sends no name and never renames the volume. Railway derives one from the
+     * service — `spun-db` gets `spun-db-volume` — which is how the MANAGED_PREFIX reaches
+     * the volume for free, and is why `volumeUpdate` sits in OPTIONAL_FIELDS rather than
+     * being a document. The record is what would show that behaviour changing.
+     */
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-db" } },
+        }),
+      ),
+      volumeOk(),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+      ),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-db",
+      image: "mongo:7",
+    });
+
+    expect(logRecords().find((r) => r.msg === "railway.volume_created")).toMatchObject({
+      service_id: "svc_1",
+      volume_id: "vol_1",
+      volume_name: "spun-db-volume",
+      mount_path: "/data/db",
+    });
+  });
+});
+
+describe("getEnvironmentVolumes", () => {
+  /* A body rather than a response, so each resolver keeps MSW's contextual typing — the
+     same reason `notAuthorized` at the top of this file is written that way. */
+  const instances = (nodes: Array<Record<string, unknown>>) => ({
+    data: {
+      environment: {
+        id: "e1",
+        volumeInstances: { edges: nodes.map((node) => ({ node })) },
+      },
+    },
+  });
+
+  it("keys the volumes by the service each is mounted on", async () => {
+    server.use(
+      api.query("EnvironmentVolumes", () =>
+        HttpResponse.json(
+          instances([
+            {
+              id: "volinst_1",
+              volumeId: "vol_1",
+              serviceId: "svc_1",
+              mountPath: "/data",
+              sizeMB: 500,
+              currentSizeMB: 3,
+            },
+          ]),
+        ),
+      ),
+    );
+
+    await expect(getEnvironmentVolumes(TOKEN, "e1")).resolves.toEqual({
+      svc_1: {
+        serviceId: "svc_1",
+        volumeId: "vol_1",
+        mountPath: "/data",
+        sizeMB: 500,
+        currentSizeMB: 3,
+      },
+    });
+  });
+
+  it("degrades to nothing when Railway refuses it, rather than throwing", async () => {
+    /*
+     * `EnvironmentVolumes` is in DEGRADING_OPERATIONS, and this is what makes that safe:
+     * every consequence of the empty answer is the conservative one. The row shows no
+     * volume, the destroy dialog offers no choice, and the data is kept — and the toast
+     * says it was kept, so the outcome is visible rather than silent.
+     */
+    server.use(
+      api.query("EnvironmentVolumes", () =>
+        // `errors` alone, with no `data` member: that is the body Railway sends, and it is
+        // also the only shape MSW's GraphQL resolver types accept.
+        HttpResponse.json({
+          errors: [{ message: "Not Authorized", path: ["environment"] }],
+        }),
+      ),
+    );
+
+    await expect(getEnvironmentVolumes(TOKEN, "e1")).resolves.toEqual({});
+
+    // Debug rather than warn: this read runs on every dashboard render, and a token that
+    // will never hold the scope would otherwise write a warn per render, forever.
+    expect(logRecords().find((r) => r.msg === "railway.volumes.refused")).toMatchObject(
+      {
+        environment_id: "e1",
+        level: "debug",
+      },
+    );
+  });
+});
+
+describe("deleteVolume", () => {
+  it("sends the volume id, not the instance id", async () => {
+    // `volumeDelete` takes the Volume's id; `VolumeInstance.id` is a different value on the
+    // same response, and sending it is a 'not found' that reads like a missing volume.
+    let seen: string | undefined;
+    server.use(
+      api.mutation("VolumeDelete", ({ variables }) => {
+        seen = variables.volumeId as string;
+        return HttpResponse.json({ data: { volumeDelete: true } });
+      }),
+    );
+
+    await deleteVolume(TOKEN, "vol_1");
+    expect(seen).toBe("vol_1");
   });
 });
 

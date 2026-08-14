@@ -7,8 +7,10 @@ import { describeActionError, isField, type ActionResult } from "@/lib/action-re
 import { runOnce, type Retainable } from "@/lib/idempotency";
 import {
   createContainer,
+  deleteVolume,
   deployService,
   destroyContainer,
+  getEnvironmentVolumes,
   getProjectContainers,
   readServiceVariableNames,
   restartDeployment,
@@ -337,16 +339,29 @@ async function attempt(
   revalidatePath("/dashboard");
 
   /*
-   * Both failures name the container. The service exists and is destroyable; saying only
+   * Every failure names the container. The service exists and is destroyable; saying only
    * "failed" would leave the user hunting for something they were not told had been
    * created — and on the deploy branch it is a billable orphan they would have no name
-   * to search Railway for. The two sentences differ because the remedies differ: refused
+   * to search Railway for. The sentences differ because the remedies differ: refused
    * variables are a preset problem, a refused deploy is Railway's.
    *
-   * Retained, both of them, and that is the point of saying so per-branch rather than
+   * Retained, all of them, and that is the point of saying so per-branch rather than
    * once at the end: a service exists, so a repeat of this submission must be told about
    * that one rather than make a second.
    */
+  if (created.outcome === "volume_failed") {
+    /*
+     * The one branch where NOT deploying is the feature rather than damage control. This
+     * image keeps state, Railway refused the volume, and a container that came up here would
+     * take the user's data and lose it — which is the defect T-491 exists to remove. The
+     * sentence says the container exists and is not running, because both halves are what
+     * the person has to act on.
+     */
+    return {
+      value: { ok: false, error: t("actions.createdButNoVolume", { name }) },
+      retain: true,
+    };
+  }
   if (created.outcome === "variables_failed") {
     return {
       value: { ok: false, error: t("actions.createdButNotConfigured", { name }) },
@@ -682,16 +697,91 @@ export async function spinDown(
        * is wider than the `Translator` alias, since that one is the namespaced overload.
        */
       const t = await getTranslations();
+      const name = context.target.displayName;
+
+      /*
+       * What the dialog's checkbox asked for — a request, not an instruction.
+       *
+       * The browser posts a boolean and a service id, and nothing else about the volume:
+       * not its id, not whether one exists. Both of those are read back from Railway below,
+       * for the same reason ownership and the deployment id are. A form that could name the
+       * volume to delete would be a form that could name somebody else's.
+       */
+      const deleteData = formField(formData, "deleteData") === "on";
+
+      /*
+       * Read BEFORE the service is deleted, and unconditionally — not only when the box was
+       * ticked.
+       *
+       * Before, because `volumeInstance.serviceId` is what ties a volume to the container the
+       * user is looking at. Railway keeps answering that field after the service is gone, but
+       * this app would have nothing left to check it against: `withManagedContainer`'s
+       * ownership proof is the service's own name. Reading first keeps the association one
+       * Railway confirms rather than one this app remembers.
+       *
+       * Unconditionally, because the answer decides which sentence is TRUE rather than which
+       * one was asked for. Reading only when the box was ticked meant an unticked destroy
+       * knew of no volume and fell through to the plain "Destroyed db" — so the one outcome
+       * that leaves a charge behind was the one that said nothing about it, which is the
+       * opposite of what the sentence exists for. It costs one read on a path that already
+       * reads the whole container list.
+       *
+       * Degrades to `{}`: EnvironmentVolumes is in DEGRADING_OPERATIONS, so a refused read
+       * finds no volume and the plain sentence is used. That is the honest answer rather than
+       * a cautious one — with the read refused this app does not know a volume exists, and
+       * claiming one was kept would be a statement it cannot support. README Limitations says
+       * where that leaves the user.
+       */
+      const volumes = await getEnvironmentVolumes(
+        context.accessToken,
+        context.environmentId,
+      );
+      const volume = volumes[context.target.serviceId];
 
       await destroyContainer(context.accessToken, context.target.serviceId);
 
-      // The other half of the audit trail. After this, Railway has no record it existed.
-      logLifecycle("destroy", context);
+      /*
+       * After the service, never before.
+       *
+       * Railway refuses to delete a volume that is still mounted on a live service, so the
+       * order is forced — and it is also the order that fails safe. Service first leaves,
+       * at worst, an orphan volume the user can see and delete in Railway's own dashboard;
+       * volume first would, at worst, wipe the data under a container that is still running.
+       */
+      let volumeDeleted = false;
+      if (volume && deleteData) {
+        await deleteVolume(context.accessToken, volume.volumeId);
+        volumeDeleted = true;
+      }
+
+      /*
+       * The other half of the audit trail. After this, Railway has no record the container
+       * existed — and `volume_deleted` is the only place any record of the data's fate
+       * survives, which is why it is written on both branches rather than only when true.
+       */
+      logLifecycle("destroy", context, {
+        volume_deleted: volumeDeleted,
+        volume_id: volume?.volumeId ?? null,
+      });
 
       revalidatePath("/dashboard");
       return {
         ok: true,
-        message: t("actions.destroyed", { name: context.target.displayName }),
+        /*
+         * Three sentences for three outcomes, and each is keyed on what HAPPENED rather than
+         * on what was asked for — the user cannot check any of this from here once the row
+         * is gone.
+         *
+         * "Kept" is stated rather than implied: a volume left behind is billable storage
+         * this app will never show again, since it lists containers and that volume no
+         * longer has one. Silence there would be the app declining to mention a charge it
+         * caused, which is precisely what the middle branch exists to prevent.
+         */
+        message: volumeDeleted
+          ? t("actions.destroyedWithVolume", { name })
+          : volume
+            ? t("actions.destroyedVolumeKept", { name })
+            : t("actions.destroyed", { name }),
       };
     }),
   );

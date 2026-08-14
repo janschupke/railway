@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { setSearchParams } from "@/test/setup-dom";
 import { LIST } from "@/lib/constants";
-import type { Container, ContainerMetrics } from "@/lib/railway/types";
+import type { Container, ContainerMetrics, ContainerVolume } from "@/lib/railway/types";
 
 /*
  * The rows are their own component with their own tests, and one of them opens a Radix
@@ -42,6 +42,7 @@ const many = (count: number) =>
 const renderList = (
   containers: Container[],
   metrics: Record<string, ContainerMetrics> = {},
+  volumes: Record<string, ContainerVolume> = {},
 ) =>
   render(
     <ContainerList
@@ -50,6 +51,7 @@ const renderList = (
       environmentId="env_1"
       heading="Containers"
       metrics={metrics}
+      volumes={volumes}
     />,
   );
 

@@ -15,7 +15,13 @@ import { useImageCheck } from "@/hooks/use-image-check";
 import { spinUp } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
 import { LIMITS } from "@/lib/constants";
-import { DEFAULT_IMAGE, PRESETS, presetVariableDefaults } from "@/lib/presets";
+import {
+  DEFAULT_IMAGE,
+  PRESETS,
+  presetFor,
+  presetVariableDefaults,
+  presetVolumeFor,
+} from "@/lib/presets";
 import { newIdempotencyKey } from "@/lib/random-id";
 import { managedSlug } from "@/lib/railway/slug";
 import { Button } from "./ui/button";
@@ -301,6 +307,25 @@ export function SpinUpForm({
    */
   const imageUnavailable = useImageCheck(image) === "unavailable";
 
+  /*
+   * What the note under the image field says, or null for the case it says nothing about.
+   *
+   * A `mountPath` means the catalog knows this image keeps state and where; `null` means it
+   * has never heard of the image at all. The third case — a preset the catalog knows keeps
+   * nothing — is this whole expression being null, which is why `presetFor` is consulted
+   * separately rather than inferring "no volume" from `presetVolumeFor` alone. Those two
+   * undefineds answer different questions; see the note on `Preset.volume`.
+   *
+   * Blank input is nothing: the field starts empty on a form nobody has touched, and a
+   * warning about an image the person has not chosen yet is a warning about nothing.
+   */
+  const storage = (() => {
+    if (!image.trim()) return null;
+    const volume = presetVolumeFor(image);
+    if (volume) return { mountPath: volume.mountPath };
+    return presetFor(image) ? null : { mountPath: null };
+  })();
+
   const fieldError = (field: "name" | "image") => {
     // The local check first: it is the more recent statement about this field, and it is
     // the only one when nothing was submitted.
@@ -357,6 +382,33 @@ export function SpinUpForm({
               listLabel={t("imageListLabel")}
               inputClassName="font-mono"
             />
+
+            {/*
+              What this image does with data it is given, said before it is created rather
+              than discovered afterwards.
+
+              Three cases and only two sentences, which is the decision here. A preset the
+              catalog knows keeps state says where its volume mounts. An image matching no
+              preset says the app does not know where it stores data — that is the honest
+              statement, and it is the one that covers `couchdb:3`, `influxdb:2` and every
+              private image. A preset with no volume says NOTHING: the catalog has checked
+              that nginx and whoami keep nothing worth keeping, and a warning there would be
+              noise that teaches people to skip the one above.
+
+              Not a Banner. Nothing is wrong, nothing needs acknowledging, and Banner
+              carries a role that would announce this to a screen reader on every keystroke
+              that changes the image. It is the same quiet caption the prefix note under the
+              container list uses.
+            */}
+            {storage && (
+              <Text asChild variant="caption" tone="subtle">
+                <p className="mt-1.5">
+                  {storage.mountPath
+                    ? t("volumeNote", { mountPath: storage.mountPath })
+                    : t("unknownStorageNote")}
+                </p>
+              </Text>
+            )}
           </div>
 
           <div className="min-w-0 grow basis-48">

@@ -38,12 +38,15 @@ export function DestroyContainerDialog({
   displayName,
   projectId,
   environmentId,
+  volumeSize,
   disabled,
 }: {
   serviceId: string;
   displayName: string;
   projectId: string;
   environmentId: string;
+  /** Formatted size of this container's volume; undefined when it has none. */
+  volumeSize?: string;
   disabled?: boolean;
 }) {
   const t = useTranslations("destroy");
@@ -81,6 +84,7 @@ export function DestroyContainerDialog({
             displayName={displayName}
             projectId={projectId}
             environmentId={environmentId}
+            volumeSize={volumeSize}
             onDone={(message) => {
               toast({ title: message, tone: "success" });
               setOpen(false);

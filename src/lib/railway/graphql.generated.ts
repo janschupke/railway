@@ -158,6 +158,19 @@ export type VariableDeleteInput = {
   serviceId?: string | null | undefined;
 };
 
+export type VolumeCreateInput = {
+  /** The environment to deploy the volume instances into. If `null`, the volume will not be deployed to any environment. `undefined` will deploy to all environments. */
+  environmentId?: string | null | undefined;
+  /** The path in the container to mount the volume to */
+  mountPath: string;
+  /** The project to create the volume in */
+  projectId: string;
+  /** The region to create the volume instances in. If not provided, the default region will be used. */
+  region?: string | null | undefined;
+  /** The service to attach the volume to. If not provided, the volume will be disconnected. */
+  serviceId?: string | null | undefined;
+};
+
 export type ProjectFieldsFragment = {
   id: string;
   name: string;
@@ -318,6 +331,40 @@ export type ServiceDeleteMutationVariables = Exact<{
 }>;
 
 export type ServiceDeleteMutation = { serviceDelete: boolean };
+
+export type VolumeCreateMutationVariables = Exact<{
+  input: VolumeCreateInput;
+}>;
+
+export type VolumeCreateMutation = { volumeCreate: { id: string; name: string } };
+
+export type VolumeDeleteMutationVariables = Exact<{
+  volumeId: string;
+}>;
+
+export type VolumeDeleteMutation = { volumeDelete: boolean };
+
+export type EnvironmentVolumesQueryVariables = Exact<{
+  id: string;
+}>;
+
+export type EnvironmentVolumesQuery = {
+  environment: {
+    id: string;
+    volumeInstances: {
+      edges: Array<{
+        node: {
+          id: string;
+          volumeId: string;
+          serviceId: string | null;
+          mountPath: string;
+          sizeMB: number;
+          currentSizeMB: number;
+        };
+      }>;
+    };
+  };
+};
 
 export type DeploymentStopMutationVariables = Exact<{
   id: string;
