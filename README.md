@@ -241,14 +241,23 @@ SSE route multiplexes deployment status and log output into the open tab.
   built. Offering it means a second confirm path, a fourth container state the dashboard
   can act on, and deciding what "spin up" does to a stopped service; the UI promises
   nothing it does not do.
-- **SSE pins a client to one replica**, so this is a single-replica app today. See below.
+- **SSE pins a client to one replica**, so this is a single-replica app today. Two pieces
+  of module state say so out loud: the stream cap in `lib/stream-slots.ts` and the
+  idempotency map in `lib/idempotency.ts`. See below.
 - **A stream open for more than an hour** outlives its access token. Deploys finish well
   inside that; a long-lived streaming session would need mid-stream token rotation.
-- **Double-submit protection is a name check, not a lock.** Two truly simultaneous
-  submissions could still create two services. It also costs a round trip: every
-  mutation re-reads the container list before acting. The ownership re-derivation in
-  `spinDown` is a genuine safety property and stays; the duplicate-name pre-check is the
-  one to replace.
+- **Double-submit protection expires, and does not survive a restart.** A submission
+  carries an idempotency key and a repeat of it is answered with the first one's result
+  rather than a second container (ADR-12), but that entry is held in memory for
+  `IDEMPOTENCY.RETAIN_SECONDS` on one replica. A repeat after that window, or across a
+  deploy that lands between the two halves of a double submit, still creates two services.
+  Both windows are far narrower than the name check this replaced, which was not a lock at
+  all.
+- **The duplicate-name message is stale by design.** It moved into the browser, where it
+  is checked against the list the page has already loaded, so it costs nothing — and it
+  cannot see a container created a second ago in another tab. It is a typo guard; the
+  idempotency key is the part that is load-bearing. The ownership re-derivation in
+  `spinDown` is a genuine safety property and stays (ADR-5).
 - **No `nonce` in the OIDC flow** (ADR-1) — `state` and PKCE only. Defensible with
   `response_type=code` plus PKCE `S256`, since the code is bound to the verifier and the
   id_token is never accepted from a redirect, but it is a deviation from the OIDC core
@@ -271,8 +280,8 @@ SSE route multiplexes deployment status and log output into the open tab.
   upstream connection per viewer per replica. That is what SSE's replica affinity forces
   once there is more than one instance.
 - **An audit log** of spin-up/spin-down per user — now half done. The events are recorded
-  (`container.created`, `container.create_failed`, `container.destroyed`,
-  `container.destroy_refused`, with the
+  (`container.created`, `container.create_failed`, `container.create_replayed`,
+  `container.destroyed`, `container.destroy_refused`, with the
   subject and the ids), and the field set is deliberately the shape a table would take, so
   the remaining work is a parse rather than a re-instrumentation. What a database adds is
   retention beyond the log window and a query the user can run themselves.
@@ -286,7 +295,6 @@ SSE route multiplexes deployment status and log output into the open tab.
   packages, add `register()` to `src/instrumentation.ts`, point Grafana Alloy at Railway's
   log drain. Nothing in `src/**` outside that one file should need to change — that is the
   test of whether the seam was cut in the right place.
-- **Idempotency keys** on create, replacing the name pre-check.
 - **Typed GraphQL documents** via codegen against the live schema, replacing the
   unchecked `gql<T>()` assertions (ADR-8). `verify-schema.ts` catches a renamed root
   field today; it cannot catch a renamed nested one.
@@ -324,22 +332,23 @@ SSE route multiplexes deployment status and log output into the open tab.
 
 ## Decisions
 
-Eleven decisions, argued in full in [`docs/adr/`](docs/adr/README.md). The short
+Twelve decisions, argued in full in [`docs/adr/`](docs/adr/README.md). The short
 version of each:
 
-| #                                                                  | Decision                                                       | Why it matters                                                                                                                                                                                             |
-| ------------------------------------------------------------------ | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ADR-1](docs/adr/0001-railway-oidc-directly-not-an-auth-vendor.md) | Railway OIDC directly, not an auth vendor                      | The app acts on **the visitor's** Railway account, not on a token I own — that makes auth a capability-delegation problem, not a login problem, and Railway is itself a compliant OIDC provider            |
-| [ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)    | Token refresh runs in the proxy layer                          | Access tokens live one hour and refresh tokens rotate on every use; Server Components can read cookies but not write them, so refresh runs in `src/proxy.ts` before the render                             |
-| [ADR-3](docs/adr/0003-sse-downstream-websocket-upstream.md)        | SSE downstream, WebSocket upstream                             | Railway genuinely pushes log lines over GraphQL subscriptions, but App Router route handlers cannot accept WebSocket upgrades and the data only flows one way                                              |
-| [ADR-4](docs/adr/0004-no-database.md)                              | No database                                                    | Railway holds the state; mirroring it would only create drift                                                                                                                                              |
-| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)    | The app only destroys what it created                          | This tool deletes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every delete                                     |
-| [ADR-6](docs/adr/0006-docker-images-only.md)                       | Docker images only; GitHub sources are a stated limitation     | Repo sources silently require _the signed-in user's_ Railway account to have the GitHub app installed with access to that repo — something this app cannot provision on their behalf                       |
-| [ADR-7](docs/adr/0007-the-url-is-the-state.md)                     | The URL is the state; there is no client store                 | Project, environment and filters are search params, so the dashboard is linkable and the server does the fetching; there is no client fetch, so there is no client cache to reconcile                      |
-| [ADR-8](docs/adr/0008-a-hand-rolled-graphql-client-not-apollo.md)  | A hand-rolled GraphQL client, not Apollo                       | All of `src/lib/railway/` is server-only, so Apollo's normalized cache and browser hooks have nothing to attach to — and a cache would be actively wrong for a live view of infrastructure                 |
-| [ADR-9](docs/adr/0009-structured-logs-on-stdout.md)                | Structured logs on stdout, with the OTel seam cut but not used | The whole server used to log through one `console.error` that flattened everything a query would want — kind, status, operation, incident id — into a template string only `grep` could read               |
-| [ADR-10](docs/adr/0010-the-dashboard-watches.md)                   | The dashboard watches; it does not poll from the browser       | A container created or destroyed in Railway's own dashboard did not appear here until someone pressed Refresh, and Railway publishes no project subscription — so someone has to poll, and the server does |
-| [ADR-11](docs/adr/0011-pnpm-stays.md)                              | pnpm stays, and the migration was priced rather than assumed   | npm has no equivalent of `allowBuilds`, a per-package postinstall allowlist, and `pnpm audit --prod` re-evaluates reachability where an ignore-list of advisory ids decays                                 |
+| #                                                                     | Decision                                                                  | Why it matters                                                                                                                                                                                                 |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ADR-1](docs/adr/0001-railway-oidc-directly-not-an-auth-vendor.md)    | Railway OIDC directly, not an auth vendor                                 | The app acts on **the visitor's** Railway account, not on a token I own — that makes auth a capability-delegation problem, not a login problem, and Railway is itself a compliant OIDC provider                |
+| [ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)       | Token refresh runs in the proxy layer                                     | Access tokens live one hour and refresh tokens rotate on every use; Server Components can read cookies but not write them, so refresh runs in `src/proxy.ts` before the render                                 |
+| [ADR-3](docs/adr/0003-sse-downstream-websocket-upstream.md)           | SSE downstream, WebSocket upstream                                        | Railway genuinely pushes log lines over GraphQL subscriptions, but App Router route handlers cannot accept WebSocket upgrades and the data only flows one way                                                  |
+| [ADR-4](docs/adr/0004-no-database.md)                                 | No database                                                               | Railway holds the state; mirroring it would only create drift                                                                                                                                                  |
+| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)       | The app only destroys what it created                                     | This tool deletes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every delete                                         |
+| [ADR-6](docs/adr/0006-docker-images-only.md)                          | Docker images only; GitHub sources are a stated limitation                | Repo sources silently require _the signed-in user's_ Railway account to have the GitHub app installed with access to that repo — something this app cannot provision on their behalf                           |
+| [ADR-7](docs/adr/0007-the-url-is-the-state.md)                        | The URL is the state; there is no client store                            | Project, environment and filters are search params, so the dashboard is linkable and the server does the fetching; there is no client fetch, so there is no client cache to reconcile                          |
+| [ADR-8](docs/adr/0008-a-hand-rolled-graphql-client-not-apollo.md)     | A hand-rolled GraphQL client, not Apollo                                  | All of `src/lib/railway/` is server-only, so Apollo's normalized cache and browser hooks have nothing to attach to — and a cache would be actively wrong for a live view of infrastructure                     |
+| [ADR-9](docs/adr/0009-structured-logs-on-stdout.md)                   | Structured logs on stdout, with the OTel seam cut but not used            | The whole server used to log through one `console.error` that flattened everything a query would want — kind, status, operation, incident id — into a template string only `grep` could read                   |
+| [ADR-10](docs/adr/0010-the-dashboard-watches.md)                      | The dashboard watches; it does not poll from the browser                  | A container created or destroyed in Railway's own dashboard did not appear here until someone pressed Refresh, and Railway publishes no project subscription — so someone has to poll, and the server does     |
+| [ADR-11](docs/adr/0011-pnpm-stays.md)                                 | pnpm stays, and the migration was priced rather than assumed              | npm has no equivalent of `allowBuilds`, a per-package postinstall allowlist, and `pnpm audit --prod` re-evaluates reachability where an ignore-list of advisory ids decays                                     |
+| [ADR-12](docs/adr/0012-idempotency-keys-replay-rather-than-reject.md) | Idempotency keys on create, and a repeat is replayed rather than rejected | A name check is not a lock and cost a round trip before every create; a repeat now gets the first submission's answer, because "you already submitted this" is a false statement about a container that exists |
 
 ---
 

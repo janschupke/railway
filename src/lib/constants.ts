@@ -255,6 +255,24 @@ export const SESSION = {
   TRANSIENT_MAX_AGE_SECONDS: 60 * 30,
 } as const;
 
+/** Double-submit protection for the one action that creates billable infrastructure. */
+export const IDEMPOTENCY = {
+  /**
+   * How long a settled spin-up stays claimable by a submission carrying the same key.
+   *
+   * The window opens when the create *settles*, so it does not have to cover the time
+   * on the wire — a submission that overlaps another shares its entry outright, and that
+   * entry is held however long the three Railway mutations take. This covers the other
+   * repeat: a person who saw something that looked like a failure and pressed the button
+   * again. SESSION.REFRESH_GRACE_SECONDS is a minute because a lagging request is
+   * machine-paced; this one is paced by somebody deciding to try again.
+   *
+   * It is also what bounds the map. Entries are swept lazily on the next call, so what is
+   * resident is "spin-ups in the last five minutes on this replica", not "spin-ups ever".
+   */
+  RETAIN_SECONDS: 300,
+} as const;
+
 /** User input bounds. */
 export const LIMITS = {
   /** Slug length after prefixing; Railway service names are not unbounded. */

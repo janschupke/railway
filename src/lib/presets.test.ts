@@ -71,6 +71,7 @@ describe("the catalog", () => {
         environmentId: "e1",
         name: "x",
         image: preset.value,
+        idempotencyKey: "0123456789abcdef0123456789abcdef",
       });
       expect(parsed.success, preset.value).toBe(true);
     }

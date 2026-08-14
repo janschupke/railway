@@ -16,7 +16,7 @@ import { ErrorBlock } from "@/components/ui/error-block";
 import { EmptyState } from "@/components/ui/misc";
 import { LINKS } from "@/lib/constants";
 import { ContainerSection } from "./container-section";
-import { loadDashboardShell } from "./data";
+import { loadDashboardShell, managedNames } from "./data";
 import { PageMain } from "@/components/ui/page";
 import { Heading } from "@/components/ui/text";
 
@@ -40,6 +40,23 @@ export default async function DashboardPage({
   const tCommon = await getTranslations("common");
   const tCreate = await getTranslations("createProject");
   const { projects, project, environment, error, errorKind, missingScopes } = shell;
+
+  /*
+   * Deliberately not awaited. The spin-up form checks a typed name against the names
+   * already here, and awaiting that read would put the container round trip back in front
+   * of the form — which is the latency the Suspense boundary below exists to remove. The
+   * form resolves it in an effect instead, so it paints without it and gains the check a
+   * moment later.
+   *
+   * The ids must be the same two strings `ContainerSection` passes below, or `cache` in
+   * ./data.ts misses and this becomes a second Railway round trip rather than none. That
+   * is also why an absent selection short-circuits here: `ContainerSection` returns before
+   * its first await in that case, so there would be no read to share.
+   */
+  const names =
+    project && environment
+      ? managedNames(project.id, environment.id)
+      : Promise.resolve([]);
 
   /*
    * The empty list has two causes that need opposite advice. Without project access
@@ -223,6 +240,7 @@ export default async function DashboardPage({
                 projectId={project?.id ?? ""}
                 environmentId={environment?.id ?? ""}
                 disabled={!project || !environment}
+                names={names}
               />
 
               {/*

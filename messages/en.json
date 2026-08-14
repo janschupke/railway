@@ -255,6 +255,7 @@
     "variablesTooMany": "Set at most {max, plural, one {# variable} other {# variables}} here",
     "variablesTooLarge": "The variables are too large together. Keep them under {max} characters.",
     "variablesMalformed": "The variables could not be read. Reload the page and try again.",
+    "submissionInvalid": "This form could not be submitted. Reload the page and try again.",
     "projectNameRequired": "Give the project a name",
     "projectNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
     "environmentNameRequired": "Give the environment a name",

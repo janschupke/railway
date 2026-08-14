@@ -13,7 +13,7 @@ vi.mock("@/lib/railway/api", () => ({
   getProjectMetrics: (...args: unknown[]) => getProjectMetrics(...args),
 }));
 
-const { loadDashboardShell, loadContainers } = await import("./data");
+const { loadDashboardShell, loadContainers, managedNames } = await import("./data");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 const { __resetEnv } = await import("@/env");
 
@@ -238,6 +238,30 @@ describe("loadContainers", () => {
     expect(data).toEqual({ containers: [], error: null, metrics: {}, spend: null });
     expect(getProjectContainers).not.toHaveBeenCalled();
     expect(getProjectMetrics).not.toHaveBeenCalled();
+  });
+
+  describe("managedNames", () => {
+    it("names only what this app created, without its prefix", async () => {
+      // A collision is only possible inside this app's own namespace: it prefixes what
+      // it creates, and a service made elsewhere is listed for context and nothing else.
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [
+          { serviceId: "s1", managed: true, displayName: "cache" },
+          { serviceId: "s2", managed: false, displayName: "postgres" },
+        ],
+      });
+
+      await expect(managedNames("p1", "e1")).resolves.toEqual(["cache"]);
+    });
+
+    it("answers with nothing rather than rejecting when the read failed", async () => {
+      // Handed to a client component as an unawaited promise, so a rejection here is an
+      // error in the client tree rather than a check that quietly did not run.
+      getProjectContainers.mockRejectedValue(new Error("socket hang up"));
+
+      await expect(managedNames("p1", "e1")).resolves.toEqual([]);
+    });
   });
 
   describe("the usage read", () => {

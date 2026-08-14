@@ -5,6 +5,7 @@ import {
   expect,
   field,
   fixtureServices,
+  fixtureStats,
   injectFaults,
   onlyVisible,
   openDestroyDialog,
@@ -182,6 +183,12 @@ test.describe("container lifecycle", () => {
   });
 
   test("rejects a duplicate name at the field that caused it", async ({ page }) => {
+    /*
+     * Checked in the browser now, against the list this page already loaded — the action
+     * used to re-read the whole project before every create to answer this, which is a
+     * Railway round trip spent on a typo. Waiting for the row is what makes the check
+     * sound here: it is proof the refreshed list has reached the form.
+     */
     await spinUp(page, "cache");
     await expect(row(page, "cache")).toBeVisible();
 
@@ -189,6 +196,38 @@ test.describe("container lifecycle", () => {
 
     await expect(onlyVisible(page.getByText(/already exists here/))).toBeVisible();
     await expect(field(page, "Name")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  test("creates one container when the form is submitted twice", async ({ page }) => {
+    /*
+     * The property the idempotency key exists for, and the only place it is observable
+     * end to end. A slow fixture holds the first submission open; the second is posted
+     * underneath it with the same key, and the key is what makes that harmless.
+     *
+     * `requestSubmit` rather than a second click: the submit button is inert while
+     * pending, deliberately, so a click would be swallowed by the UI and this would pass
+     * without exercising anything.
+     */
+    const before = (await fixtureStats(page)).operations.ServiceCreate ?? 0;
+    await injectFaults(page, { slowMs: 1500 });
+
+    await spinUp(page, "cache");
+    await page.evaluate(() => {
+      document
+        .querySelector<HTMLInputElement>('input[name="name"]')
+        ?.form?.requestSubmit();
+    });
+    // Cleared as soon as both are posted. The delay is only needed to keep the first
+    // submission open long enough for the second to carry the same key — every Server
+    // Action here re-renders the dashboard on the way back, so leaving it on makes the
+    // rest of this test cost six delayed reads for nothing.
+    await injectFaults(page, { slowMs: 0 });
+
+    await expect(row(page, "cache")).toBeVisible({ timeout: 20_000 });
+    await settled(page);
+    const after = (await fixtureStats(page)).operations.ServiceCreate ?? 0;
+    // One create, so one container — the fixture would happily have made two.
+    expect(after - before).toBe(1);
   });
 
   test("rejects a malformed image reference before submitting", async ({ page }) => {

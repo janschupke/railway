@@ -17,12 +17,25 @@ const revalidatePath = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 
 const requireAccessToken = vi.fn(async () => "token");
+/*
+ * `spinUp` reads the whole session rather than the token alone: the idempotency key it
+ * is handed is client-supplied, so the entry it claims has to be namespaced by who
+ * claimed it. The two mocks must agree — a case that rejects one and not the other is
+ * asserting against a session state production cannot be in.
+ */
+const requireSession = vi.fn(async () => ({
+  user: { id: "u1" },
+  accessToken: "token",
+}));
 vi.mock("@/lib/auth/server", () => ({
   requireAccessToken: () => requireAccessToken(),
+  requireSession: () => requireSession(),
 }));
 
 const { spinUp, spinDown, createProject, createEnvironment } =
   await import("./actions");
+const { __resetIdempotency } = await import("@/lib/idempotency");
+const { newIdempotencyKey } = await import("@/lib/random-id");
 const { SessionExpiredError } = await import("@/lib/auth/refresh");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 
@@ -81,12 +94,20 @@ const form = (entries: Record<string, string>) => {
   return data;
 };
 
+/*
+ * A fresh key per call, before the spread so a case can pin one deliberately.
+ *
+ * Fresh matters: a shared constant would make every case in this file a replay of the
+ * previous one's result, which is exactly the behaviour under test and would hide it
+ * everywhere else.
+ */
 const spinUpForm = (over: Record<string, string> = {}) =>
   form({
     projectId: "p1",
     environmentId: "e1",
     name: "cache",
     image: "redis:7-alpine",
+    idempotencyKey: newIdempotencyKey(),
     ...over,
   });
 
@@ -116,6 +137,11 @@ beforeEach(() => {
   revalidatePath.mockClear();
   requireAccessToken.mockReset();
   requireAccessToken.mockResolvedValue("token");
+  requireSession.mockReset();
+  requireSession.mockResolvedValue({ user: { id: "u1" }, accessToken: "token" });
+  // Retained results are process-global and outlive the call that made them, so without
+  // this a case would be served a previous case's container.
+  __resetIdempotency();
 });
 
 describe("spinUp", () => {
@@ -124,7 +150,6 @@ describe("spinUp", () => {
     const deployed: Array<Record<string, unknown>> = [];
 
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", ({ variables }) => {
         created.push(variables);
         return HttpResponse.json({
@@ -161,7 +186,6 @@ describe("spinUp", () => {
   function collectingVariables(serviceId = "svc_db") {
     const upserted: Array<Record<string, unknown>> = [];
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({
           data: { serviceCreate: { id: serviceId, name: "spun-cache" } },
@@ -359,7 +383,6 @@ describe("spinUp", () => {
 
   it("counts rather than names the variables when Railway refuses them", async () => {
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
       ),
@@ -419,7 +442,6 @@ describe("spinUp", () => {
 
   it("sends no variables for an image that boots bare", async () => {
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
       ),
@@ -440,7 +462,6 @@ describe("spinUp", () => {
     // Reporting a bare failure would leave the user hunting for something they were
     // never told had been created.
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
       ),
@@ -472,7 +493,6 @@ describe("spinUp", () => {
      */
     let generated = "";
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({
           data: { serviceCreate: { id: "svc_orphan", name: "spun-cache" } },
@@ -518,7 +538,6 @@ describe("spinUp", () => {
     // what, from which image" is the question the audit trail is for, and reportError's
     // own line carries none of it.
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
       ),
@@ -537,26 +556,185 @@ describe("spinUp", () => {
     expect(record("container.created")).toBeUndefined();
   });
 
-  it("refuses a duplicate name without calling Railway", async () => {
-    let createCalls = 0;
-    server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith() })),
-      api.mutation("ServiceCreate", () => {
-        createCalls += 1;
-        return HttpResponse.json({ data: { serviceCreate: { id: "x", name: "x" } } });
-      }),
-    );
+  describe("double submits", () => {
+    /**
+     * A working create path that counts what actually reached Railway.
+     *
+     * The count is the whole assertion surface for this block: what a repeat is told
+     * matters less than whether it made a second container.
+     */
+    const countingCreate = () => {
+      const calls = { create: 0 };
+      server.use(
+        api.mutation("ServiceCreate", () => {
+          calls.create += 1;
+          return HttpResponse.json({
+            data: { serviceCreate: { id: `svc_${calls.create}`, name: "spun-cache" } },
+          });
+        }),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep" } }),
+        ),
+      );
+      return calls;
+    };
 
-    const result = await spinUp(null, spinUpForm());
+    it("creates one container for two submissions carrying the same key", async () => {
+      const calls = countingCreate();
+      const data = spinUpForm();
 
-    expect(result).toEqual({
-      ok: false,
-      field: "name",
-      // Typographic quotes come from the catalog: quoting style differs by locale, so
-      // it belongs inside the message rather than around the placeholder.
-      error: "A container named \u201Ccache\u201D already exists here.",
+      const first = await spinUp(null, data);
+      const second = await spinUp(null, data);
+
+      expect(calls.create).toBe(1);
+      // The same answer, not an error: the person got what they asked for, and telling
+      // them otherwise for pressing twice would be a lie about a container that exists.
+      expect(first).toEqual({ ok: true, message: "Spinning up cache" });
+      expect(second).toEqual(first);
+      expect(record("container.create_replayed")).toMatchObject({
+        project_id: "p1",
+        environment_id: "e1",
+        service_name: "spun-cache",
+      });
+      // The replay ran no create of its own, so nothing revalidated on its behalf.
+      expect(revalidatePath).toHaveBeenCalledTimes(2);
     });
-    expect(createCalls).toBe(0);
+
+    it("waits for a submission still in flight rather than starting a second", async () => {
+      /*
+       * The case the old name lookup could not close. Two submissions a millisecond
+       * apart both read a container list without the name in it and both created one;
+       * reading a list is not holding a lock.
+       */
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let creates = 0;
+      server.use(
+        api.mutation("ServiceCreate", async () => {
+          creates += 1;
+          await gate;
+          return HttpResponse.json({
+            data: { serviceCreate: { id: "svc_new", name: "spun-cache" } },
+          });
+        }),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep" } }),
+        ),
+      );
+
+      const data = spinUpForm();
+      const both = Promise.all([spinUp(null, data), spinUp(null, data)]);
+      release();
+      const [first, second] = await both;
+
+      expect(creates).toBe(1);
+      expect(first).toEqual({ ok: true, message: "Spinning up cache" });
+      expect(second).toEqual(first);
+    });
+
+    it("creates twice for two submissions carrying different keys", async () => {
+      // The guard against a key that is accepted and then ignored: two real spin-ups of
+      // the same name are still two spin-ups.
+      const calls = countingCreate();
+
+      await spinUp(null, spinUpForm());
+      await spinUp(null, spinUpForm());
+
+      expect(calls.create).toBe(2);
+    });
+
+    it("releases the key when Railway refused the create", async () => {
+      /*
+       * A failure has to stay retryable. The form keeps its key precisely so pressing
+       * the button again is the same submission — and if a refusal were retained, one
+       * blip from Railway would leave that form unable to work for the whole window.
+       */
+      const data = spinUpForm();
+      server.use(
+        api.mutation("ServiceCreate", () =>
+          HttpResponse.json({ errors: [{ message: "Too many requests" }] }),
+        ),
+      );
+
+      await expect(spinUp(null, data)).resolves.toMatchObject({ ok: false });
+
+      const calls = countingCreate();
+      await expect(spinUp(null, data)).resolves.toEqual({
+        ok: true,
+        message: "Spinning up cache",
+      });
+      expect(calls.create).toBe(1);
+    });
+
+    it("replays a service that was created but not deployed", async () => {
+      /*
+       * The branch that matters most. A repeat here must not make a second orphan — and
+       * it must still be told the name of the first, because that sentence is the only
+       * thing pointing at a billable service the list may not show yet.
+       */
+      let creates = 0;
+      server.use(
+        api.mutation("ServiceCreate", () => {
+          creates += 1;
+          return HttpResponse.json({
+            data: { serviceCreate: { id: "svc_orphan", name: "spun-cache" } },
+          });
+        }),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+        ),
+      );
+
+      const data = spinUpForm();
+      const expected = {
+        ok: false,
+        error:
+          "Created cache, but Railway refused to deploy it. Destroy it and try again.",
+      };
+
+      await expect(spinUp(null, data)).resolves.toEqual(expected);
+      await expect(spinUp(null, data)).resolves.toEqual(expected);
+      expect(creates).toBe(1);
+      // This branch does not refresh the list from the client, so the replay's own
+      // revalidation is what puts the orphan on screen for the person told to destroy it.
+      expect(revalidatePath).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not serve one user's submission to another", async () => {
+      // The key half is client-supplied, so two browsers can send the same one. Only the
+      // user half makes a retained result unclaimable by anybody else.
+      const calls = countingCreate();
+      const data = spinUpForm({ idempotencyKey: "0123456789abcdef0123456789abcdef" });
+
+      await spinUp(null, data);
+      requireSession.mockResolvedValue({ user: { id: "u2" }, accessToken: "token" });
+      await spinUp(null, data);
+
+      expect(calls.create).toBe(2);
+    });
+
+    it("refuses a submission carrying no key at all, before any network call", async () => {
+      // No MSW handler is registered: a request here would fail the suite.
+      const data = spinUpForm();
+      data.delete("idempotencyKey");
+
+      const result = await spinUp(null, data);
+
+      expect(result).toEqual({
+        ok: false,
+        error: "This form could not be submitted. Reload the page and try again.",
+      });
+    });
+
+    it("refuses a key too short to be unguessable", async () => {
+      const result = await spinUp(null, spinUpForm({ idempotencyKey: "abc" }));
+
+      expect(result).toMatchObject({ ok: false });
+      // Unattributed on purpose: there is no field on screen to hang it on.
+      expect(!result.ok && result.field).toBeUndefined();
+    });
   });
 
   it("rejects a malformed image before any network call", async () => {
@@ -587,6 +765,7 @@ describe("spinUp", () => {
     data.append("projectId", "p1");
     data.append("environmentId", "e1");
     data.append("image", "redis:7-alpine");
+    data.append("idempotencyKey", newIdempotencyKey());
     // `name` deliberately absent.
 
     const result = await spinUp(null, data);
@@ -618,7 +797,6 @@ describe("spinUp", () => {
 
   it("surfaces a Railway rate limit in the user's language", async () => {
     server.use(
-      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json(
           { errors: [{ message: "Too many requests" }] },
@@ -639,7 +817,7 @@ describe("spinUp", () => {
   });
 
   it("asks the user to sign in again when the session cannot be refreshed", async () => {
-    requireAccessToken.mockRejectedValue(new SessionExpiredError());
+    requireSession.mockRejectedValue(new SessionExpiredError());
 
     const result = await spinUp(null, spinUpForm());
 
@@ -650,7 +828,7 @@ describe("spinUp", () => {
   });
 
   it("does not leak an unexpected internal error", async () => {
-    requireAccessToken.mockRejectedValue(new Error("ECONNREFUSED 10.0.0.1"));
+    requireSession.mockRejectedValue(new Error("ECONNREFUSED 10.0.0.1"));
 
     const result = await spinUp(null, spinUpForm());
 

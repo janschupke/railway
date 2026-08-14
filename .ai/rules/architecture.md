@@ -185,15 +185,17 @@ and `x-request-id` in `src/lib/log/request-scope.ts`. There is nowhere else to p
 this app has no database, no Redis, no KV.
 
 So a module-level `Map` — `inFlight`/`grants` in `lib/auth/refresh.ts`, `derivedKeys` in
-`lib/auth/session.ts` — is per bundle. `derivedKeys` does not care; deriving the same key
-twice is a wasted HKDF and nothing more. A refresh dedupe map very much does, which is why
-only the proxy refreshes. **Before adding process-global state to a module the proxy
-imports, work out what happens when the app bundle has its own copy.**
+`lib/auth/session.ts`, `entries` in `lib/idempotency.ts` — is per bundle. `derivedKeys` does
+not care; deriving the same key twice is a wasted HKDF and nothing more. A refresh dedupe
+map very much does, which is why only the proxy refreshes. `entries` is single-flight and
+would be worthless split in two — the proxy does not import it, and it must not start.
+**Before adding process-global state to a module the proxy imports, work out what happens
+when the app bundle has its own copy.**
 
 ## Every tuned number lives in `src/lib/constants.ts`
 
 Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `METRICS`, `SESSION`,
-`LIMITS`, `UI`, `LIST`, `LINKS`),
+`IDEMPOTENCY`, `LIMITS`, `UI`, `LIST`, `LINKS`),
 each with a comment saying why the value is what it is. These were scattered as inline
 literals across the client, the stream route, the session layer and three components, and
 the log backfill limit had already drifted from its default.

@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
-import { requireAccessToken } from "@/lib/auth/server";
+import { requireAccessToken, requireSession } from "@/lib/auth/server";
 import { describeActionError, isField, type ActionResult } from "@/lib/action-result";
+import { runOnce, type Retainable } from "@/lib/idempotency";
 import {
   createContainer,
   destroyContainer,
@@ -108,6 +109,7 @@ async function create(formData: FormData): Promise<ActionResult> {
     image: formField(formData, "image"),
     variableKey: formList(formData, "variableKey"),
     variableValue: formList(formData, "variableValue"),
+    idempotencyKey: formField(formData, "idempotencyKey"),
   });
 
   if (!parsed.success) {
@@ -129,8 +131,84 @@ async function create(formData: FormData): Promise<ActionResult> {
     };
   }
 
-  const { projectId, environmentId, name, image, variableKey, variableValue } =
-    parsed.data;
+  const { projectId, environmentId, name, idempotencyKey } = parsed.data;
+
+  try {
+    const session = await requireSession();
+
+    /*
+     * Single-flight, by the key the form minted for this submission.
+     *
+     * What stood here was a name lookup — the container list, read in full, before every
+     * create — and its own comment conceded that reading a list is not holding a lock.
+     * Two submissions a millisecond apart both read a list without the name in it and
+     * both created a container. It also made a spin-up four Railway round trips; it is
+     * three now.
+     *
+     * Keyed by user as well as by key, so one person's submission can neither claim nor
+     * observe another's. See `entries` in lib/idempotency.ts for what is retained, for
+     * how long, and for the one case this deliberately does not cover.
+     */
+    const { value, replayed } = await runOnce(
+      `${session.user.id}:${idempotencyKey}`,
+      () => attempt(session.accessToken, parsed.data),
+    );
+
+    if (replayed) {
+      /*
+       * Part of the audit trail rather than a counter, for the same reason
+       * `container.created` is: this request told someone a container exists without
+       * creating one, and a record of who was told what belongs next to the record of
+       * what was made.
+       */
+      log.info("container.create_replayed", {
+        project_id: projectId,
+        environment_id: environmentId,
+        service_name: toManagedName(name),
+      });
+      /*
+       * Revalidation is attached to the request that responds, so the one this caller is
+       * on has had none — the create happened inside somebody else's. It matters least on
+       * the success path, where the form refreshes itself, and most on the two branches
+       * that created a service and then failed: those do not refresh, and without this the
+       * caller would be told to destroy an orphan it cannot see.
+       */
+      revalidatePath("/dashboard");
+    }
+
+    return value;
+  } catch (error) {
+    const { key, values } = describeActionError(error);
+    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+  }
+}
+
+/** Everything `spinUpSchema` produces, which is everything the attempt below needs. */
+type SpinUpInput = ReturnType<typeof spinUpSchema.parse>;
+
+/**
+ * One real attempt at creating the container.
+ *
+ * Split from `create` so it can be handed to `runOnce` as the thing that runs at most
+ * once. The return type is the interesting half: `retain` says whether a later submission
+ * carrying the same key may be given this answer instead of making its own container, and
+ * only this function is in a position to know. Every path that reaches a `return` here has
+ * left a service on Railway — they are the same three the `container.created` line below
+ * covers — so all three retain. Everything else throws, and a rejection is released
+ * immediately, because a create Railway refused has to stay retryable.
+ */
+async function attempt(
+  accessToken: string,
+  data: SpinUpInput,
+): Promise<Retainable<ActionResult>> {
+  /*
+   * Resolved here rather than passed in from `create`. next-intl caches per request, so
+   * the second call is free, and taking it as a parameter would mean naming the type
+   * `getTranslations()` actually returns — which is wider than the `Translator` alias
+   * above, since that one is the namespaced overload.
+   */
+  const t = await getTranslations();
+  const { projectId, environmentId, name, image, variableKey, variableValue } = data;
 
   /*
    * The two parallel lists are one row per index. The schema has already refused a
@@ -141,161 +219,142 @@ async function create(formData: FormData): Promise<ActionResult> {
     value: variableValue[index]!,
   }));
 
-  try {
-    const accessToken = await requireAccessToken();
+  const managedName = toManagedName(name);
 
-    /*
-     * Name collisions are the realistic double-submit failure: the same form posted
-     * twice creates two identical services. Checking first is not airtight (nothing
-     * short of a lock is), but it turns the common case into a clear message instead
-     * of a duplicate container.
-     *
-     * Uncancellable, like every Railway call on this side: a Server Action has no access
-     * to the inbound request's signal in Next 16. The reasoning, and what was rejected
-     * instead, is written out once at `containerList` in ./data.ts.
-     */
-    const managedName = toManagedName(name);
-    const { containers } = await getProjectContainers(
-      accessToken,
+  /*
+   * The environment the service is created with: what the person typed, with the
+   * catalog's own defaults filled in for anything they left blank.
+   *
+   * This action accepts user-supplied environment, and until T-487 it did not. The old
+   * property — "the client sends no preset id and no variables, so no request shape
+   * injects arbitrary environment" — was real, and it is gone deliberately: a spin-up
+   * form that cannot set a variable is a form that cannot start most images. It is
+   * replaced rather than deleted, by three bounds that do not overlap:
+   *
+   *   - `spinUpSchema` bounds the SHAPE — name charset, name and value lengths, the row
+   *     count, the total size, duplicates, and the RAILWAY_ namespace Railway sets
+   *     itself. A refused row is a form error; no mutation is attempted.
+   *   - `resolveVariables` bounds the AUTHORITY. It is still the only thing in the app
+   *     that mints a credential, it mints only for a name the CATALOG declares generated
+   *     for this image, and a generated value is returned to no browser on any path.
+   *     "Generate me a secret" is not a request shape; leaving blank a row the catalog
+   *     owns is.
+   *   - The log line below bounds the RECORD — see there.
+   *
+   * The blast radius is unchanged, and that is what makes the trade defensible: every
+   * mutation carries the requester's own token, so injecting environment means injecting
+   * it into a service they asked this app to create in a project their own Railway grant
+   * already reaches. See SECURITY.md, "Input surfaces".
+   */
+  const preset = presetFor(image);
+  const { variables, generated } = resolveVariables(
+    preset?.variables,
+    submittedVariables,
+  );
+
+  /*
+   * Scoped to this one call, not to the whole action.
+   *
+   * `create`'s catch also covers the session read, where no create was ever attempted and
+   * an event named `container.create_failed` would be a lie. Here, a throw means
+   * `serviceCreate` itself was refused: nothing exists on Railway, the record is of an
+   * attempt, and the rethrow is also what releases the idempotency key so the person can
+   * press the button again. Every outcome that does leave a service behind returns
+   * instead, is logged as `container.created` below, and retains.
+   */
+  let created;
+  try {
+    created = await createContainer(accessToken, {
       projectId,
       environmentId,
-    );
-    if (containers.some((c) => c.rawName === managedName)) {
-      log.info("container.create_rejected", {
-        reason: "duplicate_name",
-        project_id: projectId,
-        environment_id: environmentId,
-        service_name: managedName,
-      });
-      return {
-        ok: false,
-        field: "name",
-        error: t("actions.duplicateName", { name }),
-      };
-    }
-
-    /*
-     * The environment the service is created with: what the person typed, with the
-     * catalog's own defaults filled in for anything they left blank.
-     *
-     * This action accepts user-supplied environment, and until T-487 it did not. The old
-     * property — "the client sends no preset id and no variables, so no request shape
-     * injects arbitrary environment" — was real, and it is gone deliberately: a spin-up
-     * form that cannot set a variable is a form that cannot start most images. It is
-     * replaced rather than deleted, by three bounds that do not overlap:
-     *
-     *   - `spinUpSchema` bounds the SHAPE — name charset, name and value lengths, the row
-     *     count, the total size, duplicates, and the RAILWAY_ namespace Railway sets
-     *     itself. A refused row is a form error; no mutation is attempted.
-     *   - `resolveVariables` bounds the AUTHORITY. It is still the only thing in the app
-     *     that mints a credential, it mints only for a name the CATALOG declares generated
-     *     for this image, and a generated value is returned to no browser on any path.
-     *     "Generate me a secret" is not a request shape; leaving blank a row the catalog
-     *     owns is.
-     *   - The log line below bounds the RECORD — see there.
-     *
-     * The blast radius is unchanged, and that is what makes the trade defensible: every
-     * mutation carries the requester's own token, so injecting environment means injecting
-     * it into a service they asked this app to create in a project their own Railway grant
-     * already reaches. See SECURITY.md, "Input surfaces".
-     */
-    const preset = presetFor(image);
-    const { variables, generated } = resolveVariables(
-      preset?.variables,
-      submittedVariables,
-    );
-
-    /*
-     * Scoped to this one call, not to the whole action.
-     *
-     * The outer catch also covers the token read and the duplicate-name lookup, where no
-     * create was ever attempted and an event named `container.create_failed` would be a
-     * lie. Here, a throw means `serviceCreate` itself was refused: nothing exists on
-     * Railway, and the record is of an attempt. Every outcome that does leave a service
-     * behind returns instead, and is logged as `container.created` below.
-     */
-    let created;
-    try {
-      created = await createContainer(accessToken, {
-        projectId,
-        environmentId,
-        name: managedName,
-        image,
-        ...(variables ? { variables } : {}),
-      });
-    } catch (error) {
-      // Rethrown immediately: `describeActionError` still owns what the user is told. This
-      // adds the context an `action` line cannot have — which name, which image, where —
-      // and warn because a refused create is an anomaly, not the ordinary path.
-      log.warn("container.create_failed", {
-        project_id: projectId,
-        environment_id: environmentId,
-        service_name: managedName,
-        image,
-        error,
-      });
-      throw error;
-    }
-
-    const presetNames = new Set((preset?.variables ?? []).map((v) => v.name));
-    const sentNames = variables ? Object.keys(variables) : [];
-    const presetSent = sentNames.filter((sent) => presetNames.has(sent));
-
-    /*
-     * The audit trail. This action creates billable infrastructure, and once a service is
-     * deleted Railway retains no record that it existed — so without this line there is
-     * nothing anywhere that says who created what, from which image, and when. `image` is
-     * user-supplied but validated and bounded at LIMITS.IMAGE_REF_MAX, and it is the
-     * single most useful field in the record. The field set is deliberately the shape a
-     * database table would take, so promoting this to one later is a parse rather than a
-     * re-instrumentation.
-     *
-     * Reached on every path where a service now exists, running or not — which is what
-     * makes it an audit trail rather than a success counter. `outcome` says which, so a
-     * record of an orphan is not indistinguishable from a record of a live container.
-     */
-    log.info("container.created", {
+      name: managedName,
+      image,
+      ...(variables ? { variables } : {}),
+    });
+  } catch (error) {
+    // Rethrown immediately: `describeActionError` still owns what the user is told. This
+    // adds the context an `action` line cannot have — which name, which image, where —
+    // and warn because a refused create is an anomaly, not the ordinary path.
+    log.warn("container.create_failed", {
       project_id: projectId,
       environment_id: environmentId,
       service_name: managedName,
       image,
-      service_id: created.serviceId,
-      deployment_id: created.deploymentId,
-      outcome: created.outcome,
-      /*
-       * Split in two, because the two halves have different cardinality.
-       *
-       * Preset-derived names come from a closed catalog, so naming them keeps the audit
-       * trail readable and keeps the label bounded. User-supplied names are neither closed
-       * nor bounded, and are attacker-chosen in exactly the way the rejected deploymentId
-       * is — so a count carries the diagnostic content instead, the same trade `id_length`
-       * makes on the stream route. Values, of either origin, are written nowhere at any
-       * level; the logger's scalar-only field type is what makes that hard to get wrong.
-       *
-       * The consequence, stated because it is a real loss: this record no longer says what
-       * environment a service was actually created with. SECURITY.md says so too.
-       */
-      variable_names: presetSent.join(","),
-      user_variable_count: sentNames.length - presetSent.length,
+      error,
     });
+    throw error;
+  }
 
-    revalidatePath("/dashboard");
+  const presetNames = new Set((preset?.variables ?? []).map((v) => v.name));
+  const sentNames = variables ? Object.keys(variables) : [];
+  const presetSent = sentNames.filter((sent) => presetNames.has(sent));
 
+  /*
+   * The audit trail. This action creates billable infrastructure, and once a service is
+   * deleted Railway retains no record that it existed — so without this line there is
+   * nothing anywhere that says who created what, from which image, and when. `image` is
+   * user-supplied but validated and bounded at LIMITS.IMAGE_REF_MAX, and it is the
+   * single most useful field in the record. The field set is deliberately the shape a
+   * database table would take, so promoting this to one later is a parse rather than a
+   * re-instrumentation.
+   *
+   * Reached on every path where a service now exists, running or not — which is what
+   * makes it an audit trail rather than a success counter. `outcome` says which, so a
+   * record of an orphan is not indistinguishable from a record of a live container.
+   */
+  log.info("container.created", {
+    project_id: projectId,
+    environment_id: environmentId,
+    service_name: managedName,
+    image,
+    service_id: created.serviceId,
+    deployment_id: created.deploymentId,
+    outcome: created.outcome,
     /*
-     * Both failures name the container. The service exists and is destroyable; saying only
-     * "failed" would leave the user hunting for something they were not told had been
-     * created — and on the deploy branch it is a billable orphan they would have no name
-     * to search Railway for. The two sentences differ because the remedies differ: refused
-     * variables are a preset problem, a refused deploy is Railway's.
+     * Split in two, because the two halves have different cardinality.
+     *
+     * Preset-derived names come from a closed catalog, so naming them keeps the audit
+     * trail readable and keeps the label bounded. User-supplied names are neither closed
+     * nor bounded, and are attacker-chosen in exactly the way the rejected deploymentId
+     * is — so a count carries the diagnostic content instead, the same trade `id_length`
+     * makes on the stream route. Values, of either origin, are written nowhere at any
+     * level; the logger's scalar-only field type is what makes that hard to get wrong.
+     *
+     * The consequence, stated because it is a real loss: this record no longer says what
+     * environment a service was actually created with. SECURITY.md says so too.
      */
-    if (created.outcome === "variables_failed") {
-      return { ok: false, error: t("actions.createdButNotConfigured", { name }) };
-    }
-    if (created.outcome === "deploy_failed") {
-      return { ok: false, error: t("actions.createdButNotDeployed", { name }) };
-    }
+    variable_names: presetSent.join(","),
+    user_variable_count: sentNames.length - presetSent.length,
+  });
 
+  revalidatePath("/dashboard");
+
+  /*
+   * Both failures name the container. The service exists and is destroyable; saying only
+   * "failed" would leave the user hunting for something they were not told had been
+   * created — and on the deploy branch it is a billable orphan they would have no name
+   * to search Railway for. The two sentences differ because the remedies differ: refused
+   * variables are a preset problem, a refused deploy is Railway's.
+   *
+   * Retained, both of them, and that is the point of saying so per-branch rather than
+   * once at the end: a service exists, so a repeat of this submission must be told about
+   * that one rather than make a second.
+   */
+  if (created.outcome === "variables_failed") {
     return {
+      value: { ok: false, error: t("actions.createdButNotConfigured", { name }) },
+      retain: true,
+    };
+  }
+  if (created.outcome === "deploy_failed") {
+    return {
+      value: { ok: false, error: t("actions.createdButNotDeployed", { name }) },
+      retain: true,
+    };
+  }
+
+  return {
+    value: {
       ok: true,
       /*
        * Gated on what was minted, not on whether any variable was set. A user who typed
@@ -305,11 +364,9 @@ async function create(formData: FormData): Promise<ActionResult> {
       message: generated
         ? t("actions.spinningUpWithCredentials", { name })
         : t("actions.spinningUp", { name }),
-    };
-  } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
-  }
+    },
+    retain: true,
+  };
 }
 
 export async function createProject(

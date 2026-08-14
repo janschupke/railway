@@ -209,7 +209,7 @@ export type LogEvent =
   | "auth.session.refreshed"
   | "auth.session.unreadable"
   | "container.create_failed"
-  | "container.create_rejected"
+  | "container.create_replayed"
   | "container.created"
   | "container.destroy_refused"
   | "container.destroy_skipped"

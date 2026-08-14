@@ -9,6 +9,12 @@ still nowhere: a user who wants a password they can keep now types their own int
 Generation stayed the default for the users who do not care what it is, and a default
 nobody has to read is one this app has no reason to store.
 
+T-494 tested it again from the other side. Double-submit protection wants somewhere to
+remember which submission produced which container, and the honest answer was a map with a
+five-minute TTL rather than a table — request bookkeeping, not state, and nothing in it a
+database would be asked to survive. [ADR-12](0012-idempotency-keys-replay-rather-than-reject.md)
+prices what that costs.
+
 ---
 
 [All decisions](README.md) · [Railway Freight Loader](../../README.md)

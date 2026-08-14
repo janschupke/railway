@@ -37,6 +37,13 @@ bounded.
 | Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
 | Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
 
+A sixth input crosses from the browser and reaches no mutation at all: the spin-up form's
+idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation.ts`. Both ends of
+that are deliberate. The floor is unguessability — a guessed key is answered with somebody
+else's result instead of the container they asked for — and the ceiling is memory, since
+the value becomes half of a key in a map that lives as long as the process. The charset is
+the one every Railway identifier here uses, which keeps it greppable in a log line.
+
 **Environment variables are user-supplied, and were not always.** Until T-487 the client
 sent neither a preset id nor a variable: the environment was derived server-side from the
 submitted image alone, which made "a caller cannot inject environment into a service" true
@@ -259,9 +266,18 @@ the other side instead, by a `no-restricted-imports` rule in `eslint.config.mjs`
 success yields both Railway tokens plus the ability to forge sessions. `.env.example`
 documents `openssl rand -base64 32`; that guidance is the actual control.
 
-**The stream cap is in-memory and per replica.** Honest rather than lazy: SSE pins a
-client to one replica, which is why the README already describes this as a single-replica
-app. If that changes, this moves to shared state along with everything else.
+**The stream cap and the idempotency map are in-memory and per replica.** Honest rather
+than lazy: SSE pins a client to one replica, which is why the README already describes this
+as a single-replica app. If that changes, both move to shared state along with everything
+else. The idempotency map (`src/lib/idempotency.ts`) is keyed `userId:key`, so one user can
+neither claim nor observe another's submission, and what it holds for
+`IDEMPOTENCY.RETAIN_SECONDS` is an `ActionResult` — catalog copy and Railway ids. No
+credential reaches it, because a generated password is returned to no browser on any path.
+
+**A repeat submission after that window creates a second container.** So does one that
+lands either side of a deploy. The form only re-mints its key on success, which is what
+makes a retry after a failure a retry rather than a second container, and both windows are
+far narrower than the name check they replaced — which was not a lock at all. See ADR-12.
 
 **Three dev-only advisories** under `@lhci/cli` — `tmp` (GHSA-ph9p-34f9-6g65, high),
 `uuid` (GHSA-w5hq-g745-h8pq, moderate), `tmp` (GHSA-52f5-9888-hmc6, low). None is

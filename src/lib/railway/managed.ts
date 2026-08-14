@@ -1,5 +1,5 @@
 import { env } from "@/env";
-import { LIMITS } from "@/lib/constants";
+import { managedSlug } from "./slug";
 
 /**
  * Ownership marker.
@@ -23,12 +23,7 @@ export function managedPrefix(): string {
 
 /** `My Redis!` -> `spun-my-redis` */
 export function toManagedName(input: string): string {
-  const slug = input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, LIMITS.SERVICE_SLUG_MAX);
-  return `${managedPrefix()}${slug || "container"}`;
+  return `${managedPrefix()}${managedSlug(input)}`;
 }
 
 export function isManagedName(name: string): boolean {

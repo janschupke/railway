@@ -12,10 +12,18 @@ vi.mock("@/app/dashboard/actions", () => ({
 const { SpinUpForm } = await import("./spin-up-form");
 const { ToastProvider } = await import("./ui/toast");
 
-const renderForm = (props: { disabled?: boolean } = {}) =>
+const renderForm = ({
+  names = [],
+  ...props
+}: { disabled?: boolean; names?: string[] | Promise<string[]> } = {}) =>
   render(
     <ToastProvider>
-      <SpinUpForm projectId="p1" environmentId="e1" {...props} />
+      <SpinUpForm
+        projectId="p1"
+        environmentId="e1"
+        names={Array.isArray(names) ? Promise.resolve(names) : names}
+        {...props}
+      />
     </ToastProvider>,
   );
 
@@ -215,6 +223,108 @@ describe("SpinUpForm", () => {
 
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText("Name")).toHaveValue("");
+  });
+
+  describe("the submission key", () => {
+    const keyFrom = (call: number) =>
+      spinUp.mock.calls[call]?.[1]?.get("idempotencyKey");
+
+    const submitNamed = async (user: UserEvent, name: string) => {
+      await user.type(screen.getByLabelText("Name"), name);
+      await user.click(submitButton());
+    };
+
+    it("carries one on every submission", async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await submitNamed(user, "cache");
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+      expect(keyFrom(0)).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("mints a new one after a success", async () => {
+      // The submission that key named is over. Reusing it would have the server answer
+      // the next container with the last one's result.
+      const user = userEvent.setup();
+      renderForm();
+
+      await submitNamed(user, "cache");
+      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+      await submitNamed(user, "queue");
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
+      expect(keyFrom(1)).not.toBe(keyFrom(0));
+    });
+
+    it("keeps the same one after a failure", async () => {
+      /*
+       * The property that makes retrying work. A failed submission left nothing on
+       * Railway and released its key server-side, so pressing the button again is the
+       * same submission — and a key re-minted on every render, or on every result,
+       * would silently turn each retry into a fresh container.
+       */
+      spinUp.mockResolvedValue({ ok: false, error: "Rate limited by Railway" });
+      const user = userEvent.setup();
+      renderForm();
+
+      await submitNamed(user, "cache");
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+      // React resets the uncontrolled fields once a function action returns, whatever it
+      // returned, so retrying means retyping. The key is state rather than a field, which
+      // is exactly why it survives that reset.
+      await submitNamed(user, "cache");
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
+      expect(keyFrom(1)).toBe(keyFrom(0));
+    });
+  });
+
+  describe("the local duplicate check", () => {
+    it("refuses a name already taken, without calling the action", async () => {
+      // What replaced the container-list read the action used to make before every
+      // create. Free, because the page has already fetched this list.
+      const user = userEvent.setup();
+      renderForm({ names: ["cache"] });
+
+      // Typed as the person would type it: the slug rule runs on this side too.
+      await user.type(screen.getByLabelText("Name"), "Cache");
+      await user.click(submitButton());
+
+      expect(await screen.findByText(/already exists here/)).toBeInTheDocument();
+      expect(screen.getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
+      expect(spinUp).not.toHaveBeenCalled();
+      // React resets an uncontrolled form once a function action returns, which is why
+      // this refuses in onSubmit instead: clearing the name while asking for a different
+      // one leaves nothing to change.
+      expect(screen.getByLabelText("Name")).toHaveValue("Cache");
+    });
+
+    it("submits a name that only resembles a taken one", async () => {
+      const user = userEvent.setup();
+      renderForm({ names: ["cache"] });
+
+      await user.type(screen.getByLabelText("Name"), "cache2");
+      await user.click(submitButton());
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    });
+
+    it("submits while the list it would check against is still loading", async () => {
+      /*
+       * The check is read from a promise in an effect rather than with `use`, so the form
+       * paints and works without it. Suspending here would put the container round trip
+       * back in front of the form, which is what its Suspense boundary exists to avoid.
+       */
+      const user = userEvent.setup();
+      renderForm({ names: new Promise<string[]>(() => {}) });
+
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await user.click(submitButton());
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    });
   });
 
   it("explains why it is disabled instead of silently doing nothing", async () => {

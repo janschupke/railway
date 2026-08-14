@@ -22,6 +22,21 @@ const IMAGE_PATTERN =
 export const RAILWAY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
+ * The token the spin-up form mints to name one submission of itself.
+ *
+ * Not exported: nothing outside this file decides what a key may look like, and the
+ * generator in lib/random-id.ts sits comfortably inside these bounds rather than at them.
+ *
+ * Both ends of the length matter, and for unrelated reasons. The floor is the security
+ * one — a short key is a guessable key, and guessing one replays somebody else's result
+ * instead of creating what they asked for. The ceiling is a memory one: this string
+ * becomes half of a key in a process-global map, so unbounded is a growth surface. The
+ * charset is the same one every Railway identifier uses here, which keeps it greppable
+ * in a log line.
+ */
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+
+/**
  * An environment variable name: POSIX's own definition.
  *
  * Underscore or letter, then letters, digits and underscores. Deliberately not
@@ -136,6 +151,16 @@ export const spinUpSchema = z
       .max(LIMITS.VARIABLES_MAX, "validation.variablesTooMany")
       .default([]),
     variableValue: z.array(variableValue).default([]),
+    /*
+     * Last on purpose. Zod reports shape issues in declaration order and the action reads
+     * `issues[0]`, so anything a person can actually fix — the name, the image, a variable
+     * row — outranks a form that arrived without its key. A user shown "reload the page"
+     * for a typo they could have corrected would have no way to know that.
+     */
+    idempotencyKey: z
+      .string()
+      .min(1, "validation.submissionInvalid")
+      .regex(IDEMPOTENCY_KEY_PATTERN, "validation.submissionInvalid"),
   })
   .superRefine((data, ctx) => {
     /*
@@ -251,6 +276,7 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.variablesTooMany",
   "validation.variablesTooLarge",
   "validation.variablesMalformed",
+  "validation.submissionInvalid",
   "validation.projectNameRequired",
   "validation.projectNameTooLong",
   "validation.environmentNameRequired",

@@ -1,6 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -8,6 +15,8 @@ import { spinUp } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
 import { LIMITS } from "@/lib/constants";
 import { DEFAULT_IMAGE, PRESETS, presetVariableDefaults } from "@/lib/presets";
+import { newIdempotencyKey } from "@/lib/random-id";
+import { managedSlug } from "@/lib/railway/slug";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
@@ -71,12 +80,23 @@ export function SpinUpForm({
   projectId,
   environmentId,
   disabled,
+  names,
 }: {
   projectId: string;
   environmentId: string;
   disabled?: boolean;
+  /**
+   * The managed container names already in this environment, unawaited.
+   *
+   * A promise rather than an array because the list is fetched inside a Suspense boundary
+   * below this form, and awaiting it in the page would put that round trip back in front
+   * of the form. Required rather than optional so the page cannot quietly stop passing it
+   * and lose the check with nothing to show for it.
+   */
+  names: Promise<string[]>;
 }) {
   const t = useTranslations("spinUp");
+  const tActions = useTranslations("actions");
   const tPresets = useTranslations("presets");
   const router = useRouter();
   const { toast } = useToast();
@@ -93,6 +113,23 @@ export function SpinUpForm({
   const [refreshing, startRefresh] = useTransition();
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
   const [rows, setRows] = useState<VariableRow[]>(() => seedRows(DEFAULT_IMAGE));
+  /*
+   * Names this submission, so the server can recognise a repeat of it.
+   *
+   * Minted once and re-minted only on success, which is the whole rule. A submission that
+   * failed left nothing on Railway and released its key, so pressing the button again with
+   * the same one is a retry and must be allowed to run; a submission that succeeded is
+   * finished, and the next one is a different container that must not be answered with the
+   * last one's result. `useId` would be neither — it is stable for the life of the
+   * component, so every spin-up in a session would carry the same key.
+   */
+  const [submissionKey, setSubmissionKey] = useState(newIdempotencyKey);
+  const [takenNames, setTakenNames] = useState<readonly string[]>([]);
+  /*
+   * The local half of what used to be a server-side lookup. Held separately from `result`
+   * because no submission produced it: nothing was sent.
+   */
+  const [duplicate, setDuplicate] = useState<string | null>(null);
 
   /*
    * The current image, readable from the result effect without being a dependency of it.
@@ -194,6 +231,9 @@ export function SpinUpForm({
        * spin-up's environment is still armed.
        */
       setRows(seedRows(imageRef.current));
+      // The submission this key named is over. Anything typed next is a different
+      // container, and must not be answered with this one's result.
+      setSubmissionKey(newIdempotencyKey());
       toast({ title: result.message, tone: "success" });
       startRefresh(() => router.refresh());
     } else if (!result.field || (isVariableField(result.field) && !hasIndex(result))) {
@@ -206,14 +246,59 @@ export function SpinUpForm({
     }
   }, [result, router, toast, failedTitle, startRefresh]);
 
-  const fieldError = (field: "name" | "image") =>
-    result && !result.ok && result.field === field ? result.error : undefined;
+  /*
+   * Read in an effect rather than with `use`, which is the point of taking a promise at
+   * all: `use` would suspend this form until the container list arrived, and the whole
+   * reason that list sits behind its own boundary is so the form does not wait for it.
+   *
+   * A fresh promise arrives on every render of the page, which is how the check learns
+   * about the container this form just made. The flag is for the ordering that follows
+   * from that: a slow earlier read must not land on top of a newer one.
+   */
+  useEffect(() => {
+    let live = true;
+    void names.then((resolved) => {
+      if (live) setTakenNames(resolved);
+    });
+    return () => {
+      live = false;
+    };
+  }, [names]);
+
+  /**
+   * The check that replaced the server's, at no round trip.
+   *
+   * `preventDefault` rather than wrapping `formAction` in a function of our own: React
+   * resets an uncontrolled form once a function action returns, so a wrapper that declined
+   * to submit would clear the name field while telling the user to change the name in it.
+   *
+   * Stale by construction — it knows what the last render knew — and that is the trade
+   * this is worth making. It is a typo guard, not a lock; the idempotency key on the
+   * submission is what makes a genuine double-submit harmless.
+   */
+  const guardDuplicate = (event: FormEvent<HTMLFormElement>) => {
+    const typed = nameRef.current?.value ?? "";
+    if (typed !== "" && takenNames.includes(managedSlug(typed))) {
+      event.preventDefault();
+      setDuplicate(tActions("duplicateName", { name: typed }));
+      return;
+    }
+    setDuplicate(null);
+  };
+
+  const fieldError = (field: "name" | "image") => {
+    // The local check first: it is the more recent statement about this field, and it is
+    // the only one when nothing was submitted.
+    if (field === "name" && duplicate) return duplicate;
+    return result && !result.ok && result.field === field ? result.error : undefined;
+  };
 
   return (
     <Card className="p-4">
-      <form action={formAction} className="space-y-4">
+      <form action={formAction} onSubmit={guardDuplicate} className="space-y-4">
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="environmentId" value={environmentId} />
+        <input type="hidden" name="idempotencyKey" value={submissionKey} />
 
         {/*
           One row where both fit, stacked where they do not. `flex-wrap` rather than a
@@ -318,8 +403,8 @@ export function SpinUpForm({
         <div className="flex items-center gap-3">
           {/*
             Inert during the refresh too. That is a real cost — but the list a second
-            submission would be checked against is the stale one, and spinUp rejects
-            duplicate names server-side regardless.
+            submission would be checked against is the stale one, and the idempotency key
+            on the submission is what makes a repeat harmless regardless.
           */}
           <Button
             type="submit"
