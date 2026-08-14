@@ -168,6 +168,18 @@ export const WATCH = {
 export const SESSION = {
   /** Refresh this far ahead of expiry. Railway access tokens live one hour. */
   REFRESH_SKEW_SECONDS: 300,
+  /**
+   * How long a settled refresh stays claimable by a caller still holding the token it
+   * spent.
+   *
+   * Railway invalidates a refresh token on first use, so a request that was already in
+   * flight with the old cookie when another one won the race arrives at a token that is
+   * already dead. Deleting the entry the instant the grant resolved meant only strictly
+   * overlapping callers were deduped, and a caller that lost by milliseconds was signed
+   * out of a healthy session. Sized by how far a slow request can lag the winner — a
+   * cold render plus an upstream round trip, not a minute of it — with room to spare.
+   */
+  REFRESH_GRACE_SECONDS: 60,
   MAX_AGE_SECONDS: 60 * 60 * 24 * 30,
   /**
    * PKCE verifier and state only need to survive the round-trip to Railway — but that

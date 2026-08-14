@@ -1,6 +1,6 @@
 ---
 meta:
-  updated: 2026-08-13
+  updated: 2026-08-14
 ---
 
 # Architecture
@@ -61,8 +61,29 @@ Two things in that file are load-bearing and easy to break:
   sets them on `/:path*` independently of this matcher.
 
 A failed refresh is **not** proof the session is gone. Refresh tokens rotate, so a request
-that lost a race spends a token another request already replaced. The catch block re-reads
-the jar and, if it holds a newer session, deletes nothing. Do not simplify that branch.
+that lost a race spends a token another request already replaced.
+
+`refreshSession` is what keeps that from signing anyone out. It holds one grant per token
+being spent, and **retains a fulfilled grant for `SESSION.REFRESH_GRACE_SECONDS` rather
+than deleting it on settle** — a request already in flight with the old cookie arrives
+after the winner resolved, and must be handed the live session instead of spending a dead
+token. Deleting on settle deduped only strictly overlapping callers, which is half the
+race. A _rejected_ grant is dropped immediately; caching one turns an upstream blip into a
+sign-out for the whole window.
+
+The re-read in the proxy's catch block stays, but know what it is: `request.cookies` is
+that invocation's own inbound jar, so the only thing that can put a newer session in it is
+the success branch above. It covers one request refreshing itself, not two requests
+racing. Do not relabel it as the cross-request guard, and do not delete the cookie ahead
+of it.
+
+**The proxy is the only refresh writer.** `requireSession` in `src/lib/auth/server.ts`
+reads and refuses; it does not refresh. Its callers all sit on paths the matcher covers,
+so the proxy has already refreshed and written the cookie onto the request before their
+handler runs — and a refresh from that side would use a _different copy_ of the grant map,
+because `src/proxy.ts` compiles into its own chunk graph (see the boundary note below).
+Two copies means the same token spent twice, which is the failure the map exists to
+prevent.
 
 ## The app only ever destroys services it created
 
@@ -125,6 +146,23 @@ exactly the ones the proxy does not import. That is the constraint, not an overs
 the eslint rule in `eslint.config.mjs` is the enforcement.
 
 If a component needs something from the session, **pass it as a prop**.
+
+## Module state does not cross the proxy/render boundary
+
+A module imported by both `src/proxy.ts` and the app is **two instances**, not one. Next
+compiles the proxy into `.next/server/middleware.js` with its own chunk graph and says so
+outright: the proxy is invoked separately from the render and in optimized cases deployed
+to a CDN, so do not rely on shared modules or globals across it.
+
+Everything that has to pass between the two goes through headers instead — the CSP nonce,
+and `x-request-id` in `src/lib/log/request-scope.ts`. There is nowhere else to put it:
+this app has no database, no Redis, no KV.
+
+So a module-level `Map` — `inFlight`/`grants` in `lib/auth/refresh.ts`, `derivedKeys` in
+`lib/auth/session.ts` — is per bundle. `derivedKeys` does not care; deriving the same key
+twice is a wasted HKDF and nothing more. A refresh dedupe map very much does, which is why
+only the proxy refreshes. **Before adding process-global state to a module the proxy
+imports, work out what happens when the app bundle has its own copy.**
 
 ## Every tuned number lives in `src/lib/constants.ts`
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SESSION } from "@/lib/constants";
 import type { RailwaySession } from "./session";
 
 const refreshTokenGrant = vi.fn();
@@ -8,7 +9,8 @@ vi.mock("openid-client", () => ({
 }));
 vi.mock("./oidc", () => ({ oidcConfig: () => ({}) }));
 
-const { refreshSession, SessionExpiredError } = await import("./refresh");
+const { refreshSession, SessionExpiredError, __resetRefreshCache } =
+  await import("./refresh");
 
 const base: RailwaySession = {
   user: { id: "user_1", name: "Ada" },
@@ -23,6 +25,10 @@ describe("refreshSession", () => {
   // function has that function invoked as teardown — which would call the mock again.
   beforeEach(() => {
     refreshTokenGrant.mockReset();
+    // A settled grant now outlives the call that made it, and every case here spends the
+    // same `old-refresh` token, so without this each one would be served the previous
+    // case's result.
+    __resetRefreshCache();
   });
 
   it("stores the rotated refresh token", async () => {
@@ -109,6 +115,37 @@ describe("refreshSession", () => {
       "new-refresh",
       "new-refresh",
     ]);
+  });
+
+  it("hands a caller that arrived late the session the winner already got", async () => {
+    /*
+     * The other half of the same defect, and the one that survived single-flight.
+     *
+     * Deleting the entry on settle deduped only strictly overlapping calls. A request
+     * already in flight with the old cookie reached here milliseconds after the winner's
+     * grant resolved, found nothing, spent the dead token itself and was signed out of a
+     * session that had just been refreshed successfully.
+     */
+    refreshTokenGrant.mockResolvedValue({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+    });
+
+    const winner = await refreshSession(base, () => 0);
+    const late = await refreshSession(base, () => 30_000);
+
+    expect(refreshTokenGrant).toHaveBeenCalledTimes(1);
+    expect(late).toBe(winner);
+  });
+
+  it("stops serving a retained grant once the grace window closes", async () => {
+    // Retention is a courtesy to a request in flight, not a second cache of the session.
+    refreshTokenGrant.mockResolvedValue({ access_token: "new-access" });
+
+    await refreshSession(base, () => 0);
+    await refreshSession(base, () => SESSION.REFRESH_GRACE_SECONDS * 1000 + 1);
+
+    expect(refreshTokenGrant).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache a failure, so the next attempt is a real one", async () => {

@@ -162,9 +162,15 @@ export async function proxy(request: NextRequest) {
      * Refresh tokens rotate, so a request that lost a race spends a token another
      * request has already replaced — and deleting the cookie here threw away a session
      * that had just been refreshed successfully, sending the user back to the consent
-     * screen for no reason. refreshSession now shares one grant between concurrent
-     * callers, and this re-read closes the remaining window: if the jar already holds a
-     * newer session, use it and delete nothing.
+     * screen for no reason.
+     *
+     * The cross-request half of that is closed in refreshSession, which retains a
+     * settled grant under the token it spent for SESSION.REFRESH_GRACE_SECONDS, so a
+     * late caller is handed the live session and never reaches this branch. Do not
+     * mistake the re-read below for that guard: `request.cookies` is this invocation's
+     * own inbound jar, and the only thing that can write to it is the success branch
+     * above. It covers exactly one case — this request already refreshed — and it stays
+     * because getting it wrong is what made a healthy session look revoked.
      */
     const current = await openSession(
       request.cookies.get(cookieName)?.value,

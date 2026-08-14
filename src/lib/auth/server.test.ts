@@ -17,11 +17,8 @@ const jar = {
 };
 vi.mock("next/headers", () => ({ cookies: async () => jar }));
 
-const refreshSession = vi.fn();
-vi.mock("./refresh", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./refresh")>();
-  return { ...actual, refreshSession: (s: RailwaySession) => refreshSession(s) };
-});
+// ./refresh is deliberately not mocked: nothing in server.ts calls the grant any more.
+// The proxy is the only refresh writer — see requireSession's doc comment.
 
 const {
   getSession,
@@ -47,7 +44,6 @@ beforeEach(() => {
   store.clear();
   jar.set.mockClear();
   jar.delete.mockClear();
-  refreshSession.mockReset();
 });
 
 describe("getSession", () => {
@@ -75,7 +71,6 @@ describe("getSession", () => {
 
     await getSession();
 
-    expect(refreshSession).not.toHaveBeenCalled();
     expect(jar.set).not.toHaveBeenCalled();
   });
 });
@@ -124,30 +119,31 @@ describe("requireAccessToken", () => {
     store.set(SESSION_COOKIE, await sealSession(session(), SECRET));
 
     expect(await requireAccessToken()).toBe("access");
-    expect(refreshSession).not.toHaveBeenCalled();
+    expect(jar.set).not.toHaveBeenCalled();
   });
 
-  it("refreshes and persists when the token is close to expiry", async () => {
-    // Server Actions can write cookies, so this is the safe fallback when a request
-    // slips past the proxy with a stale token.
-    const stale = session({ expiresAt: now() + SESSION.REFRESH_SKEW_SECONDS - 10 });
+  it("uses a token inside the refresh window rather than refreshing it here", async () => {
+    /*
+     * The proxy is the only refresh writer: it runs before every path that reaches this
+     * function, and its dedupe map is not the one this bundle would see. A token inside
+     * REFRESH_SKEW_SECONDS still works, so this hands it over and lets the proxy rotate
+     * it on the next request.
+     */
+    const stale = session({
+      accessToken: "nearly-stale",
+      expiresAt: now() + SESSION.REFRESH_SKEW_SECONDS - 10,
+    });
     store.set(SESSION_COOKIE, await sealSession(stale, SECRET));
-    refreshSession.mockResolvedValue(
-      session({ accessToken: "rotated", refreshToken: "rotated-refresh" }),
-    );
 
-    expect(await requireAccessToken()).toBe("rotated");
-    expect(jar.set).toHaveBeenCalledTimes(1);
+    expect(await requireAccessToken()).toBe("nearly-stale");
+    expect(jar.set).not.toHaveBeenCalled();
   });
 
-  it("propagates a failed refresh so the caller can prompt re-consent", async () => {
+  it("refuses a token that has actually expired, so the caller can prompt re-consent", async () => {
     store.set(
       SESSION_COOKIE,
       await sealSession(session({ expiresAt: now() - 1 }), SECRET),
     );
-    refreshSession.mockImplementation(async () => {
-      throw new SessionExpiredError("spent");
-    });
 
     await expect(requireAccessToken()).rejects.toBeInstanceOf(SessionExpiredError);
     expect(jar.set).not.toHaveBeenCalled();

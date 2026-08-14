@@ -1,4 +1,5 @@
 import * as client from "openid-client";
+import { SESSION } from "@/lib/constants";
 import type { RailwaySession } from "./session";
 import { oidcConfig } from "./oidc";
 
@@ -11,8 +12,14 @@ export class SessionExpiredError extends Error {
   }
 }
 
+type RetainedGrant = {
+  result: Promise<RailwaySession>;
+  /** Epoch ms after which this entry stops being served. Infinite while in flight. */
+  retainUntil: number;
+};
+
 /**
- * In-flight refreshes, keyed by the token being spent.
+ * Which session replaced which refresh token, keyed by the token that was spent.
  *
  * Railway rotates refresh tokens: the first use invalidates the token. A single
  * dashboard load issues many requests that all pass through the proxy carrying the same
@@ -21,10 +28,38 @@ export class SessionExpiredError extends Error {
  * won, and every other one got `invalid_grant` and concluded the session was dead. That
  * is the mechanism behind "it made me authorize again a million times".
  *
+ * Deduping only the *in-flight* window closed half of that. A request that was already
+ * on its way with the old cookie when the winner's grant resolved found the entry gone,
+ * spent the dead token itself, and was signed out of a session that had just been
+ * refreshed successfully. So a fulfilled entry is retained for
+ * SESSION.REFRESH_GRACE_SECONDS rather than deleted: a caller that lost the race by
+ * milliseconds is handed the live session instead of a consent screen.
+ *
+ * A rejected entry is deleted immediately — a failure must stay retryable, and caching
+ * one would turn a single upstream blip into a sign-out for the whole grace window.
+ *
  * Keyed by token rather than by user so an entry can never serve a caller holding a
- * different (older or newer) token, and deleted on settle so a failure is retryable.
+ * different (older or newer) token. Retaining the rotated tokens under the spent one
+ * widens no exposure: the spent token only ever reaches this map out of a JWE-sealed
+ * cookie, and anyone able to replay that cookie already holds the live access token
+ * inside it.
+ *
+ * Per bundle, not per process — see `requireSession` in ./server.ts for why the proxy is
+ * the only caller that refreshes.
  */
-const inFlight = new Map<string, Promise<RailwaySession>>();
+const grants = new Map<string, RetainedGrant>();
+
+/** Drop entries whose grace window has closed. Lazy: no timer runs in the proxy. */
+function sweep(nowMs: number): void {
+  for (const [token, entry] of grants) {
+    if (entry.retainUntil <= nowMs) grants.delete(token);
+  }
+}
+
+/** Test seam: the retention is process-global and would otherwise leak across cases. */
+export function __resetRefreshCache(): void {
+  grants.clear();
+}
 
 /**
  * Exchange the refresh token for a new access token.
@@ -34,7 +69,8 @@ const inFlight = new Map<string, Promise<RailwaySession>>();
  * the old token is already spent, and a user is capped at 100 live refresh tokens
  * per authorization.
  *
- * Concurrent callers holding the same refresh token share one grant — see `inFlight`.
+ * Callers holding the same refresh token share one grant, whether they arrive together
+ * or seconds apart — see `grants`.
  */
 export async function refreshSession(
   session: RailwaySession,
@@ -46,13 +82,35 @@ export async function refreshSession(
     throw new SessionExpiredError("no refresh token in session");
   }
 
-  const existing = inFlight.get(token);
-  if (existing) return existing;
+  sweep(now());
 
-  const pending = grant(session, token, now).finally(() => {
-    inFlight.delete(token);
-  });
-  inFlight.set(token, pending);
+  const existing = grants.get(token);
+  if (existing) return existing.result;
+
+  const pending = grant(session, token, now);
+  const entry: RetainedGrant = {
+    result: pending,
+    retainUntil: Number.POSITIVE_INFINITY,
+  };
+  grants.set(token, entry);
+
+  /*
+   * `.then(ok, err)` rather than `.finally`: the two branches differ, and passing a
+   * rejection handler here means this bookkeeping never registers an unhandled rejection
+   * of its own. The identity check keeps a settling promise from touching an entry that a
+   * later call has already replaced under the same key.
+   */
+  pending.then(
+    () => {
+      if (grants.get(token) === entry) {
+        entry.retainUntil = now() + SESSION.REFRESH_GRACE_SECONDS * 1000;
+      }
+    },
+    () => {
+      if (grants.get(token) === entry) grants.delete(token);
+    },
+  );
+
   return pending;
 }
 
