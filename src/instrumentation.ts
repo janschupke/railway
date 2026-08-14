@@ -29,12 +29,17 @@ import { log } from "@/lib/logger";
  * design, so the healthiest possible deployment of a misconfigured service looks identical
  * to a broken one.
  *
- * `port` is here and the bind address is not, which is the honest split. `next start`
- * reads PORT and ignores HOSTNAME — measured, by setting HOSTNAME=127.0.0.1 and watching
- * the container carry on listening on `:::3000` — so the port is a value this process
- * genuinely chose and the address is not one it can report without inventing it. It always
- * binds the IPv6 wildcard dual-stack, which needs saying once here rather than logging per
- * boot.
+ * Both the port and the bind address are here, and the address is the newer half. Under
+ * `next start` it could not be: that server read PORT and ignored HOSTNAME — measured, by
+ * setting HOSTNAME=127.0.0.1 and watching the container carry on listening on `:::3000` —
+ * so reporting an address would have meant echoing a variable nothing read. The standalone
+ * server reads both, and an address it took from the environment is worth exactly as much
+ * as a port it took from the environment.
+ *
+ * The defaults below are server.js's own, so an unset variable is reported as the value it
+ * produced rather than as a blank. `0.0.0.0` appearing in this line is itself the finding:
+ * it is the IPv4 wildcard and no IPv6 interface, the Dockerfile sets `::` instead, and a
+ * deployment that says `0.0.0.0` is one that lost that line somewhere.
  *
  * Failure is logged, not thrown. Throwing here kills the boot, which loses the log to the
  * crash and leaves the operator with a restart loop instead of a sentence; serving is also
@@ -48,8 +53,11 @@ export function register(): void {
    */
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  // Next's own fallback when PORT is unset, so the line is never blank about it.
-  const listening = { port: process.env.PORT ?? "3000" };
+  // server.js's own fallbacks, so the line is never blank about either.
+  const listening = {
+    port: process.env.PORT ?? "3000",
+    hostname: process.env.HOSTNAME ?? "0.0.0.0",
+  };
 
   try {
     env();

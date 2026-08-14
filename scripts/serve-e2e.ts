@@ -2,9 +2,14 @@
  * Starts the fake Railway and a production Next server against it, then waits until
  * both answer.
  *
- * Shared by Playwright's `webServer` config and Lighthouse's `startServerCommand` so
- * the two cannot drift into measuring different environments. Kill it with Ctrl-C or a
- * SIGTERM; both children go with it.
+ * Run by `pnpm serve:e2e`, by scripts/lighthouse.ts — which spawns this file directly,
+ * because lighthouserc.cjs reads the auth cookie as it loads and so cannot be the thing
+ * that starts the server — and by the CI job that measures Lighthouse. Kill it with
+ * Ctrl-C or a SIGTERM; both children go with it.
+ *
+ * playwright.config.ts starts the same two servers from its own `webServer` array rather
+ * than through this file, so the environment below and the one there are two copies of the
+ * same list and have to be changed together.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -62,13 +67,18 @@ start("pnpm", ["exec", "tsx", "e2e/fixtures/fake-railway/server.ts"], {
 /*
  * The standalone server, not `next start` — which refuses to serve a build made with
  * `output: "standalone"`. It is the same server.js the deployment runs, and it takes no
- * arguments, so the port arrives through the environment. `pnpm build` has to have run:
- * postbuild is what copies .next/static into the standalone directory, and without it
- * every page answers 200 with every asset 404.
+ * arguments, so the port and the bind address arrive through the environment. `pnpm build`
+ * has to have run: postbuild is what copies .next/static into the standalone directory, and
+ * without it every page answers 200 with every asset 404.
+ *
+ * HOSTNAME matches the Dockerfile rather than server.js's `0.0.0.0` default: `::` is the
+ * dual-stack wildcard, and the default takes no IPv6 connection at all — including a
+ * `localhost` probe that resolves to ::1 first.
  */
 start("node", [".next/standalone/server.js"], {
   NODE_ENV: "production",
   PORT: String(APP_PORT),
+  HOSTNAME: "::",
   APP_URL,
   RAILWAY_CLIENT_ID: "e2e-client",
   RAILWAY_CLIENT_SECRET: "e2e-secret",

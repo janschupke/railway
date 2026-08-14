@@ -137,6 +137,11 @@ A single spec is `pnpm test:e2e e2e/containers.spec.ts`; a single Vitest file is
 `pnpm test src/lib/sse.test.ts` — positional filters, no `--`, which Vitest would otherwise
 swallow and run the whole suite.
 
-`playwright.config.ts` starts `next start`, so the app must be built first. Both webservers
-reuse an existing one outside CI, so a dev server already on 3100 or a fixture on 4010 will
-be adopted rather than replaced.
+`pnpm build` is not optional in that line. `playwright.config.ts` starts
+`node .next/standalone/server.js` — a file `next build` writes and nothing else does, so
+without a build the suite either cannot start or, worse, serves the last one. Nothing warns:
+an old build passes, and the change under test is simply not in it.
+
+Both webservers reuse an existing one outside CI, so a dev server already on 3100 or a
+fixture on 4010 will be adopted rather than replaced. On 3100 that is now the same trap
+wearing a different hat — a `next dev` there is adopted, and the suite runs against dev.

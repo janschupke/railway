@@ -10,8 +10,8 @@ import type { BrowserContext, Page } from "@playwright/test";
  *
  * The allow-list is empty, and that is the finding rather than an oversight. The
  * reported "preloaded using link preload but not used" warning does not occur in a
- * production build at all: the only `<link rel=preload>` `next start` emits is Next's
- * own error-boundary chunk, at fetchPriority=low, and the browser does not complain
+ * production build at all: the only `<link rel=preload>` the production server emits is
+ * Next's own error-boundary chunk, at fetchPriority=low, and the browser does not complain
  * about it. In `next dev` there is exactly one preload and it is Turbopack's HMR client
  * — dev-only, framework-emitted, and never shipped. See "Known non-issues" in the README.
  *

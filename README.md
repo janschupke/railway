@@ -48,10 +48,11 @@ substitute your own domain.
 
 ### Deploying
 
-Connect the repo to Railway; it detects Next.js and reads `railway.json` for the start
-command and `/api/health` healthcheck. Set `RAILWAY_CLIENT_ID`, `RAILWAY_CLIENT_SECRET`
-and `SESSION_SECRET` as service variables — `APP_URL` is derived from Railway's injected
-`RAILWAY_PUBLIC_DOMAIN`.
+Connect the repo to Railway; `railway.json` points it at the `Dockerfile` and sets the
+`/api/health` healthcheck. There is no start command there — the image carries its own, and
+the runtime stage has no package manager to run one with. Set `RAILWAY_CLIENT_ID`,
+`RAILWAY_CLIENT_SECRET` and `SESSION_SECRET` as service variables — `APP_URL` is derived
+from Railway's injected `RAILWAY_PUBLIC_DOMAIN`.
 
 The `Dockerfile` pins its base image by sha256 digest as well as by tag, on both `FROM`
 lines, and the runtime stage strips npm, corepack and yarn — none of which the app calls
@@ -80,7 +81,7 @@ The app deploys itself the same way it deploys containers.
 
 ```bash
 pnpm check          # format + lint (0 warnings) + types + codegen drift + knip + coverage
-pnpm test:e2e       # Playwright against the fake Railway fixture
+pnpm build && pnpm test:e2e   # Playwright against the fake Railway fixture
 pnpm build && pnpm size   # per-route first-load JS against bundle-budgets.json
 pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 pnpm verify:schema  # pinned OIDC metadata, and every document against the committed schema

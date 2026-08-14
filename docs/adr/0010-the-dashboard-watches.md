@@ -79,8 +79,8 @@ lives in a `Record<serviceId, ContainerMetrics>` beside the container list, not 
 float in that hash would announce a change on every single tick, forever.
 
 **The connection budget, which is what forced a change elsewhere.** Browsers allow six
-connections per origin over HTTP/1.1, and `next start` speaks HTTP/1.1. One is now the
-watcher and one is reserved for RSC navigation and Server Action fetches, which share the
+connections per origin over HTTP/1.1, and the server this app ships speaks HTTP/1.1. One is
+now the watcher and one is reserved for RSC navigation and Server Action fetches, which share the
 same pool — so `STREAM.MAX_CONCURRENT_PER_USER` came down from 8 to 4. It was above the
 browser's own limit before, which meant the cap that actually applied was invisible: the
 seventh EventSource did not fail, it queued, with nothing on the wire and nothing in any

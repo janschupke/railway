@@ -92,21 +92,41 @@ describe("register", () => {
     process.env.APP_URL = "https://example.test";
   };
 
-  it("says the port it came up on, so a healthcheck aimed elsewhere is visible", () => {
+  it("says the address it came up on, so a healthcheck aimed elsewhere is visible", () => {
     /*
      * A healthcheck failure cannot tell an app that never started from one that came up
-     * on a port nothing is asking about. The bind ADDRESS is deliberately not reported:
-     * `next start` ignores HOSTNAME and always takes the dual-stack IPv6 wildcard, so a
-     * field for it would be echoing an environment variable nothing read.
+     * where nothing is asking. Both halves of "where" are reported because the standalone
+     * server reads both — under `next start` the address was an environment variable
+     * nothing consulted, and a field for it would have been an invention.
      */
     validEnv();
     process.env.PORT = "8080";
+    process.env.HOSTNAME = "::";
 
     register();
 
-    const record = logRecords().find((r) => r.msg === "boot");
-    expect(record).toMatchObject({ port: "8080" });
-    expect(record).not.toHaveProperty("hostname");
+    expect(logRecords().find((r) => r.msg === "boot")).toMatchObject({
+      port: "8080",
+      hostname: "::",
+    });
+  });
+
+  it("reports the address it fell back to, which is the one that cannot route", () => {
+    /*
+     * server.js defaults HOSTNAME to `0.0.0.0` — the IPv4 wildcard and no IPv6 interface,
+     * which Railway's internal network needs. The Dockerfile sets `::`, so this value in a
+     * deployed log means that line was lost rather than that nothing was configured.
+     */
+    validEnv();
+    delete process.env.PORT;
+    delete process.env.HOSTNAME;
+
+    register();
+
+    expect(logRecords().find((r) => r.msg === "boot")).toMatchObject({
+      port: "3000",
+      hostname: "0.0.0.0",
+    });
   });
 
   it("names the variables a misconfigured deployment is missing", () => {

@@ -175,7 +175,8 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      # playwright.config.ts starts `next start`, so the app must be built first.
+      # playwright.config.ts starts `node .next/standalone/server.js`, which builds nothing
+      # and does not exist until this step has run. A stale one would be served silently.
       - run: pnpm build
 
       # Runs against e2e/fixtures/fake-railway; no Railway credentials involved.
@@ -244,9 +245,10 @@ jobs:
       # pinned here does not.
       #
       # DL3059 (consecutive `RUN`s) is deliberate in that file: `pnpm size` reads
-      # .next/diagnostics and must run before `rm -rf .next/cache`, so the three cannot be
-      # one instruction. DL3066 wants a numeric UID, and `node` is the name Alpine's image
-      # ships — a number would be a guess at what that name resolves to.
+      # .next/diagnostics, which `pnpm build` writes, so the two cannot be one instruction
+      # without losing the budget failure's own exit code. DL3066 wants a numeric UID, and
+      # `node` is the name Alpine's image ships — a number would be a guess at what that
+      # name resolves to.
       - name: hadolint
         run: |
           # ghcr.io/hadolint/hadolint:v2.15.1-alpine

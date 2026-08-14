@@ -71,7 +71,11 @@ export default defineConfig({
        * the suite exercises the artefact rather than a second way of starting it, and
        * `pnpm build` has to have run: postbuild copies .next/static into place.
        *
-       * Port comes from the environment because server.js takes no arguments.
+       * Port and address come from the environment because server.js takes no arguments.
+       * HOSTNAME is the Dockerfile's value rather than server.js's `0.0.0.0` default, for
+       * the same reason it is set there: `::` is the dual-stack wildcard and the default
+       * is IPv4 only. Without it a `localhost` probe that resolves to ::1 first finds
+       * nothing listening, which is a failure of the harness and reads as one of the app.
        */
       command: "node .next/standalone/server.js",
       url: `${APP_URL}/api/health`,
@@ -82,6 +86,7 @@ export default defineConfig({
       env: {
         NODE_ENV: "production",
         PORT: String(APP_PORT),
+        HOSTNAME: "::",
         APP_URL,
         RAILWAY_CLIENT_ID: "e2e-client",
         RAILWAY_CLIENT_SECRET: "e2e-secret",

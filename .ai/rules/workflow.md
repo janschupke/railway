@@ -146,12 +146,19 @@ part of the name of a production one. Playwright, TypeScript, `@types/node` and 
 closure shipped to production because they are devDependencies of the same package.json.
 Tracing asks what the code imports, and none of them answer.
 
-Three consequences to work with rather than around:
+Four consequences to work with rather than around:
 
 - **`next start` does not serve a standalone build.** `pnpm start`, `playwright.config.ts`
   and `scripts/serve-e2e.ts` all run `node .next/standalone/server.js`, which takes no
   arguments — the port comes from `PORT`. A new consumer of a production build does the
   same.
+- **`HOSTNAME` is now read, and its default is wrong for Railway.** `server.js` binds
+  `process.env.HOSTNAME || '0.0.0.0'`, and `0.0.0.0` is the IPv4 wildcard and no IPv6
+  interface at all; `next start` bound `::`, which is dual-stack and takes both. Railway
+  routes internally over IPv6. The `Dockerfile` sets `HOSTNAME="::"` for that reason and
+  `playwright.config.ts` and `scripts/serve-e2e.ts` repeat it, so what the suite exercises
+  listens where the deployment does. The boot log names the address it took, so a
+  deployment that lost that line says so instead of failing a healthcheck anonymously.
 - **`pnpm build` is not finished without `postbuild`.** `scripts/pack-standalone.ts` copies
   `.next/static` in, which `next build` deliberately omits, and without it every page
   answers 200 while every chunk, stylesheet and font 404s. It also asserts the message

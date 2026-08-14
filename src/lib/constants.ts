@@ -97,10 +97,10 @@ export const STREAM = {
    * Concurrent log streams one user may hold.
    *
    * Bounded by the BROWSER, not by this server. Chrome and Firefox allow six connections
-   * per origin over HTTP/1.1, and `next start` speaks HTTP/1.1 — so a seventh EventSource
-   * does not fail, it queues, with nothing on the wire, nothing in any log, and a pane
-   * that sits on "Connecting…". This was 8, which meant the cap that actually applied was
-   * the invisible one.
+   * per origin over HTTP/1.1, and the server this app ships speaks HTTP/1.1 — so a
+   * seventh EventSource does not fail, it queues, with nothing on the wire, nothing in any
+   * log, and a pane that sits on "Connecting…". This was 8, which meant the cap that
+   * actually applied was the invisible one.
    *
    *   6 − 1 (the project watcher, api/watch) − 1 (reserved for RSC navigation and Server
    *   Action fetches, which share the same pool) = 4.

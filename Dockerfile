@@ -175,13 +175,21 @@ EXPOSE 3000
 # Railway sets PORT and the standalone server reads it — `parseInt(process.env.PORT, 10) ||
 # 3000`. 3000 is the fallback for a plain `docker run`.
 #
-# Still deliberately no HOSTNAME, but for the opposite reason to the one that used to be
-# written here. This image now does use standalone output, and server.js does consult
-# HOSTNAME — with a default of `0.0.0.0`, so it already binds every interface. Setting it
-# could only narrow that. The usual Next Docker recipe sets `HOSTNAME=0.0.0.0` to restate
-# the default; earlier Next versions defaulted to localhost, which is where that line comes
-# from and why it is not needed here.
+# HOSTNAME is now set, and the note that used to stand here said the opposite. It said this
+# image did not use standalone output and `next start` ignored the variable — both true then
+# and neither true now. server.js reads it: `process.env.HOSTNAME || '0.0.0.0'`.
+#
+# That default is the trap. `0.0.0.0` is the IPv4 wildcard and no IPv6 interface at all,
+# while `next start` bound `::` — the IPv6 wildcard, dual-stack because `ipv6Only` is false
+# by default, so it takes IPv4 connections through the same socket. Railway's internal
+# network is IPv6, so taking the standalone default would have narrowed the address the
+# deployed container listens on and surfaced as "Healthcheck failure", which names nothing
+# and points at nothing. `::` is a superset of the default rather than an alternative to it.
+#
+# The usual Next Docker recipe writes `HOSTNAME=0.0.0.0`, restating a default that only
+# matters on Next versions old enough to have bound localhost. That is not this line.
 ENV PORT=3000
+ENV HOSTNAME="::"
 
 # server.js, which the build traced and wrote. `pnpm start` would mean installing a package
 # manager into the runtime image to read one line of package.json, and it would put a

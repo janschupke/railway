@@ -77,7 +77,7 @@ try {
    * Node directly rather than `pnpm serve:e2e`, with the same flags the script uses. Not a
    * style choice: serve-e2e.ts kills its own children on SIGTERM, and a package-manager
    * wrapper in between is one more process for that signal to be swallowed by — the fake
-   * Railway and `next start` would outlive this run and hold their ports. The flags are
+   * Railway and the app server would outlive this run and hold their ports. The flags are
    * `--experimental-strip-types` because the file is TypeScript and has top-level await,
    * which is exactly what tsx's CJS transform refuses.
    */
