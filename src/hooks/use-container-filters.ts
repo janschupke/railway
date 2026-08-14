@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  NO_FILTERS,
   filterQueryString,
   parseFilters,
   type ContainerFilters,
@@ -130,9 +131,21 @@ export function useContainerFilters() {
       (owners: ContainerFilters["owners"]) => commit({ ...filters, owners }),
       [commit, filters],
     ),
+    setSort: useCallback(
+      (sort: ContainerFilters["sort"]) => commit({ ...filters, sort }),
+      [commit, filters],
+    ),
+    /**
+     * Clears what is hidden, and leaves the reading order alone.
+     *
+     * The sort is carried across rather than reset with everything else: it is not a filter,
+     * it has its own way back, and a control that says "Clear filters" reordering the list
+     * would be the button doing something its label does not mention. `hasActiveFilters`
+     * draws the same line, and this is the write side of it.
+     */
     clear: useCallback(() => {
       setDraft("");
-      commit({ query: "", statuses: [], owners: [] });
-    }, [commit]),
+      commit({ ...NO_FILTERS, sort: filters.sort });
+    }, [commit, filters.sort]),
   };
 }

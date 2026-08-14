@@ -41,6 +41,10 @@
     "loading": "Loading dashboard",
     "containersHeading": "Containers",
     "containersListLabel": "Containers",
+    "selectAll": "Select every container created here",
+    "selectionNone": "Select containers to destroy several at once.",
+    "selectionCount": "{count, plural, one {# container selected} other {# containers selected}}",
+    "selectionCapped": "{count, number} containers selected, the most that can be destroyed at once.",
     "createdHere": "{managed, number} of {total, plural, one {# container} other {# containers}} created here",
     "listSummary": "Showing {shown, number} of {matched, plural, one {# container} other {# containers}}, {managed, number} created here",
     "loadMore": "Load more",
@@ -111,6 +115,13 @@
     "ownerLabel": "Origin",
     "ownerCreated": "Created here",
     "ownerExternal": "Not managed here",
+    "sortLabel": "Sort",
+    "sortDefault": "Default order",
+    "sortNameAsc": "Name A–Z",
+    "sortNameDesc": "Name Z–A",
+    "sortState": "State",
+    "sortNewest": "Newest first",
+    "sortOldest": "Oldest first",
     "clear": "Clear filters",
     "noMatchesTitle": "No containers match these filters",
     "noMatchesDescription": "Widen the search or clear the filters to see the rest of this environment."
@@ -118,6 +129,7 @@
   "containers": {
     "noSource": "no source",
     "toggleLogs": "Logs for {name}",
+    "selectRow": "Select {name}",
     "notManagedTooltip": "Only services created in this app can be destroyed here. Manage this one on Railway.",
     "noDeployment": "This service has no deployment yet, so there is nothing to stream.",
     "failedExplanation": "Railway reported this deployment as failed. Its API returns the status and nothing else, so the reason — a missing image, a refused pull, a crash on the first tick — is on Railway's own page for this service.",
@@ -263,7 +275,18 @@
     "submitPending": "Destroying…",
     "announce": "Destroying {name}…",
     "refreshPending": "Removing…",
-    "failedTitle": "Could not destroy container"
+    "failedTitle": "Could not destroy container",
+    "bulkTrigger": "Destroy selected",
+    "bulkTitle": "Destroy {count, plural, one {# container} other {# containers}}?",
+    "bulkDescription": "This permanently deletes these services and their deployment history from Railway. It cannot be undone.",
+    "bulkListLabel": "Containers about to be destroyed",
+    "bulkConfirmLabel": "Type {count, number} to confirm",
+    "bulkSubmit": "Destroy {count, plural, one {# container} other {# containers}} permanently",
+    "bulkSubmitPending": "Destroying…",
+    "bulkAnnounce": "Destroying {count, plural, one {# container} other {# containers}}…",
+    "bulkFailedTitle": "Could not destroy the selected containers",
+    "bulkDeleteDataLabel": "Also delete {count, plural, one {the volume} other {the # volumes}} attached to these containers",
+    "bulkDeleteDataHint": "A container without a volume is unaffected. Data on a deleted volume cannot be recovered."
   },
   "editContainer": {
     "trigger": "Edit",
@@ -328,7 +351,10 @@
     "restarted": "Restarting {name}",
     "redeployed": "Redeploying {name}",
     "projectCreated": "Created {name}",
-    "environmentCreated": "Created {name}"
+    "environmentCreated": "Created {name}",
+    "destroyedMany": "Destroyed {count, plural, one {# container} other {# containers}}",
+    "destroyedSome": "Destroyed {count, number} of {total, number}. The rest are still listed — they were already gone, were not created here, or Railway refused.",
+    "destroyedNone": "None of the {count, plural, one {# container} other {# containers}} could be destroyed. They were already gone, were not created here, or Railway refused."
   },
   "validation": {
     "nameRequired": "Give the container a name",
@@ -355,7 +381,8 @@
     "projectNameRequired": "Give the project a name",
     "projectNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
     "environmentNameRequired": "Give the environment a name",
-    "environmentNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}"
+    "environmentNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
+    "tooManyContainers": "Select at most {max, number} containers to destroy at once."
   },
   "errors": {
     "generic": "Something went wrong. Please try again. Reference {incident}.",

@@ -456,26 +456,36 @@ billingPeriod { start end } }` as part of the document. All three render a link 
    keeps the same deployment rather than starting a new one.
 4. Destroy it (type the container name to confirm) and check it disappears from the
    Railway dashboard too.
-5. **Token expiry:** leave the tab open past the hour, or rewind `expiresAt` in the
+5. **Several at once.** Spin up three, tick their checkboxes and press **Destroy
+   selected**. The confirmation names the count and lists the names, and asks for the
+   count rather than three names — friction proportionate to the batch instead of
+   multiplied by it. Ownership is still re-derived per service on the server: the
+   unmanaged row has no checkbox, and `actions.integration.test.ts` proves a forged
+   service id in a batch is refused on its own while the rest go through.
+6. **Sorting.** Change **Sort** and confirm the URL gains `?sort=`, the order changes with
+   no request to Railway, and reloading the page keeps it. Then press **Clear filters**:
+   the search and status params go and the sort stays, because it hides nothing and has
+   its own default.
+7. **Token expiry:** leave the tab open past the hour, or rewind `expiresAt` in the
    session cookie, then perform an action. It should succeed — the proxy refreshes and
    rotates transparently.
-6. **Ownership:** create a service in the Railway dashboard directly. It appears here as
+8. **Ownership:** create a service in the Railway dashboard directly. It appears here as
    _Not managed here_, with no lifecycle controls at all — no stop, restart, redeploy or
-   destroy.
-7. **The way out:** click any container's name — every row, not only the broken ones —
+   destroy, and no selection checkbox either.
+9. **The way out:** click any container's name — every row, not only the broken ones —
    and confirm it opens that service on Railway in a new tab. The chevron beside it is
    the log panel's disclosure; check it still expands from the keyboard.
-8. **Failure paths:** type `nonexistent/image:tag` and confirm the field warns beside it
-   after a beat — then confirm the warning changes nothing else: the field is not marked
-   invalid, the submit button is live, and submitting still creates the container. That is
-   the whole point of the check being advisory. It settles into **Failed** rather than
-   spinning forever, and expanding the row explains the failure and repeats **Open in
-   Railway**. Do not expect build logs here: an image source
-   performs no build, and a pull that never resolves may write nothing to either log
-   phase — which is exactly why the row carries an explanation and a deep link. Reload the
-   page and expand the row again; if Railway did write output to the other phase, the
-   monitor's fallback fetches it. Then revoke the app's authorization mid-session and
-   confirm you are sent back to sign in with an explanation, not a stack trace.
+10. **Failure paths:** type `nonexistent/image:tag` and confirm the field warns beside it
+    after a beat — then confirm the warning changes nothing else: the field is not marked
+    invalid, the submit button is live, and submitting still creates the container. That is
+    the whole point of the check being advisory. It settles into **Failed** rather than
+    spinning forever, and expanding the row explains the failure and repeats **Open in
+    Railway**. Do not expect build logs here: an image source
+    performs no build, and a pull that never resolves may write nothing to either log
+    phase — which is exactly why the row carries an explanation and a deep link. Reload the
+    page and expand the row again; if Railway did write output to the other phase, the
+    monitor's fallback fetches it. Then revoke the app's authorization mid-session and
+    confirm you are sent back to sign in with an explanation, not a stack trace.
 
 ---
 

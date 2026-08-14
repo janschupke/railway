@@ -31,17 +31,19 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import { stripPrefix, toManagedName } from "@/lib/railway/managed";
 import { httpPortFor, presetFor } from "@/lib/presets";
 import { resolveVariables } from "@/lib/railway/secrets";
+import { SessionExpiredError } from "@/lib/auth/refresh";
 import {
   VALIDATION_KEYS,
   VALIDATION_VALUES,
   containerActionSchema,
+  containerBulkActionSchema,
   containerEditSchema,
   environmentCreateSchema,
   projectCreateSchema,
   spinUpSchema,
 } from "@/lib/validation";
 import type { MessageKey, Translate } from "@/lib/messages";
-import type { Container } from "@/lib/railway/types";
+import type { Container, ContainerVolume } from "@/lib/railway/types";
 
 /**
  * Server Actions resolve copy themselves.
@@ -575,6 +577,13 @@ const LIFECYCLE_EVENTS = {
     skipped: "container.destroy_skipped",
     refused: "container.destroy_refused",
     done: "container.destroyed",
+    /*
+     * Destroy alone carries a fourth outcome, because destroy alone is asked about several
+     * containers at once. Everywhere else a refused mutation ends the request and reaches
+     * the log through `reportError` under an `action` line; inside a batch it ends one
+     * entry, the request goes on, and this is the only record that names which entry.
+     */
+    failed: "container.destroy_failed",
   },
   stop: {
     skipped: "container.stop_skipped",
@@ -604,6 +613,37 @@ const LIFECYCLE_EVENTS = {
 } as const;
 
 type LifecycleVerb = keyof typeof LIFECYCLE_EVENTS;
+
+/** What the ownership boundary decided about one service id the browser posted. */
+type ManagedResolution =
+  | { managed: true; target: Container }
+  | { managed: false; reason: "gone" | "unmanaged" };
+
+/**
+ * The ownership boundary itself, for exactly one service.
+ *
+ * The only `!target.managed` in this file, which `mutation-callsites.test.ts` asserts by
+ * counting. It is a function rather than two lines inside `withManagedContainer` because
+ * destroy can now be asked about several services at once, and the alternative was a second
+ * copy of "find the service, refuse an unmanaged one" written for the batch — the second
+ * implementation that rule exists to prevent, and the one that would have been subtly weaker
+ * because it was written under a loop.
+ *
+ * Per service, and that is the property the bulk path depends on: a batch is a list of
+ * individual decisions taken against one read, never one decision taken about a list.
+ *
+ * It logs nothing and reads nothing. The caller owns the log line, because the event name is
+ * the verb's, and the caller owns the read, because a batch must not make one per service.
+ */
+function resolveManagedTarget(
+  containers: Container[],
+  serviceId: string,
+): ManagedResolution {
+  const target = containers.find((c) => c.serviceId === serviceId);
+  if (!target) return { managed: false, reason: "gone" };
+  if (!target.managed) return { managed: false, reason: "unmanaged" };
+  return { managed: true, target };
+}
 
 /**
  * The ownership boundary, for every action that changes a container that already exists.
@@ -671,18 +711,18 @@ async function withManagedContainer(
       projectId,
       environmentId,
     );
-    const target = containers.find((c) => c.serviceId === serviceId);
+    const resolution = resolveManagedTarget(containers, serviceId);
 
-    if (!target) {
-      log.info(events.skipped, {
-        reason: "gone",
-        project_id: projectId,
-        service_id: serviceId,
-      });
-      revalidatePath("/dashboard");
-      return { ok: false, error: t("actions.gone") };
-    }
-    if (!target.managed) {
+    if (!resolution.managed) {
+      if (resolution.reason === "gone") {
+        log.info(events.skipped, {
+          reason: "gone",
+          project_id: projectId,
+          service_id: serviceId,
+        });
+        revalidatePath("/dashboard");
+        return { ok: false, error: t("actions.gone") };
+      }
       /*
        * The ownership boundary refusing a request, at warn because it should never
        * happen through the UI — these controls are only rendered for managed services.
@@ -697,7 +737,13 @@ async function withManagedContainer(
       return { ok: false, error: t("actions.notManaged") };
     }
 
-    return await run({ accessToken, projectId, environmentId, target, containers });
+    return await run({
+      accessToken,
+      projectId,
+      environmentId,
+      target: resolution.target,
+      containers,
+    });
   } catch (error) {
     const { key, values } = describeActionError(error);
     return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
@@ -731,6 +777,56 @@ function logLifecycle(
     service_name: context.target.rawName,
     ...extra,
   });
+}
+
+/**
+ * Destroying one container that ownership has already cleared, and its volume with it.
+ *
+ * The mechanism only. Which containers, whether the box was ticked and what the user is told
+ * afterwards all belong to the two actions below — this is the part that must not differ
+ * between destroying one and destroying six, and the only place in the app that sends either
+ * of these two mutations.
+ *
+ * `volume` is passed in rather than looked up, because a batch reads the environment's
+ * volumes once for all of its services and a single destroy reads them for its one.
+ */
+async function destroyManagedContainer(
+  accessToken: string,
+  context: { projectId: string; environmentId: string; target: Container },
+  volume: ContainerVolume | undefined,
+  deleteData: boolean,
+): Promise<{ volumeDeleted: boolean }> {
+  await destroyContainer(accessToken, context.target.serviceId);
+
+  /*
+   * After the service, never before.
+   *
+   * Railway refuses to delete a volume that is still mounted on a live service, so the
+   * order is forced — and it is also the order that fails safe. Service first leaves,
+   * at worst, an orphan volume the user can see and delete in Railway's own dashboard;
+   * volume first would, at worst, wipe the data under a container that is still running.
+   */
+  let volumeDeleted = false;
+  if (volume && deleteData) {
+    await deleteVolume(accessToken, volume.volumeId);
+    volumeDeleted = true;
+  }
+
+  /*
+   * The other half of the audit trail. After this, Railway has no record the container
+   * existed — and `volume_deleted` is the only place any record of the data's fate
+   * survives, which is why it is written on both branches rather than only when true.
+   *
+   * One line per service, in the batch case as much as the single one. A bulk destroy that
+   * wrote one record naming six services would be the moment this stopped being an audit
+   * trail and started being a counter.
+   */
+  logLifecycle("destroy", context, {
+    volume_deleted: volumeDeleted,
+    volume_id: volume?.volumeId ?? null,
+  });
+
+  return { volumeDeleted };
 }
 
 export async function spinDown(
@@ -787,31 +883,12 @@ export async function spinDown(
       );
       const volume = volumes[context.target.serviceId];
 
-      await destroyContainer(context.accessToken, context.target.serviceId);
-
-      /*
-       * After the service, never before.
-       *
-       * Railway refuses to delete a volume that is still mounted on a live service, so the
-       * order is forced — and it is also the order that fails safe. Service first leaves,
-       * at worst, an orphan volume the user can see and delete in Railway's own dashboard;
-       * volume first would, at worst, wipe the data under a container that is still running.
-       */
-      let volumeDeleted = false;
-      if (volume && deleteData) {
-        await deleteVolume(context.accessToken, volume.volumeId);
-        volumeDeleted = true;
-      }
-
-      /*
-       * The other half of the audit trail. After this, Railway has no record the container
-       * existed — and `volume_deleted` is the only place any record of the data's fate
-       * survives, which is why it is written on both branches rather than only when true.
-       */
-      logLifecycle("destroy", context, {
-        volume_deleted: volumeDeleted,
-        volume_id: volume?.volumeId ?? null,
-      });
+      const { volumeDeleted } = await destroyManagedContainer(
+        context.accessToken,
+        context,
+        volume,
+        deleteData,
+      );
 
       revalidatePath("/dashboard");
       return {
@@ -834,6 +911,143 @@ export async function spinDown(
       };
     }),
   );
+}
+
+/**
+ * Destroying several containers on one confirmation.
+ *
+ * Deliberately not `withManagedContainer` in a loop, and the difference is one Railway read
+ * against N of them: the helper fetches the container list to resolve its single service, so
+ * six of them would be six full project queries plus six volume reads to answer a question
+ * one read already answers. This reads once and resolves each id against that answer.
+ *
+ * What does NOT change with the batch is the guard. `resolveManagedTarget` runs per service,
+ * on Railway's own response, exactly as it does for one — a batch is a list of individual
+ * decisions, never one decision about a list — and every refusal is logged under its own
+ * service id rather than summarised.
+ *
+ * The mutations are sequential and a failure does not stop the rest. Sequential because each
+ * entry is up to two mutations against a quota Railway documents at 1,000 an hour, and fifty
+ * of them at once is the shape that gets rate-limited; continuing because a batch that
+ * stopped halfway would leave the user with a partially destroyed environment and a sentence
+ * about the one that failed.
+ */
+export async function spinDownMany(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("spinDownMany", { trustInboundId: true }, () =>
+    destroyMany(formData),
+  );
+}
+
+async function destroyMany(formData: FormData): Promise<ActionResult> {
+  const t = await getTranslations();
+  const events = LIFECYCLE_EVENTS.destroy;
+
+  const parsed = containerBulkActionSchema.safeParse({
+    projectId: formField(formData, "projectId"),
+    environmentId: formField(formData, "environmentId"),
+    serviceId: formList(formData, "serviceId"),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    // The count ceiling is the one rule here a person can be told something useful about;
+    // everything else this schema refuses is a request no browser produces.
+    return {
+      ok: false,
+      error: issue ? messageForIssue(t, issue.message) : t("actions.missingReference"),
+    };
+  }
+
+  const { projectId, environmentId, serviceId: serviceIds } = parsed.data;
+  const deleteData = formField(formData, "deleteData") === "on";
+
+  try {
+    const accessToken = await requireAccessToken();
+
+    // One read for the batch, uncancellable, for the reasons `withManagedContainer` states.
+    const { containers } = await getProjectContainers(
+      accessToken,
+      projectId,
+      environmentId,
+    );
+    const volumes = await getEnvironmentVolumes(accessToken, environmentId);
+
+    /*
+     * Deduplicated, because two entries naming the same service would destroy it once and
+     * then report a failure destroying it again — a batch that lies about its own outcome
+     * on a request the browser cannot send but a hand-written form can.
+     */
+    let destroyed = 0;
+    let failed = 0;
+    for (const id of new Set(serviceIds)) {
+      const resolution = resolveManagedTarget(containers, id);
+
+      if (!resolution.managed) {
+        failed += 1;
+        const record = { project_id: projectId, service_id: id };
+        if (resolution.reason === "gone") {
+          log.info(events.skipped, { reason: "gone", ...record });
+        } else {
+          log.warn(events.refused, { reason: "unmanaged", ...record });
+        }
+        continue;
+      }
+
+      const context = { projectId, environmentId, target: resolution.target };
+      try {
+        await destroyManagedContainer(
+          accessToken,
+          context,
+          volumes[resolution.target.serviceId],
+          deleteData,
+        );
+        destroyed += 1;
+      } catch (error) {
+        /*
+         * Recorded and counted rather than rethrown. The services already destroyed are
+         * gone whatever happens next, so abandoning the batch here would end the request
+         * with an error message and no account of them at all.
+         *
+         * A session that expired mid-batch is the one exception: every remaining call would
+         * fail the same way, and the user needs the sentence that says why rather than
+         * "6 of 6 could not be destroyed".
+         */
+        if (error instanceof SessionExpiredError) throw error;
+        failed += 1;
+        log.warn(events.failed, {
+          project_id: projectId,
+          service_id: resolution.target.serviceId,
+          service_name: resolution.target.rawName,
+          error,
+        });
+      }
+    }
+
+    revalidatePath("/dashboard");
+
+    const total = destroyed + failed;
+    if (destroyed === 0) {
+      return { ok: false, error: t("actions.destroyedNone", { count: total }) };
+    }
+    return {
+      ok: true,
+      /*
+       * The shortfall is named rather than rounded away. Every reason a service was left
+       * behind — gone, not ours, refused by Railway — leaves the row on the page after the
+       * refresh, so a sentence claiming all six went would be contradicted by the list
+       * underneath it within the second.
+       */
+      message:
+        failed === 0
+          ? t("actions.destroyedMany", { count: destroyed })
+          : t("actions.destroyedSome", { count: destroyed, total }),
+    };
+  } catch (error) {
+    const { key, values } = describeActionError(error);
+    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+  }
 }
 
 export async function stopContainer(

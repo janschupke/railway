@@ -153,6 +153,57 @@ test.describe("filtering and paging the container list", () => {
     await expect(search(page)).toHaveValue("");
   });
 
+  test("sorts the list from the URL, without going back to Railway", async ({
+    page,
+  }) => {
+    /*
+     * The same property the search assertion above rests on, for the other half of the
+     * ticket: PROJECT_QUERY takes a project id and nothing else, so there is no sort
+     * argument to send and re-ordering must cost no round trip at all.
+     */
+    let navigations = 0;
+    page.on("request", (request) => {
+      if (request.headers()["next-router-state-tree"]) navigations += 1;
+    });
+
+    const sort = page.getByRole("combobox", { name: /^Sort/ });
+    // The default is the server's own order — managed first, then newest — so it writes no
+    // param and the plain list keeps a bare URL.
+    await expect(sort).toHaveAccessibleName("Sort Default order");
+    await expect(page).not.toHaveURL(/[?&]sort=/);
+
+    await sort.click();
+    await page.getByRole("option", { name: "Name A–Z" }).click();
+
+    await expect(page).toHaveURL(/[?&]sort=name-asc/);
+    // postgres is the only name in the fixture that does not start "spun-web", and
+    // ascending it sorts ahead of every one of them.
+    await expect(rows(page).first()).toContainText("postgres");
+    expect(navigations).toBe(0);
+  });
+
+  test("applies a sorted link on the first paint, and keeps it through a filter clear", async ({
+    page,
+  }) => {
+    await page.goto("/dashboard?sort=name-desc&q=web-0");
+    await settled(page);
+
+    await expect(rows(page).first()).toContainText("web-09");
+
+    await button(page, /clear filters/i)
+      .first()
+      .click();
+
+    /*
+     * "Clear filters" clears filters. The sort hides nothing and has its own way back
+     * through the control's own default, so a button whose label says one thing and also
+     * reset the reading order would be copy that lies.
+     */
+    await expect(page).not.toHaveURL(/[?&]q=/);
+    await expect(page).toHaveURL(/[?&]sort=name-desc/);
+    await expect(rows(page).first()).toContainText("web-44");
+  });
+
   test("returns to the top of a list it had to scroll", async ({ page }) => {
     const backToTop = button(page, /back to top/i);
     await expect(backToTop).toHaveCount(0);

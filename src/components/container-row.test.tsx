@@ -80,6 +80,7 @@ const renderRow = (
   over: Partial<Container> = {},
   metrics?: ContainerMetrics,
   volume?: ContainerVolume,
+  selection?: { selected?: boolean; onSelectedChange?: (checked: boolean) => void },
 ) =>
   render(
     <ToastProvider>
@@ -91,6 +92,7 @@ const renderRow = (
             environmentId="e1"
             metrics={metrics}
             volume={volume}
+            {...selection}
           />
         </ul>
       </TooltipProvider>
@@ -111,6 +113,47 @@ describe("ContainerRow", () => {
 
     renderRow({ image: null, repo: null });
     expect(screen.getByText("no source")).toBeInTheDocument();
+  });
+
+  describe("selection", () => {
+    it("has no checkbox at all unless the list offered it one", () => {
+      /*
+       * The handler is the whole condition, deliberately: the list decides which rows it
+       * may act on and hands a handler only to those, so a row never re-derives that from
+       * `container.managed` and can never tick itself into a selection the list would then
+       * have to filter back out.
+       */
+      renderRow({ managed: true });
+      expect(screen.queryByRole("checkbox")).toBeNull();
+    });
+
+    it("names the container it selects, since the box carries no visible text", () => {
+      renderRow({ displayName: "cache" }, undefined, undefined, {
+        onSelectedChange: vi.fn(),
+      });
+      expect(
+        screen.getByRole("checkbox", { name: "Select cache" }),
+      ).toBeInTheDocument();
+    });
+
+    it("reports a tick rather than holding the state itself", async () => {
+      const user = userEvent.setup();
+      const onSelectedChange = vi.fn();
+      renderRow({}, undefined, undefined, { onSelectedChange });
+
+      await user.click(screen.getByRole("checkbox"));
+      expect(onSelectedChange).toHaveBeenCalledWith(true);
+      // Still unticked: the selection lives in the list, and this row renders what it is told.
+      expect(screen.getByRole("checkbox")).not.toBeChecked();
+    });
+
+    it("shows the list's answer, not its own", () => {
+      renderRow({}, undefined, undefined, {
+        selected: true,
+        onSelectedChange: vi.fn(),
+      });
+      expect(screen.getByRole("checkbox")).toBeChecked();
+    });
   });
 
   it("offers destroy only for containers this app created", () => {

@@ -329,6 +329,31 @@ export const containerActionSchema = z.object({
   serviceId: railwayId("validation.serviceRequired"),
 });
 
+/**
+ * Several containers, named by one repeated field.
+ *
+ * The same three names the singular schema uses, with `serviceId` arriving as a list — the
+ * repeated-native-field shape the variables editor already established, which is why the
+ * action reads it with `formList` and no index is ever written into a field name.
+ *
+ * The ceiling is the rule worth stating. Every other bound in this file protects a value;
+ * this one protects the *quota*, because one submission becomes one `serviceDelete` per
+ * entry and the browser decides how many entries there are. It is checked before anything is
+ * read from Railway and long before anything is deleted, so an oversized batch costs a form
+ * error rather than a partial teardown.
+ *
+ * Ownership is not here and cannot be: the list says which services, and only Railway's own
+ * answer says whether this app may touch them. See `resolveManagedTarget`.
+ */
+export const containerBulkActionSchema = z.object({
+  projectId: railwayId("validation.projectRequired"),
+  environmentId: railwayId("validation.environmentRequired"),
+  serviceId: z
+    .array(railwayId("validation.serviceRequired"))
+    .min(1, "validation.serviceRequired")
+    .max(LIMITS.BULK_DESTROY_MAX, "validation.tooManyContainers"),
+});
+
 /** Catalog keys a validation issue can name, plus the values each interpolates. */
 export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.nameTooLong": { max: LIMITS.CONTAINER_NAME_MAX },
@@ -338,6 +363,7 @@ export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
   "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
   "validation.portInvalid": { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
+  "validation.tooManyContainers": { max: LIMITS.BULK_DESTROY_MAX },
   "validation.projectNameTooLong": { max: LIMITS.PROJECT_NAME_MAX },
   "validation.environmentNameTooLong": { max: LIMITS.ENVIRONMENT_NAME_MAX },
 };
@@ -370,6 +396,7 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.variablesTooLarge",
   "validation.variablesMalformed",
   "validation.portInvalid",
+  "validation.tooManyContainers",
   "validation.submissionInvalid",
   "validation.projectNameRequired",
   "validation.projectNameTooLong",

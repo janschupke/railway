@@ -334,6 +334,21 @@ export const LIMITS = {
    */
   VARIABLES_TOTAL_MAX: 16_000,
   /**
+   * Services one bulk destroy may name.
+   *
+   * A transport bound rather than a product one. The list's own select-all reaches the
+   * matched set, which is however many containers the environment holds, and a request is a
+   * repeated form field anyone can post any number of — so without a ceiling one submission
+   * is an unbounded number of `serviceDelete` mutations, each one sequential and each one
+   * against a quota Railway documents at 1,000 requests an hour on Hobby.
+   *
+   * Fifty because that is already a batch worth pausing over: fifty sequential deletes plus
+   * the reads around them is a visible fraction of an hour's quota, and an environment where
+   * a person routinely destroys more than fifty at once is one this app is the wrong tool
+   * for. The list says when it has stopped at this number rather than truncating quietly.
+   */
+  BULK_DESTROY_MAX: 50,
+  /**
    * The port a public domain routes to, inside the container.
    *
    * The whole legal range rather than a shorter opinionated one, and that is deliberate:

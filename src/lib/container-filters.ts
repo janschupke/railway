@@ -16,6 +16,7 @@ const FILTER_PARAM = {
   query: "q",
   status: "status",
   owner: "owner",
+  sort: "sort",
 } as const;
 
 /**
@@ -30,17 +31,44 @@ export const OWNER_FILTERS = ["created", "external"] as const;
 
 export type OwnerFilter = (typeof OWNER_FILTERS)[number];
 
+/**
+ * The orders the list can be read in, key and direction together.
+ *
+ * One value rather than a key plus a direction, because half the pairs are not worth
+ * offering: nobody wants the lifecycle run backwards, and a direction toggle beside the
+ * dropdown would be a second control in a row whose constant height is a decision
+ * container-filter-bar.tsx argues for at length. One selection is therefore one token, one
+ * param and one URL.
+ *
+ * `default` is the order Railway's answer already arrived in — managed first, then newest,
+ * per sortContainers in railway/mappers.ts. It is a member rather than the absence of one so
+ * the control has something to return to; it writes no param, so the plain list keeps a bare
+ * URL.
+ */
+export const SORT_ORDERS = [
+  "default",
+  "name-asc",
+  "name-desc",
+  "state",
+  "newest",
+  "oldest",
+] as const;
+
+export type SortOrder = (typeof SORT_ORDERS)[number];
+
 export type ContainerFilters = {
   query: string;
   statuses: ContainerState[];
   owners: OwnerFilter[];
+  sort: SortOrder;
 };
 
-/** Every group empty: the unfiltered list. */
+/** Every group empty and the server's own order: the unfiltered list. */
 export const NO_FILTERS: ContainerFilters = {
   query: "",
   statuses: [],
   owners: [],
+  sort: "default",
 };
 
 /**
@@ -72,6 +100,21 @@ function canonical<T extends string>(values: string[], allowed: readonly T[]): T
   return allowed.filter((member) => chosen.has(member));
 }
 
+/**
+ * Reads the sort, falling back to the server's own order.
+ *
+ * Not `canonical` above, which answers "which of these are selected" for a group that can
+ * hold several. This one is single-valued, so an unrecognised token has a specific right
+ * answer rather than an empty set: the same posture toContainerState takes towards an enum
+ * member this build does not know — narrow oddly, never blank the list.
+ */
+function readSort(params: URLSearchParams): SortOrder {
+  const value = (params.get(FILTER_PARAM.sort) ?? "").trim().toLowerCase();
+  return (SORT_ORDERS as readonly string[]).includes(value)
+    ? (value as SortOrder)
+    : "default";
+}
+
 export function parseFilters(params: URLSearchParams): ContainerFilters {
   return {
     // Collapsed rather than merely trimmed: "web  server" and "web server" are the same
@@ -82,6 +125,7 @@ export function parseFilters(params: URLSearchParams): ContainerFilters {
       .slice(0, LIST.QUERY_MAX),
     statuses: canonical(readGroup(params, FILTER_PARAM.status), CONTAINER_STATES),
     owners: canonical(readGroup(params, FILTER_PARAM.owner), OWNER_FILTERS),
+    sort: readSort(params),
   };
 }
 
@@ -108,6 +152,9 @@ export function filterQueryString(
   if (next.query) params.set(FILTER_PARAM.query, next.query);
   if (next.statuses.length) params.set(FILTER_PARAM.status, next.statuses.join(","));
   if (next.owners.length) params.set(FILTER_PARAM.owner, next.owners.join(","));
+  // The server's own order writes nothing, so an unsorted list keeps a bare URL and the
+  // absence of the param and `sort=default` mean the same thing on the way back in.
+  if (next.sort !== "default") params.set(FILTER_PARAM.sort, next.sort);
 
   return params.toString().replace(/%2C/g, ",");
 }
@@ -157,9 +204,87 @@ export function filterContainers(
   );
 }
 
+/**
+ * Whether anything is being hidden.
+ *
+ * Sort is deliberately not part of this. It hides nothing, it has its own way back — the
+ * `default` member of its own control — and counting it here would make a button labelled
+ * "Clear filters" the thing that resets the reading order, which is copy that lies.
+ */
 export function hasActiveFilters(filters: ContainerFilters): boolean {
   return (
     filters.query !== "" || filters.statuses.length > 0 || filters.owners.length > 0
+  );
+}
+
+/** Where each state sits in the lifecycle, from the one array that already orders them. */
+const STATE_RANK = new Map(CONTAINER_STATES.map((state, index) => [state, index]));
+
+/**
+ * Newest or oldest first, by the *service's* creation.
+ *
+ * `createdAt` rather than `updatedAt`, and that is not a coin toss. `updatedAt` moves every
+ * time a deployment ticks — it is the field watch-fingerprint.ts excludes for exactly that
+ * reason — so a list sorted on it would reorder itself under the reader every few seconds,
+ * on a page that refreshes itself. The row displays `updatedAt`; the order is built on the
+ * value that holds still.
+ *
+ * A container Railway gave no creation date sorts last in both directions. It is the one
+ * ordering that says the same thing either way: this app does not know when this was made.
+ */
+const byCreated =
+  (direction: 1 | -1) =>
+  (a: Container, b: Container): number => {
+    if (!a.createdAt || !b.createdAt) {
+      if (a.createdAt) return -1;
+      if (b.createdAt) return 1;
+      return 0;
+    }
+    return direction * a.createdAt.localeCompare(b.createdAt);
+  };
+
+/**
+ * The comparator per order, minus the tie-break every one of them shares.
+ *
+ * `default` is absent rather than mapped to a no-op comparator: it means "do not sort",
+ * which is a different thing from "sort by nothing" — see `orderContainers`.
+ */
+const COMPARATORS: Record<
+  Exclude<SortOrder, "default">,
+  (a: Container, b: Container, locale?: string) => number
+> = {
+  "name-asc": (a, b, locale) => a.displayName.localeCompare(b.displayName, locale),
+  "name-desc": (a, b, locale) => b.displayName.localeCompare(a.displayName, locale),
+  state: (a, b) => (STATE_RANK.get(a.state) ?? 0) - (STATE_RANK.get(b.state) ?? 0),
+  newest: byCreated(-1),
+  oldest: byCreated(1),
+};
+
+/**
+ * The list in the reader's chosen order.
+ *
+ * Applied after `filterContainers` and before paging, on the client, for the same reason the
+ * filtering is: PROJECT_QUERY accepts a project id and nothing else, so there is no sort
+ * argument to send and the whole array is already here.
+ *
+ * `default` returns the input untouched rather than re-sorting it into the same shape. That
+ * preserves both the array identity — the memo above this in ContainerList would otherwise
+ * hand `useIncrementalList` a new array on every render — and `sortContainers`' guarantee
+ * that the containers this app can act on lead.
+ *
+ * Every order is total: the comparators above decide most pairs, and the service id settles
+ * the rest, so two containers created in the same second have one order rather than
+ * whichever one Array.prototype.sort happened to prefer this run.
+ */
+export function orderContainers(
+  containers: Container[],
+  sort: SortOrder,
+  locale?: string,
+): Container[] {
+  if (sort === "default") return containers;
+  const compare = COMPARATORS[sort];
+  return [...containers].sort(
+    (a, b) => compare(a, b, locale) || a.serviceId.localeCompare(b.serviceId),
   );
 }
 
@@ -169,9 +294,16 @@ export function hasActiveFilters(filters: ContainerFilters): boolean {
  * Pagination resets on this rather than on the container array, whose identity changes on
  * every router.refresh() — see use-incremental-list. Canonical parse ordering is what
  * makes a plain join sufficient here.
+ *
+ * The sort is part of it, although it narrows nothing: re-ordering changes which containers
+ * the first page holds, so a reader three pages into one order would otherwise land three
+ * pages into another. Row selection resets on this string too — see ContainerList.
  */
 export function filterKey(filters: ContainerFilters): string {
-  return [filters.query, filters.statuses.join(","), filters.owners.join(",")].join(
-    "|",
-  );
+  return [
+    filters.query,
+    filters.statuses.join(","),
+    filters.owners.join(","),
+    filters.sort,
+  ].join("|");
 }

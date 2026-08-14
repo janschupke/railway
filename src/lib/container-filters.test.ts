@@ -5,8 +5,10 @@ import {
   filterQueryString,
   hasActiveFilters,
   NO_FILTERS,
+  orderContainers,
   parseFilters,
   type ContainerFilters,
+  type SortOrder,
 } from "./container-filters";
 import { LIST } from "./constants";
 import type { Container } from "./railway/types";
@@ -233,5 +235,125 @@ describe("filterKey", () => {
     expect(filterKey(filters({ query: "a" }))).not.toBe(
       filterKey(filters({ query: "b" })),
     );
+  });
+});
+
+describe("the sort in the URL", () => {
+  it("defaults to the order Railway's answer already arrived in", () => {
+    expect(parseFilters(params("")).sort).toBe("default");
+  });
+
+  it("reads a member it knows", () => {
+    expect(parseFilters(params("sort=name-asc")).sort).toBe("name-asc");
+  });
+
+  it("falls back rather than blanking the list on a value it does not know", () => {
+    // Same posture toContainerState takes towards an enum member this build lacks: a link
+    // naming an order that no longer exists must read oddly, never fail.
+    expect(parseFilters(params("sort=by-vibes")).sort).toBe("default");
+  });
+
+  it("writes no param for the default, so the plain list keeps a bare URL", () => {
+    expect(filterQueryString(params(""), filters({ sort: "default" }))).toBe("");
+  });
+
+  it("writes the chosen order beside the filters and the page's own params", () => {
+    expect(
+      filterQueryString(
+        params("project=p1"),
+        filters({ query: "web", sort: "oldest" }),
+      ),
+    ).toBe("project=p1&q=web&sort=oldest");
+  });
+
+  it("is not a filter, so it does not arm Clear", () => {
+    // A button labelled "Clear filters" that also reset the reading order would be copy
+    // that lies; the write side of the same line lives in useContainerFilters.clear.
+    expect(hasActiveFilters(filters({ sort: "newest" }))).toBe(false);
+  });
+
+  it("resets the page count, because it changes which rows the first page holds", () => {
+    expect(filterKey(filters({ sort: "newest" }))).not.toBe(
+      filterKey(filters({ sort: "oldest" })),
+    );
+  });
+});
+
+describe("orderContainers", () => {
+  const listed = (containers: Container[], sort: SortOrder) =>
+    orderContainers(containers, sort, "en").map((c) => c.displayName);
+
+  const web = container({
+    serviceId: "svc_b",
+    displayName: "web",
+    state: "failed",
+    createdAt: "2026-08-02T00:00:00Z",
+  });
+  const api = container({
+    serviceId: "svc_a",
+    displayName: "api",
+    state: "running",
+    createdAt: "2026-08-03T00:00:00Z",
+  });
+  const db = container({
+    serviceId: "svc_c",
+    displayName: "db",
+    state: "building",
+    createdAt: "2026-08-01T00:00:00Z",
+  });
+  const all = [web, api, db];
+
+  it("leaves the server's order alone, identity included", () => {
+    /*
+     * Not merely "returns the same names". A fresh array here would reach
+     * useIncrementalList as a new `items` on every render of a page that refreshes itself
+     * every few seconds.
+     */
+    expect(orderContainers(all, "default")).toBe(all);
+  });
+
+  it("sorts by name in both directions", () => {
+    expect(listed(all, "name-asc")).toEqual(["api", "db", "web"]);
+    expect(listed(all, "name-desc")).toEqual(["web", "db", "api"]);
+  });
+
+  it("sorts by state in lifecycle order rather than alphabetically", () => {
+    // CONTAINER_STATES is already ordered as a deployment walks them, which is the order
+    // worth reading: building sits before running, and running before failed.
+    expect(listed(all, "state")).toEqual(["db", "api", "web"]);
+  });
+
+  it("sorts by when the service was created, in both directions", () => {
+    expect(listed(all, "newest")).toEqual(["api", "web", "db"]);
+    expect(listed(all, "oldest")).toEqual(["db", "web", "api"]);
+  });
+
+  it("puts a container with no creation date last, whichever way it is read", () => {
+    /*
+     * The one ordering that says the same thing in both directions: this app does not know
+     * when this was made. Sorting a missing date as the epoch would make it the oldest
+     * thing in the environment, which is a claim rather than an absence.
+     */
+    const undated = container({
+      serviceId: "svc_z",
+      displayName: "zed",
+      createdAt: null,
+    });
+    expect(listed([undated, ...all], "newest").at(-1)).toBe("zed");
+    expect(listed([undated, ...all], "oldest").at(-1)).toBe("zed");
+  });
+
+  it("settles a tie by service id rather than leaving it to the engine", () => {
+    const same = (serviceId: string) =>
+      container({ serviceId, displayName: "same", createdAt: "2026-08-01T00:00:00Z" });
+    expect(
+      orderContainers([same("svc_9"), same("svc_1")], "newest").map((c) => c.serviceId),
+    ).toEqual(["svc_1", "svc_9"]);
+  });
+
+  it("does not sort in place", () => {
+    const input = [...all];
+    orderContainers(input, "name-asc");
+    expect(input).toEqual(all);
   });
 });

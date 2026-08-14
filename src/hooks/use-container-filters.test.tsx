@@ -40,6 +40,7 @@ describe("useContainerFilters", () => {
       query: "redis",
       statuses: ["running", "failed"],
       owners: ["created"],
+      sort: "default",
     });
     expect(result.current.draft).toBe("redis");
   });
@@ -121,6 +122,36 @@ describe("useContainerFilters", () => {
       "/dashboard?project=p1&environment=e1",
     );
     expect(result.current.draft).toBe("");
+  });
+
+  it("commits a sort the same way a chip commits, with no debounce", () => {
+    const replaceState = spyOnHistory();
+    const { result } = renderHook(() => useContainerFilters());
+
+    act(() => result.current.setSort("newest"));
+    expect(replaceState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/dashboard?project=p1&environment=e1&sort=newest",
+    );
+  });
+
+  it("leaves the reading order alone when the filters are cleared", () => {
+    /*
+     * "Clear filters" clears filters. The sort hides nothing, has its own way back through
+     * the control's own default, and resetting it here would be the button doing something
+     * its label does not mention — the write side of the line `hasActiveFilters` draws.
+     */
+    setSearchParams("project=p1&environment=e1&q=redis&status=failed&sort=oldest");
+    const replaceState = spyOnHistory();
+    const { result } = renderHook(() => useContainerFilters());
+
+    act(() => result.current.clear());
+    expect(replaceState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/dashboard?project=p1&environment=e1&sort=oldest",
+    );
   });
 
   it("does not claw back text typed while the previous keystroke was settling", () => {

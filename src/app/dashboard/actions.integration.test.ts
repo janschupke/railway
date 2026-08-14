@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { railwayApiUrl } from "@/lib/railway/client";
+import { LIMITS } from "@/lib/constants";
 import { logRecords, rawLogLines } from "@/test/log-capture";
 
 const revalidatePath = vi.fn();
@@ -35,6 +36,7 @@ vi.mock("@/lib/auth/server", () => ({
 const {
   spinUp,
   spinDown,
+  spinDownMany,
   stopContainer,
   restartContainer,
   redeployContainer,
@@ -1414,6 +1416,321 @@ describe("spinDown", () => {
 
       expect(result.ok).toBe(false);
       expect(volumeReads).toBe(0);
+    });
+  });
+});
+
+describe("spinDownMany", () => {
+  const manyForm = (
+    serviceIds: string[],
+    over: Record<string, string> = {},
+  ): FormData => {
+    const data = form({ projectId: "p1", environmentId: "e1", ...over });
+    for (const id of serviceIds) data.append("serviceId", id);
+    return data;
+  };
+
+  /** Three of ours and the one this app did not create. */
+  const mixedProject = () =>
+    projectWith([
+      { id: "svc_a", name: "spun-cache" },
+      { id: "svc_b", name: "spun-queue" },
+      { id: "svc_c", name: "spun-web" },
+      { id: "svc_foreign", name: "postgres" },
+    ]);
+
+  it("destroys every service in the batch and says how many", async () => {
+    const deleted: string[] = [];
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", ({ variables }) => {
+        deleted.push(variables.id as string);
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const result = await spinDownMany(null, manyForm(["svc_a", "svc_b"]));
+
+    expect(result).toEqual({ ok: true, message: "Destroyed 2 containers" });
+    expect(deleted).toEqual(["svc_a", "svc_b"]);
+  });
+
+  it("re-derives ownership per service, not per batch", async () => {
+    /*
+     * The load-bearing safety test, and the one the whole feature is bounded by. A batch is
+     * a list of individual decisions taken against one read — never one decision about a
+     * list — so a foreign service travelling alongside two of ours is refused on its own
+     * while the other two go through.
+     */
+    const deleted: string[] = [];
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", ({ variables }) => {
+        deleted.push(variables.id as string);
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const result = await spinDownMany(
+      null,
+      manyForm(["svc_a", "svc_foreign", "svc_b"]),
+    );
+
+    expect(deleted).toEqual(["svc_a", "svc_b"]);
+    expect(result).toEqual({
+      ok: true,
+      message:
+        "Destroyed 2 of 3. The rest are still listed — they were already gone, were not created here, or Railway refused.",
+    });
+    expect(record("container.destroy_refused")).toMatchObject({
+      reason: "unmanaged",
+      service_id: "svc_foreign",
+    });
+  });
+
+  it("reads the container list once for the whole batch", async () => {
+    /*
+     * The reason this is not `withManagedContainer` in a loop. Six services through the
+     * singular helper would be six full project queries plus six volume reads, against a
+     * quota Railway documents at 1,000 requests an hour.
+     */
+    let projectReads = 0;
+    let volumeReads = 0;
+    server.use(
+      api.query("Project", () => {
+        projectReads += 1;
+        return HttpResponse.json({ data: mixedProject() });
+      }),
+      api.query("EnvironmentVolumes", () => {
+        volumeReads += 1;
+        return HttpResponse.json({
+          data: { environment: { id: "e1", volumeInstances: { edges: [] } } },
+        });
+      }),
+      api.mutation("ServiceDelete", () =>
+        HttpResponse.json({ data: { serviceDelete: true } }),
+      ),
+    );
+
+    await spinDownMany(null, manyForm(["svc_a", "svc_b", "svc_c"]));
+
+    expect(projectReads).toBe(1);
+    expect(volumeReads).toBe(1);
+  });
+
+  it("writes one audit line per service, never one naming the batch", async () => {
+    /*
+     * The moment this stopped being an audit trail and started being a counter would be a
+     * single record listing six service ids. Once Railway has answered `serviceDelete` it
+     * retains no record any of them existed.
+     */
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", () =>
+        HttpResponse.json({ data: { serviceDelete: true } }),
+      ),
+    );
+
+    await spinDownMany(null, manyForm(["svc_a", "svc_b"]));
+
+    const destroyed = logRecords().filter((r) => r.msg === "container.destroyed");
+    expect(destroyed.map((r) => r.service_name)).toEqual(["spun-cache", "spun-queue"]);
+  });
+
+  it("skips a service that has already gone and destroys the rest", async () => {
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", () =>
+        HttpResponse.json({ data: { serviceDelete: true } }),
+      ),
+    );
+
+    const result = await spinDownMany(null, manyForm(["svc_a", "svc_gone"]));
+
+    expect(result).toEqual({
+      ok: true,
+      message:
+        "Destroyed 1 of 2. The rest are still listed — they were already gone, were not created here, or Railway refused.",
+    });
+    expect(record("container.destroy_skipped")).toMatchObject({
+      reason: "gone",
+      service_id: "svc_gone",
+    });
+  });
+
+  it("carries on past a service Railway refuses, and names it", async () => {
+    /*
+     * The services already destroyed are gone whatever happens next, so abandoning the
+     * batch would end the request with an error and no account of them at all.
+     */
+    const deleted: string[] = [];
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", ({ variables }) => {
+        if (variables.id === "svc_b") {
+          return HttpResponse.json({ errors: [{ message: "nope" }] }, { status: 500 });
+        }
+        deleted.push(variables.id as string);
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const result = await spinDownMany(null, manyForm(["svc_a", "svc_b", "svc_c"]));
+
+    expect(deleted).toEqual(["svc_a", "svc_c"]);
+    expect(result.ok).toBe(true);
+    expect(record("container.destroy_failed")).toMatchObject({
+      service_id: "svc_b",
+    });
+  });
+
+  it("fails the whole request when nothing in the batch could be destroyed", async () => {
+    server.use(api.query("Project", () => HttpResponse.json({ data: mixedProject() })));
+
+    const result = await spinDownMany(null, manyForm(["svc_foreign", "svc_gone"]));
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "None of the 2 containers could be destroyed. They were already gone, were not created here, or Railway refused.",
+    });
+  });
+
+  it("destroys a repeated service id once rather than reporting a failure", async () => {
+    // A shape no browser produces and a hand-written form does: destroying it twice would
+    // make the batch lie about its own outcome.
+    const deleted: string[] = [];
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+      api.mutation("ServiceDelete", ({ variables }) => {
+        deleted.push(variables.id as string);
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const result = await spinDownMany(null, manyForm(["svc_a", "svc_a"]));
+
+    expect(deleted).toEqual(["svc_a"]);
+    expect(result).toEqual({ ok: true, message: "Destroyed 1 container" });
+  });
+
+  it("refuses an oversized batch before it reads anything", async () => {
+    let projectReads = 0;
+    let deleteCalls = 0;
+    server.use(
+      api.query("Project", () => {
+        projectReads += 1;
+        return HttpResponse.json({ data: mixedProject() });
+      }),
+      api.mutation("ServiceDelete", () => {
+        deleteCalls += 1;
+        return HttpResponse.json({ data: { serviceDelete: true } });
+      }),
+    );
+
+    const ids = Array.from(
+      { length: LIMITS.BULK_DESTROY_MAX + 1 },
+      (_, i) => `svc_${i}`,
+    );
+    const result = await spinDownMany(null, manyForm(ids));
+
+    expect(result).toEqual({
+      ok: false,
+      error: `Select at most ${LIMITS.BULK_DESTROY_MAX} containers to destroy at once.`,
+    });
+    // The ceiling protects the quota, so it has to bite before anything is spent on it.
+    expect(projectReads).toBe(0);
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("rejects a request naming no service at all", async () => {
+    const result = await spinDownMany(null, manyForm([]));
+    expect(result.ok).toBe(false);
+  });
+
+  describe("the stored data", () => {
+    const volumesFor = (serviceIds: string[]) => ({
+      data: {
+        environment: {
+          id: "e1",
+          volumeInstances: {
+            edges: serviceIds.map((serviceId, index) => ({
+              node: {
+                id: `volinst_${index}`,
+                volumeId: `vol_${index}`,
+                serviceId,
+                mountPath: "/data",
+                sizeMB: 500,
+                currentSizeMB: 4,
+              },
+            })),
+          },
+        },
+      },
+    });
+
+    it("deletes every volume in the batch when the box was ticked", async () => {
+      const volumesDeleted: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+        api.query("EnvironmentVolumes", () =>
+          HttpResponse.json(volumesFor(["svc_a", "svc_b"])),
+        ),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", ({ variables }) => {
+          volumesDeleted.push(variables.volumeId as string);
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      await spinDownMany(null, manyForm(["svc_a", "svc_b"], { deleteData: "on" }));
+
+      expect(volumesDeleted).toEqual(["vol_0", "vol_1"]);
+    });
+
+    it("keeps every volume when it was not", async () => {
+      let volumeDeletes = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+        api.query("EnvironmentVolumes", () =>
+          HttpResponse.json(volumesFor(["svc_a", "svc_b"])),
+        ),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", () => {
+          volumeDeletes += 1;
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      // Unticked is the default here, unlike the single destroy: one tick covers containers
+      // whose volumes the reader has not seen individually.
+      await spinDownMany(null, manyForm(["svc_a", "svc_b"]));
+
+      expect(volumeDeletes).toBe(0);
+      expect(record("container.destroyed")).toMatchObject({ volume_deleted: false });
+    });
+
+    it("leaves a container without a volume alone", async () => {
+      const volumesDeleted: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: mixedProject() })),
+        api.query("EnvironmentVolumes", () => HttpResponse.json(volumesFor(["svc_a"]))),
+        api.mutation("ServiceDelete", () =>
+          HttpResponse.json({ data: { serviceDelete: true } }),
+        ),
+        api.mutation("VolumeDelete", ({ variables }) => {
+          volumesDeleted.push(variables.volumeId as string);
+          return HttpResponse.json({ data: { volumeDelete: true } });
+        }),
+      );
+
+      await spinDownMany(null, manyForm(["svc_a", "svc_b"], { deleteData: "on" }));
+
+      expect(volumesDeleted).toEqual(["vol_0"]);
     });
   });
 });

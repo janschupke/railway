@@ -19,6 +19,7 @@ vi.mock("@/components/container-row", () => ({
 }));
 
 const { ContainerSection } = await import("./container-section");
+const { ToastProvider } = await import("@/components/ui/toast");
 
 const container = (over: Partial<Container> = {}): Container => ({
   serviceId: "svc_1",
@@ -57,7 +58,11 @@ const renderSection = async (
     ...over,
   });
   return render(
-    await ContainerSection({ projectId: "proj_1", environmentId: "env_1" }),
+    // The list's selection toolbar holds a destroy dialog, which toasts its own outcome.
+    // Provided here rather than stubbed away: the dashboard layout owns it in production.
+    <ToastProvider>
+      {await ContainerSection({ projectId: "proj_1", environmentId: "env_1" })}
+    </ToastProvider>,
   );
 };
 

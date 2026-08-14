@@ -219,6 +219,13 @@ export type LogEvent =
   | "container.create_failed"
   | "container.create_replayed"
   | "container.created"
+  /*
+   * `destroy_failed` has no counterpart under the other verbs on purpose. They fail by
+   * ending the request, which `reportError` records under `action`; destroy is the one that
+   * can be asked about several containers at once, so a refused mutation there ends one
+   * entry of a batch that carries on — and this is the only line that says which.
+   */
+  | "container.destroy_failed"
   | "container.destroy_refused"
   | "container.destroy_skipped"
   | "container.destroyed"

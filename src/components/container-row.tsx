@@ -26,6 +26,7 @@ import { ContainerUrl } from "./container-url";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
+import { Checkbox } from "./ui/checkbox";
 import { Button } from "./ui/button";
 import { ErrorBlock } from "./ui/error-block";
 import { Tooltip } from "./ui/tooltip";
@@ -67,10 +68,23 @@ export function ContainerRow({
   environmentId,
   metrics,
   volume,
+  selected = false,
+  onSelectedChange,
 }: {
   container: Container;
   projectId: string;
   environmentId: string;
+  /** Whether this row is part of the list's current selection. */
+  selected?: boolean;
+  /**
+   * Absent means this row cannot be selected, and is the only thing that decides it.
+   *
+   * The list passes a handler to the rows it may act on and nothing to the rest, so "which
+   * rows have a checkbox" is answered once, where the selection lives, rather than by each
+   * row re-deriving it from `container.managed`. A row that could tick itself into a
+   * selection the list would then have to filter back out is the state this avoids.
+   */
+  onSelectedChange?: (selected: boolean) => void;
   /**
    * Passed in rather than read from the container, because it is deliberately not on it —
    * see ContainerMetrics on what a fluctuating value in the watch fingerprint would cost.
@@ -244,6 +258,29 @@ export function ContainerRow({
           single-enum view of a deployment cannot.
         */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/*
+            The selection box, and the empty slot that stands in for it.
+
+            Only a managed row can be destroyed, so only a managed row gets one — a checkbox
+            on a service this app cannot touch would be a selection that can never lead
+            anywhere. The unmanaged row renders a box of the same size instead, because the
+            alternative is every name in the list sitting on one axis except the ones that
+            are not ours, which reads as a rendering fault rather than as a distinction.
+
+            `size-3.5` matches the input inside Checkbox; the gap comes from the flex row.
+          */}
+          {onSelectedChange ? (
+            <Checkbox
+              hideLabel
+              label={t("selectRow", { name: container.displayName })}
+              checked={selected}
+              onChange={(event) => onSelectedChange(event.target.checked)}
+              className="shrink-0"
+            />
+          ) : (
+            <span aria-hidden className="size-3.5 shrink-0" />
+          )}
+
           <button
             type="button"
             onClick={toggle}

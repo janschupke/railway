@@ -9,6 +9,7 @@ const handlers = () => ({
   onFlushDraft: vi.fn(),
   onStatusesChange: vi.fn(),
   onOwnersChange: vi.fn(),
+  onSortChange: vi.fn(),
   onClear: vi.fn(),
 });
 
@@ -210,6 +211,49 @@ describe("ContainerFilterBar", () => {
     ].map((el) => [...el.classList].find((name) => name.startsWith("h-control-")));
 
     expect(heights).toEqual(["h-control-md", "h-control-md", "h-control-md"]);
+  });
+
+  describe("the sort control", () => {
+    it("carries its label in its accessible name, not only beside it", async () => {
+      renderBar({ filters: { ...NO_FILTERS, sort: "newest" } });
+
+      /*
+       * The whole reason `inline` renders the label as text inside the trigger rather than
+       * hiding a Field label: the name a speech user says out loud is what is on screen,
+       * so Label in Name (WCAG 2.5.3) holds without a catalog string that has to be kept
+       * matching — which is the arrangement the MultiSelect trigger beside it needs.
+       */
+      expect(
+        screen.getByRole("combobox", { name: "Sort Newest first" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers every order the URL can carry, in one control", async () => {
+      const user = userEvent.setup();
+      renderBar();
+
+      await user.click(screen.getByRole("combobox", { name: /^Sort/ }));
+
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "Default order",
+        "Name A–Z",
+        "Name Z–A",
+        "State",
+        "Newest first",
+        "Oldest first",
+      ]);
+    });
+
+    it("reports the chosen order rather than applying it itself", async () => {
+      const user = userEvent.setup();
+      const spies = renderBar();
+
+      await user.click(screen.getByRole("combobox", { name: /^Sort/ }));
+      await user.click(screen.getByRole("option", { name: "Oldest first" }));
+
+      // Presentation only: every value comes from the URL and every change goes back there.
+      expect(spies.onSortChange).toHaveBeenCalledWith("oldest");
+    });
   });
 
   it("caps the search box at the length the parser keeps", () => {

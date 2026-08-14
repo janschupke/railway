@@ -4,8 +4,10 @@ import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   OWNER_FILTERS,
+  SORT_ORDERS,
   type ContainerFilters as Filters,
   type OwnerFilter,
+  type SortOrder,
 } from "@/lib/container-filters";
 import { LIST } from "@/lib/constants";
 import { CONTAINER_STATES, type ContainerState } from "@/lib/railway/types";
@@ -13,6 +15,7 @@ import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { MultiSelect } from "./ui/multi-select";
+import { Select } from "./ui/select";
 import { chip } from "./ui/chip";
 import { Text } from "./ui/text";
 
@@ -21,6 +24,31 @@ const OWNER_LABEL_KEY = {
   created: "ownerCreated",
   external: "ownerExternal",
 } as const satisfies Record<OwnerFilter, string>;
+
+/**
+ * Catalog key per order, for the same division of labour as OWNER_LABEL_KEY above.
+ *
+ * `SORT_ORDERS` decides which orders exist and in what sequence they are offered; this
+ * decides nothing except which key names each, and the catalog owns the words. A member
+ * added there without an entry here is a type error rather than a missing option.
+ */
+const SORT_LABEL_KEY = {
+  /*
+   * "Default order" rather than a description of it.
+   *
+   * The order is "created here first, then newest", and that is what this option was called
+   * — which put the string "Created here" on two controls in the same row, one of them the
+   * origin filter. Two labels where one is a prefix of the other is a real ambiguity for
+   * anyone driving the page by voice, and it broke a locator that had been correct for
+   * months. The wording that survives says what the option DOES: puts the list back.
+   */
+  default: "sortDefault",
+  "name-asc": "sortNameAsc",
+  "name-desc": "sortNameDesc",
+  state: "sortState",
+  newest: "sortNewest",
+  oldest: "sortOldest",
+} as const satisfies Record<SortOrder, string>;
 
 /**
  * The container list's control row.
@@ -49,6 +77,7 @@ export function ContainerFilterBar({
   onFlushDraft,
   onStatusesChange,
   onOwnersChange,
+  onSortChange,
   onClear,
   canClear,
 }: {
@@ -58,6 +87,7 @@ export function ContainerFilterBar({
   onFlushDraft: () => void;
   onStatusesChange: (statuses: ContainerState[]) => void;
   onOwnersChange: (owners: OwnerFilter[]) => void;
+  onSortChange: (sort: SortOrder) => void;
   onClear: () => void;
   canClear: boolean;
 }) {
@@ -143,6 +173,26 @@ export function ContainerFilterBar({
             />
           ))}
         </div>
+
+        {/*
+          Ordering, beside the narrowing, because both answer "which rows do I want in front
+          of me" and a reader looking for one will look where the other is.
+
+          One control for six orders rather than a key and a direction, and the reason is the
+          row's own: two controls is two more things that wrap. It is also the only control
+          here that is never off — `default` is a choice, not an absence — which is why it is
+          the one that does not gain a chip below.
+        */}
+        <Select
+          inline
+          label={t("sortLabel")}
+          value={filters.sort}
+          onValueChange={(value) => onSortChange(value as SortOrder)}
+          options={SORT_ORDERS.map((order) => ({
+            value: order,
+            label: t(SORT_LABEL_KEY[order]),
+          }))}
+        />
 
         {/*
           Always rendered, disabled when there is nothing to clear.

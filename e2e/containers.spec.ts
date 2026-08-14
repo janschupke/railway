@@ -382,6 +382,73 @@ test.describe("container lifecycle", () => {
     }
   });
 
+  test("destroys several containers on one confirmation", async ({ page }) => {
+    /*
+     * The whole of T-503 in one pass. Tearing down three containers used to be three
+     * dialogs, each demanding the container's name typed exactly — friction that is right
+     * for one row and does not scale to the workflow this app invites.
+     *
+     * Nginx rather than Redis for the same reason the single destroy uses it: Redis keeps
+     * state, so the batch would also be exercising the stored-data checkbox.
+     */
+    for (const name of ["one", "two", "three"]) {
+      await spinUp(page, name, "Nginx");
+      await expect(row(page, name)).toBeVisible();
+    }
+
+    const destroy = button(page, "Destroy selected");
+    // Mounted from the start and disabled, rather than appearing with the first tick and
+    // pushing the list down under the pointer that is ticking it.
+    await expect(destroy).toBeDisabled();
+
+    await row(page, "one").getByRole("checkbox").check();
+    await row(page, "two").getByRole("checkbox").check();
+    await expect(page.getByText("2 containers selected")).toBeVisible();
+    await expect(destroy).toBeEnabled();
+
+    await destroy.click();
+    const dialog = onlyVisible(page.getByRole("alertdialog"));
+    await expect(dialog).toContainText("Destroy 2 containers?");
+
+    // The names, so a stray tick is visible before it becomes irreversible.
+    const listed = dialog.getByRole("list", {
+      name: "Containers about to be destroyed",
+    });
+    await expect(listed).toContainText("one");
+    await expect(listed).toContainText("two");
+    await expect(listed).not.toContainText("three");
+
+    const confirm = dialog.getByRole("button", {
+      name: /destroy 2 containers permanently/i,
+    });
+    await expect(confirm).toBeDisabled();
+
+    // The count, not two names: friction proportionate to the batch rather than multiplied
+    // by it, and the one fact a miscount of ticked boxes would get wrong.
+    await dialog.getByLabel("Type 2 to confirm").fill("2");
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+
+    await expect(toast(page, "Destroyed 2 containers")).toBeVisible();
+    await expect(row(page, "one")).toHaveCount(0);
+    await expect(row(page, "two")).toHaveCount(0);
+    await expect(row(page, "three")).toBeVisible();
+  });
+
+  test("offers no selection checkbox for a service it did not create", async ({
+    page,
+  }) => {
+    /*
+     * The UI half of the ownership rule for the batch. A checkbox on a service this app
+     * cannot destroy would be a selection that can only ever lead to a refusal — and the
+     * refusal itself, per service rather than per batch, is proven in
+     * actions.integration.test.ts.
+     */
+    await expect(row(page, "postgres").getByRole("checkbox")).toHaveCount(0);
+    await spinUp(page, "cache", "Nginx");
+    await expect(row(page, "cache").getByRole("checkbox")).toHaveCount(1);
+  });
+
   test("offers no destroy control for a service it did not create", async ({
     page,
   }) => {
