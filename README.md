@@ -462,9 +462,18 @@ RAILWAY_TOKEN=… pnpm verify:schema       # + full schema introspection
 ```
 
 Get a token at <https://railway.com/account/tokens>. Beyond the root fields, it
-introspects the **input objects the app builds by hand** — `ServiceCreateInput` and
-`VariableCollectionUpsertInput`. That gap was real: a renamed member inside an input
-passes a root-field check and fails every spin-up.
+introspects the **input objects the app builds by hand** — `ServiceCreateInput`,
+`VariableCollectionUpsertInput`, `ProjectCreateInput` and `EnvironmentCreateInput`. That
+gap was real: a renamed member inside an input passes a root-field check and fails every
+spin-up.
+
+Each of those input entries lists only the members the app actually sends, which is why
+`ProjectCreateInput` asserts `name` alone and not the eight other members Railway offers
+there. Two of the listed members exist to prevent a silent cost rather than a crash:
+`skipDeploys` on the variables upsert, and `skipInitialDeploys` on `EnvironmentCreateInput`
+— without the latter Railway seeds a new environment from an existing one and deploys what
+it copies, so a person clicking **New environment** would be billed for a duplicate of
+every service in the project. Losing either member would not fail loudly.
 
 It also prints the optional capabilities, with the consequence of each. As of 2026-08-13
 `deploymentStop`, `deploymentRemove` and `serviceInstanceUpdate` all exist — see
@@ -913,6 +922,27 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **Projects and environments can be created here but never deleted here.** `projectCreate`
+  and `environmentCreate` are in `REQUIRED_FIELDS`; `projectDelete` and `environmentDelete`
+  are absent from `operations.ts` entirely, so no request shape reaches them. This is not a
+  gap waiting to be filled. Deleting a service is bounded — the `MANAGED_PREFIX` check means
+  this app only ever deletes what it created, and what it created is one container. Deleting
+  a project takes every service, environment and volume inside it, including the ones this
+  app did not create and cannot see the value of, and no ownership marker on the project
+  makes that safe: the blast radius is the contents, not the wrapper. So the prefix is not
+  applied to them either — it gates destroy, and there is no destroy to gate. Removing a
+  project is done in Railway's own dashboard, where the consequences are stated by the
+  people who own the billing relationship.
+- **A new project lands on the personal account.** `ProjectCreateInput` carries a
+  `workspaceId` and this app does not send it, so a user who works out of a workspace
+  creates the project here and moves it in Railway. A workspace picker is a real feature —
+  it needs the workspace list, a default, and an answer for a token holding `project:admin`
+  without `workspace:viewer` — not a member added to an input.
+- **A new environment is empty.** `environmentCreate` is sent with `skipInitialDeploys` and
+  without `sourceEnvironmentId`, so nothing is copied in and nothing is deployed. Railway's
+  own dashboard duplicates an existing environment instead; that is the more useful default
+  for someone who has already set a project up, and the more expensive one to hand to a
+  button whose consequences are not on screen.
 - **Environment variables are single-line, and capped.** Twenty-five rows, 2 048 characters
   a value, 16 000 characters in total, and no line breaks — so a certificate, a private key
   or a JSON document is set on Railway's own Variables page rather than here. Names in the

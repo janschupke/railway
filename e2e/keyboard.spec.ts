@@ -90,6 +90,53 @@ test.describe("keyboard operation", () => {
     await expect(trigger).toBeFocused();
   });
 
+  test("traps focus in the create dialog and restores it on close", async ({
+    page,
+  }) => {
+    /*
+     * The same guarantee as the destroy dialog above, on a different Radix primitive.
+     * Worth its own test rather than assumed from that one: the reason destroy imports
+     * its body statically is that a dynamic import left nothing in the content at open
+     * time and broke the trap, and this dialog is one refactor away from the same fix.
+     */
+    await signIn(page);
+
+    const trigger = onlyVisible(page.getByRole("button", { name: /new project/i }));
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Project name")).toBeVisible();
+
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press("Tab");
+      const inside = await dialog.evaluate((el) => el.contains(document.activeElement));
+      expect(inside, `focus escaped the dialog on tab ${i + 1}`).toBe(true);
+    }
+
+    await dismissWithEscape(page, dialog);
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  test("creates a project entirely from the keyboard", async ({ page }) => {
+    await signIn(page);
+
+    await onlyVisible(page.getByRole("button", { name: /new project/i })).focus();
+    await page.keyboard.press("Enter");
+
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await expect(dialog.getByLabel("Project name")).toBeFocused();
+    await page.keyboard.type("Keyboard project");
+    await page.keyboard.press("Enter");
+
+    await expect(toast(page, "Created Keyboard project")).toBeVisible();
+    await expect(
+      onlyVisible(page.getByRole("combobox", { name: "Project" })),
+    ).toContainText("Keyboard project");
+  });
+
   test("completes a destroy entirely from the keyboard", async ({ page }) => {
     await signIn(page);
     await spinUp(page, "cache");

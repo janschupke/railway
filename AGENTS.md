@@ -11,9 +11,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 # Railway Freight Loader
 
 One Next.js 16 App Router app, single package, pnpm. A visitor signs into **their own**
-Railway account over OIDC, picks a project and environment, and creates or destroys
-Docker-image services with live build and deploy logs streamed into the browser. There is no
-database, no client store, and the visitor's token never leaves the server.
+Railway account over OIDC, picks or creates a project and environment, and creates or
+destroys Docker-image services with live build and deploy logs streamed into the browser.
+There is no database, no client store, and the visitor's token never leaves the server.
 
 All detailed rules live in [`.ai/rules/`](.ai/rules/) — the single source of truth. The
 reasoning behind each decision lives in [README.md](README.md) (eleven ADRs) and
@@ -49,7 +49,7 @@ Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 - **Never log** a token, `Error.cause`, an email, the sealed cookie, or container stdout. Never render upstream failure text — route it through `reportError`.
 - **`src/components/**` and `src/hooks/**` may not import** `lib/auth/session|refresh|server` or `lib/logger` / `lib/log/*`. Pass what the component needs as a prop.
 - **Every tuned number goes in `src/lib/constants.ts`**, in its group, with a rationale comment.
-- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input.
+- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input. **Projects and environments are created but never deleted**, so they carry no prefix and `projectDelete`/`environmentDelete` are absent from `operations.ts` entirely.
 - **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.

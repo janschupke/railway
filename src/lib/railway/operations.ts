@@ -139,6 +139,52 @@ export const PROJECT_QUERY = /* GraphQL */ `
   }
 `;
 
+/**
+ * A new project on the signed-in user's personal account.
+ *
+ * Selects `...ProjectFields` rather than a bare `id`, and that is what the create flow is
+ * built on: `projectCreate` returns `Project!` — the same type the list query reads — so
+ * the default environment Railway makes alongside the project arrives in this response.
+ * Without it the client would have a project id and no environment id, and would have to
+ * re-read the whole project list before it could select what it had just created.
+ *
+ * `ProjectCreateInput` also carries `workspaceId`, `defaultEnvironmentName`, `description`,
+ * `isPublic`, `prDeploys`, `repo`, `runtime` and `isMonorepo`. The app sends `name` and
+ * nothing else: an omitted `workspaceId` is what makes the project personal, and every
+ * other member is a decision the user has not been asked to make. Adding one means adding
+ * it to REQUIRED_INPUT_TYPES below, because a member this app sends is a member whose
+ * removal must fail verification.
+ */
+export const PROJECT_CREATE_MUTATION = /* GraphQL */ `
+  ${PROJECT_FIELDS}
+  mutation ProjectCreate($input: ProjectCreateInput!) {
+    projectCreate(input: $input) {
+      ...ProjectFields
+    }
+  }
+`;
+
+/**
+ * A new environment inside an existing project.
+ *
+ * `skipInitialDeploys: true` is load-bearing rather than tidy. Railway seeds a new
+ * environment from an existing one and deploys what it copies, so a person clicking "New
+ * environment" would be billed for a duplicate of every service in the project without
+ * having asked for one. This app creates infrastructure only when someone names it, and
+ * `sourceEnvironmentId` is deliberately not sent for the same reason.
+ *
+ * `ephemeral`, `stageInitialChanges` and `applyChangesInBackground` are the remaining
+ * members and are all left out — see the note on ProjectCreateInput above.
+ */
+export const ENVIRONMENT_CREATE_MUTATION = /* GraphQL */ `
+  mutation EnvironmentCreate($input: EnvironmentCreateInput!) {
+    environmentCreate(input: $input) {
+      id
+      name
+    }
+  }
+`;
+
 export const SERVICE_CREATE_MUTATION = /* GraphQL */ `
   mutation ServiceCreate($input: ServiceCreateInput!) {
     serviceCreate(input: $input) {
@@ -300,6 +346,19 @@ export const REQUIRED_FIELDS: Array<{
    * Railway restarts it forever.
    */
   { root: "Mutation", field: "variableCollectionUpsert", args: ["input"] },
+  /*
+   * The two create paths, confirmed against the live API on 2026-08-14 together with their
+   * input shapes below. Both return an object rather than a Boolean —
+   * `projectCreate: Project!` and `environmentCreate: Environment!` — which is what lets
+   * the dashboard select what was just made instead of re-reading the list to find it.
+   *
+   * Required rather than optional because losing either does not degrade a feature, it
+   * removes the app's answer to an empty account: the first-run path is a person with no
+   * project, and the alternative to creating one here is sending them to railway.com and
+   * hoping they come back.
+   */
+  { root: "Mutation", field: "projectCreate", args: ["input"] },
+  { root: "Mutation", field: "environmentCreate", args: ["input"] },
   { root: "Subscription", field: "deploymentLogs", args: ["deploymentId"] },
   { root: "Subscription", field: "buildLogs", args: ["deploymentId"] },
 ];
@@ -388,6 +447,25 @@ export const REQUIRED_INPUT_TYPES: Array<{ name: string; fields: string[] }> = [
       "replace",
       "skipDeploys",
     ],
+  },
+  /*
+   * `name` alone. Every other member of ProjectCreateInput is left out deliberately — see
+   * PROJECT_CREATE_MUTATION — and listing one here that the app does not send would assert
+   * a dependency it does not have.
+   *
+   * `name` is nullable on the live schema (`String`, not `String!`): Railway will name an
+   * unnamed project itself. The app always sends one, so this entry is about the member
+   * still existing, not about it being mandatory.
+   */
+  { name: "ProjectCreateInput", fields: ["name"] },
+  /*
+   * `skipInitialDeploys` is in this list for the same reason `skipDeploys` is in the one
+   * above: its removal would not fail loudly, it would quietly start billing someone for a
+   * copy of every service in the project.
+   */
+  {
+    name: "EnvironmentCreateInput",
+    fields: ["projectId", "name", "skipInitialDeploys"],
   },
 ];
 

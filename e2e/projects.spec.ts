@@ -1,4 +1,4 @@
-import { button, expect, injectFaults, onlyVisible, test } from "./support";
+import { button, expect, injectFaults, onlyVisible, test, toast } from "./support";
 
 /**
  * Where the dashboard gets its project list, and what it says when it gets nothing.
@@ -72,9 +72,11 @@ test.describe("the empty project list", () => {
 
     await expect(onlyVisible(page.getByText("No projects to show"))).toBeVisible();
 
-    // The primary action asks Railway again. Re-authorizing is offered, but demoted:
-    // the authorization is intact, and sending the user round it is the loop this
-    // page used to be.
+    // The primary action creates one, because the account is reachable and holds nothing.
+    // Check again and re-authorizing are both still offered and both demoted: the
+    // authorization is intact, and sending the user round it is the loop this page used
+    // to be.
+    await expect(button(page, /create a project/i)).toBeVisible();
     await expect(button(page, /check again/i)).toBeVisible();
     await expect(
       onlyVisible(page.getByRole("link", { name: /authorize again/i })),
@@ -96,6 +98,83 @@ test.describe("the empty project list", () => {
 
     // Proves the button re-queries Railway rather than replaying a cached render.
     await expect(projectSelect(page)).toContainText("Demo Project");
+  });
+});
+
+/**
+ * The first-run path: a reachable Railway account that holds nothing.
+ *
+ * `projectsEmpty` rather than `projectsSource: "none"` — the two look identical on screen
+ * and are not the same state. That fault makes the sources answer with nothing while the
+ * fixture still holds projects; this one empties the account, so a project created here
+ * shows up in the very next read, which is the thing worth proving.
+ */
+test.describe("an account with no projects yet", () => {
+  const environmentSelect = (page: import("@playwright/test").Page) =>
+    onlyVisible(page.getByRole("combobox", { name: "Environment" }));
+
+  test("creates the first project from the empty state and lands on it", async ({
+    page,
+  }) => {
+    await injectFaults(page, { projectsEmpty: true });
+    await signInBare(page);
+    await expect(onlyVisible(page.getByText("No projects to show"))).toBeVisible();
+
+    await button(page, /create a project/i).click();
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Project name").fill("Client work");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+
+    await expect(toast(page, "Created Client work")).toBeVisible();
+    // The point of creating it here rather than on railway.com: the dashboard is now
+    // pointed at it, with the default environment Railway made alongside it.
+    await expect(projectSelect(page)).toContainText("Client work");
+    await expect(environmentSelect(page)).toContainText("production");
+    await expect(page).toHaveURL(/project=proj_\d+/);
+    // The empty state is gone rather than sitting behind the picker.
+    await expect(page.getByText("No projects to show")).toHaveCount(0);
+  });
+
+  test("keeps the dialog open and says why when the name is refused", async ({
+    page,
+  }) => {
+    await injectFaults(page, { projectsEmpty: true });
+    await signInBare(page);
+
+    await button(page, /create a project/i).click();
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await dialog.getByLabel("Project name").fill("x".repeat(65));
+    await dialog.getByRole("button", { name: "Create project" }).click();
+
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "Keep the name under 64 characters",
+    );
+    // Still open, still holding what was typed: the fix is an edit, not a retype.
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Project name")).toHaveValue("x".repeat(65));
+  });
+});
+
+test.describe("creating an environment", () => {
+  test("adds one to the selected project and switches to it", async ({ page }) => {
+    await signInBare(page);
+
+    await button(page, /new environment/i).click();
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await dialog.getByLabel("Environment name").fill("qa");
+    await dialog.getByRole("button", { name: "Create environment" }).click();
+
+    await expect(toast(page, "Created qa")).toBeVisible();
+    await expect(
+      onlyVisible(page.getByRole("combobox", { name: "Environment" })),
+    ).toContainText("qa");
+
+    // Empty is the contract: skipInitialDeploys means nothing is copied in and nothing
+    // is billed until the user spins something up themselves.
+    await expect(
+      onlyVisible(page.getByText("Nothing running in this environment")),
+    ).toBeVisible();
   });
 });
 

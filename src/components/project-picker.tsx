@@ -1,18 +1,18 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
 import { useTranslations } from "next-intl";
+import { useDashboardSelection } from "@/hooks/use-dashboard-selection";
 import type { RailwayProject } from "@/lib/railway/types";
+import { CreateEnvironmentButton, CreateProjectButton } from "./create-project-button";
 import { PendingStatus } from "./ui/misc";
 import { Select } from "./ui/select";
-
-/** Query-parameter names — protocol shared with the page's searchParams, not copy. */
-const PARAM = { project: "project", environment: "environment" } as const;
 
 /**
  * Selection lives in the URL rather than component state, so the dashboard is
  * linkable, survives a refresh, and lets the server do the fetching.
+ *
+ * The writing of it moved to useDashboardSelection when the create dialogs arrived —
+ * see that file for why one place owns the rules.
  */
 export function ProjectPicker({
   projects,
@@ -24,15 +24,9 @@ export function ProjectPicker({
   environmentId: string | null;
 }) {
   const t = useTranslations("dashboard");
-  const router = useRouter();
-  const params = useSearchParams();
-  const [pending, startTransition] = useTransition();
+  const { selectProject, selectEnvironment, pending } = useDashboardSelection();
 
   const selected = projects.find((p) => p.id === projectId);
-
-  const navigate = (next: URLSearchParams) => {
-    startTransition(() => router.push(`/dashboard?${next.toString()}`));
-  };
 
   return (
     /*
@@ -63,13 +57,7 @@ export function ProjectPicker({
             // projects are all personal gets an ungrouped list exactly as before.
             ...(p.workspaceName ? { group: p.workspaceName } : {}),
           }))}
-          onValueChange={(id) => {
-            const next = new URLSearchParams(params);
-            next.set(PARAM.project, id);
-            // The old environment belongs to the old project; let the server default it.
-            next.delete(PARAM.environment);
-            navigate(next);
-          }}
+          onValueChange={selectProject}
         />
       </div>
 
@@ -84,12 +72,18 @@ export function ProjectPicker({
           options={
             selected?.environments.map((e) => ({ value: e.id, label: e.name })) ?? []
           }
-          onValueChange={(id) => {
-            const next = new URLSearchParams(params);
-            next.set(PARAM.environment, id);
-            navigate(next);
-          }}
+          onValueChange={selectEnvironment}
         />
+      </div>
+
+      {/*
+        After the two selects, not between them. These add to what the selects choose
+        from, and putting a button in the middle of the pair would break the reading order
+        of the two controls that belong together.
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        <CreateProjectButton />
+        <CreateEnvironmentButton projectId={projectId} />
       </div>
 
       <PendingStatus label={pending ? t("switchingProject") : undefined} />

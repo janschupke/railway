@@ -163,6 +163,18 @@ test.describe("accessibility", () => {
       await injectFaults(page, { slowMs: 0 });
     });
 
+    test(`create dialog has no violations (${theme})`, async ({ page }) => {
+      // The other dialog, and a different role: `dialog` rather than `alertdialog`, with
+      // a labelled text field and a close button the destroy confirmation does not have.
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await onlyVisible(page.getByRole("button", { name: /new project/i })).click();
+      await expect(onlyVisible(page.getByRole("dialog"))).toBeVisible();
+
+      await expectNoA11yViolations(page, `create-dialog/${theme}`);
+    });
+
     test(`destroy dialog has no violations (${theme})`, async ({ page }) => {
       await signIn(page);
       await spinUp(page, "cache");

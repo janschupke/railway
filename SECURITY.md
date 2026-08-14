@@ -26,7 +26,7 @@ upstream call.
 
 ### Input surfaces
 
-Three things cross from a browser into a Railway mutation. None is trusted; each is
+Five things cross from a browser into a Railway mutation. None is trusted; each is
 bounded.
 
 | Input                 | Bound                                                                                                                              | Where                                                 |
@@ -34,6 +34,8 @@ bounded.
 | Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/validation.ts`                               |
 | Container name        | 40 characters, and prefixed before it is sent                                                                                      | `src/lib/validation.ts`, `src/lib/railway/managed.ts` |
 | Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                               |
+| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
+| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
 
 **Environment variables are user-supplied, and were not always.** Until T-487 the client
 sent neither a preset id nor a variable: the environment was derived server-side from the
@@ -54,6 +56,22 @@ by three bounds that do not overlap:
   the users who do not, which is why not showing it costs nothing.
 - **Record.** `container.created` names only the preset-derived variables and counts the
   rest; see the logging bullet under Operational notes.
+
+**The two names carry no charset rule, on purpose.** They are the only user input here that
+is not pattern-matched, and the reason is that neither is ever interpreted: a project name
+is not slugged into a service name, not prefixed, and not interpolated into a path, a URL
+or a shell — Railway stores it and renders it back. The bound that matters is length, and a
+charset rule would only reject names people legitimately write. Compare the container name
+directly above, which `toManagedName` turns into a service identifier and therefore does
+constrain.
+
+**Neither can be deleted from this app.** `projectDelete` and `environmentDelete` are absent
+from `src/lib/railway/operations.ts` entirely rather than guarded behind the ownership
+prefix, so no request shape reaches them. That is also why projects and environments carry
+no `MANAGED_PREFIX`: the marker gates destroy, and there is no destroy to gate. Deleting a
+project would take every service, environment and volume in it — including ones this app
+did not create — which is a different blast radius from deleting one service, and not one a
+single mis-aimed click should be able to reach.
 
 **The blast radius did not change**, and that is what makes the trade defensible. Every
 mutation carries the requester's own token, so injecting environment means injecting it

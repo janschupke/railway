@@ -150,6 +150,29 @@ export function execute(
       };
     }
 
+    case "ProjectCreate": {
+      const input = variables.input as { name: string };
+      const project = store.addProject(input.name);
+      // The full ProjectFields selection: the app reads the default environment straight
+      // out of this response rather than re-reading the project list to find it.
+      return {
+        data: {
+          projectCreate: {
+            id: project.id,
+            name: project.name,
+            environments: edges(project.environments),
+          },
+        },
+      };
+    }
+
+    case "EnvironmentCreate": {
+      const input = variables.input as { projectId: string; name: string };
+      const environment = store.addEnvironment(input.projectId, input.name);
+      if (!environment) return { errors: [{ message: "Project not found" }] };
+      return { data: { environmentCreate: environment } };
+    }
+
     case "ServiceCreate": {
       const input = variables.input as {
         projectId: string;

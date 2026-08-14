@@ -9,8 +9,10 @@ import {
   DEPLOYMENT_EVENTS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
+  ENVIRONMENT_CREATE_MUTATION,
   PROJECTS_PERSONAL_QUERY,
   PROJECTS_WORKSPACE_QUERY,
+  PROJECT_CREATE_MUTATION,
   PROJECT_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
@@ -32,7 +34,7 @@ import {
   type ServiceNode,
   type ViewerNode,
 } from "./mappers";
-import type { Container, LogLine, RailwayProject } from "./types";
+import type { Container, LogLine, RailwayEnvironment, RailwayProject } from "./types";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
@@ -188,6 +190,51 @@ export async function getProjectContainers(
     project: toProject(data.project),
     containers: toContainers(nodes(data.project.services), environmentId),
   };
+}
+
+/**
+ * A new personal project, with whatever environment Railway created alongside it.
+ *
+ * Returns the mapped `RailwayProject` rather than the raw node so the caller can select it
+ * immediately: the environments come back in this same response — see
+ * PROJECT_CREATE_MUTATION — which is the difference between landing the user on their new
+ * project and landing them on the empty state they just acted on.
+ *
+ * Nothing here is prefixed. `MANAGED_PREFIX` gates destroy, this app offers no way to
+ * delete a project, and a marker that guards nothing would only put `spun-` on a name the
+ * user typed and then reads back in Railway's own dashboard.
+ */
+export async function createProject(
+  accessToken: string,
+  name: string,
+  signal?: AbortSignal,
+): Promise<RailwayProject> {
+  const data = await gql<{ projectCreate: ProjectNode }>(
+    PROJECT_CREATE_MUTATION,
+    { input: { name } },
+    { accessToken, operationName: "ProjectCreate", signal },
+  );
+  return toProject(data.projectCreate);
+}
+
+/**
+ * A new, empty environment in an existing project.
+ *
+ * Empty is the contract, not an accident of the arguments — see
+ * ENVIRONMENT_CREATE_MUTATION for why nothing is seeded or deployed into it.
+ */
+export async function createEnvironment(
+  accessToken: string,
+  projectId: string,
+  name: string,
+  signal?: AbortSignal,
+): Promise<RailwayEnvironment> {
+  const data = await gql<{ environmentCreate: { id: string; name: string } }>(
+    ENVIRONMENT_CREATE_MUTATION,
+    { input: { projectId, name, skipInitialDeploys: true } },
+    { accessToken, operationName: "EnvironmentCreate", signal },
+  );
+  return { id: data.environmentCreate.id, name: data.environmentCreate.name };
 }
 
 export async function createContainer(

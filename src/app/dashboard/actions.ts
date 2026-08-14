@@ -8,6 +8,14 @@ import {
   createContainer,
   destroyContainer,
   getProjectContainers,
+  /*
+   * Aliased because the exported actions below are the same two verbs. The repo's other
+   * actions dodge this by being named for the UI rather than the API — spinUp calls
+   * createContainer — and there is no such second name for "create a project" that is not
+   * a euphemism.
+   */
+  createEnvironment as createEnvironmentOnRailway,
+  createProject as createProjectOnRailway,
 } from "@/lib/railway/api";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
@@ -17,6 +25,8 @@ import { resolveVariables } from "@/lib/railway/secrets";
 import {
   VALIDATION_KEYS,
   VALIDATION_VALUES,
+  environmentCreateSchema,
+  projectCreateSchema,
   spinDownSchema,
   spinUpSchema,
 } from "@/lib/validation";
@@ -291,6 +301,133 @@ async function create(formData: FormData): Promise<ActionResult> {
       message: generated
         ? t("actions.spinningUpWithCredentials", { name })
         : t("actions.spinningUp", { name }),
+    };
+  } catch (error) {
+    const { key, values } = describeActionError(error);
+    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+  }
+}
+
+export async function createProject(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("createProject", { trustInboundId: true }, () =>
+    addProject(formData),
+  );
+}
+
+async function addProject(formData: FormData): Promise<ActionResult> {
+  const t = await getTranslations();
+
+  const parsed = projectCreateSchema.safeParse({
+    name: formField(formData, "projectName"),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (!issue) return { ok: false, error: t("actions.invalidForm") };
+    return {
+      ok: false,
+      error: messageForIssue(t, issue.message),
+      field: "projectName",
+    };
+  }
+
+  const { name } = parsed.data;
+
+  try {
+    const accessToken = await requireAccessToken();
+    const project = await createProjectOnRailway(accessToken, name);
+
+    /*
+     * The audit trail, for the same reason `container.created` has one: this creates
+     * billable infrastructure under someone's account. The name is user-supplied and
+     * bounded at LIMITS.PROJECT_NAME_MAX, and it is the only field that makes the record
+     * findable in Railway's own dashboard afterwards.
+     *
+     * There is no `project.destroyed` counterpart and there never will be — this app does
+     * not delete projects, which is why they carry no MANAGED_PREFIX either.
+     */
+    log.info("project.created", {
+      project_id: project.id,
+      project_name: name,
+      environment_count: project.environments.length,
+    });
+
+    revalidatePath("/dashboard");
+
+    /*
+     * Railway creates a default environment with the project, and the create mutation
+     * returns it — so the ordinary path selects both. The fallback is a project with no
+     * environment at all, which the picker already has a sentence for ("This project has
+     * no environments"); naming an environment id that does not exist would be worse than
+     * saying nothing.
+     */
+    const environment = project.environments[0];
+    return {
+      ok: true,
+      message: t("actions.projectCreated", { name: project.name }),
+      select: {
+        projectId: project.id,
+        ...(environment ? { environmentId: environment.id } : {}),
+      },
+    };
+  } catch (error) {
+    const { key, values } = describeActionError(error);
+    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+  }
+}
+
+export async function createEnvironment(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("createEnvironment", { trustInboundId: true }, () =>
+    addEnvironment(formData),
+  );
+}
+
+async function addEnvironment(formData: FormData): Promise<ActionResult> {
+  const t = await getTranslations();
+
+  const parsed = environmentCreateSchema.safeParse({
+    projectId: formField(formData, "projectId"),
+    name: formField(formData, "environmentName"),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (!issue) return { ok: false, error: t("actions.invalidForm") };
+    /*
+     * Attributed to the only field on screen. A bad `projectId` is not something the form
+     * can show — it is a hidden input the picker filled in — so its message reaches the
+     * user as a toast instead, which is what an absent `field` means.
+     */
+    const field = issue.path[0];
+    return {
+      ok: false,
+      error: messageForIssue(t, issue.message),
+      ...(field === "name" ? { field: "environmentName" as const } : {}),
+    };
+  }
+
+  const { projectId, name } = parsed.data;
+
+  try {
+    const accessToken = await requireAccessToken();
+    const environment = await createEnvironmentOnRailway(accessToken, projectId, name);
+
+    log.info("environment.created", {
+      project_id: projectId,
+      environment_id: environment.id,
+      environment_name: name,
+    });
+
+    revalidatePath("/dashboard");
+
+    return {
+      ok: true,
+      message: t("actions.environmentCreated", { name: environment.name }),
+      select: { projectId, environmentId: environment.id },
     };
   } catch (error) {
     const { key, values } = describeActionError(error);

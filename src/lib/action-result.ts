@@ -4,10 +4,31 @@ import { reportError } from "@/lib/report-error";
 import type { MessageDescriptor } from "@/lib/messages";
 
 /** Field names a Server Action can attribute an error to. */
-export type ActionField = "name" | "image" | "variableKey" | "variableValue";
+export type ActionField =
+  | "name"
+  | "image"
+  | "variableKey"
+  | "variableValue"
+  | "projectName"
+  | "environmentName";
+
+/**
+ * What the client should select once an action has created it.
+ *
+ * Ids only, and that bound is the point: an action returns no upstream text on any path,
+ * and these two values are about to be written into a query string anyway — selection
+ * lives in the URL and nowhere else (see `.ai/rules/architecture.md`). Without this the
+ * only honest thing a create dialog could do is refresh and leave the user to find what
+ * they just made in a picker of things that all look alike.
+ *
+ * `environmentId` is optional because only the project path can be sure of one: Railway
+ * returns the new project's default environment in the same response, but a caller that
+ * ever creates a project without one should drop the parameter rather than invent it.
+ */
+export type ActionSelection = { projectId: string; environmentId?: string };
 
 export type ActionResult =
-  | { ok: true; message: string }
+  | { ok: true; message: string; select?: ActionSelection }
   | {
       ok: false;
       error: string;
@@ -56,6 +77,8 @@ const FIELDS: ReadonlySet<string> = new Set([
   "image",
   "variableKey",
   "variableValue",
+  "projectName",
+  "environmentName",
 ]);
 
 export function isField(value: unknown): value is ActionField {

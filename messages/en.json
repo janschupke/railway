@@ -17,7 +17,8 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "themeSystem": "System",
-    "noValue": "—"
+    "noValue": "—",
+    "close": "Close"
   },
   "footer": {
     "source": "Source on GitHub",
@@ -47,7 +48,7 @@
     "scrollToTop": "Back to top",
     "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
     "noProjectsTitle": "No projects to show",
-    "noProjectsDescription": "Railway returned an empty project list for this account. Your authorization is intact, so re-authorizing usually changes nothing.",
+    "noProjectsDescription": "Railway returned an empty project list for this account. Your authorization is intact, so re-authorizing changes nothing — create a project here and it will appear in Railway too.",
     "noProjectsScopeTitle": "This app was not granted project access",
     "noProjectsScopeDescription": "Railway withheld {scopes} at consent, so it reports no projects no matter how many you have. Authorizing again and approving project access will fix it.",
     "noProjectsRetry": "Check again",
@@ -68,6 +69,31 @@
     "retryPending": "Retrying…",
     "reauthorize": "Re-authorize",
     "errorRef": "ref: {digest}"
+  },
+  "createProject": {
+    "trigger": "New project",
+    "triggerFirst": "Create a project",
+    "title": "Create a project",
+    "description": "This creates a project on your own Railway account. It is not deleted from here — projects are removed in Railway's own dashboard.",
+    "label": "Project name",
+    "placeholder": "My project",
+    "submit": "Create project",
+    "submitPending": "Creating…",
+    "announce": "Creating project…",
+    "opening": "Opening your new project…",
+    "failedTitle": "The project could not be created"
+  },
+  "createEnvironment": {
+    "trigger": "New environment",
+    "title": "Create an environment",
+    "description": "A new, empty environment in this project. Nothing is copied into it and nothing is deployed, so it costs nothing until you spin something up.",
+    "label": "Environment name",
+    "placeholder": "staging",
+    "submit": "Create environment",
+    "submitPending": "Creating…",
+    "announce": "Creating environment…",
+    "opening": "Opening your new environment…",
+    "failedTitle": "The environment could not be created"
   },
   "filters": {
     "searchLabel": "Search containers",
@@ -194,7 +220,9 @@
     "missingReference": "Missing container reference.",
     "gone": "That container no longer exists.",
     "notManaged": "This service was not created here, so it cannot be destroyed here.",
-    "destroyed": "Destroyed {name}"
+    "destroyed": "Destroyed {name}",
+    "projectCreated": "Created {name}",
+    "environmentCreated": "Created {name}"
   },
   "validation": {
     "nameRequired": "Give the container a name",
@@ -215,7 +243,11 @@
     "variableValueInvalid": "Values cannot contain line breaks. Paste a single line, or set this one on Railway.",
     "variablesTooMany": "Set at most {max, plural, one {# variable} other {# variables}} here",
     "variablesTooLarge": "The variables are too large together. Keep them under {max} characters.",
-    "variablesMalformed": "The variables could not be read. Reload the page and try again."
+    "variablesMalformed": "The variables could not be read. Reload the page and try again.",
+    "projectNameRequired": "Give the project a name",
+    "projectNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
+    "environmentNameRequired": "Give the environment a name",
+    "environmentNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}"
   },
   "errors": {
     "generic": "Something went wrong. Please try again. Reference {incident}.",

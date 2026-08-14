@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { CreateProjectButton } from "@/components/create-project-button";
 import { ContainerSectionSkeleton } from "@/components/dashboard-skeletons";
 import { ProjectPicker } from "@/components/project-picker";
 import { ProjectWatcher } from "@/components/project-watcher";
@@ -37,6 +38,7 @@ export default async function DashboardPage({
 
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
+  const tCreate = await getTranslations("createProject");
   const { projects, project, environment, error, errorKind, missingScopes } = shell;
 
   /*
@@ -44,6 +46,12 @@ export default async function DashboardPage({
    * Railway reports nothing no matter how many projects exist, and re-consent is the
    * only fix; with it, the list is genuinely empty and re-consent changes nothing —
    * which is the loop this page used to send people round.
+   *
+   * The create action belongs on exactly one side of this line. `projectCreate` is
+   * refused by the same withheld scope that produced the empty list on the denied branch,
+   * so offering it there would be a second button that cannot work; on the genuinely-empty
+   * branch it is the only thing that changes anything, which is why that branch leads with
+   * it and demotes the retry.
    */
   const deniedProjectAccess = missingScopes.some(
     (scope) => scope === "project:admin" || scope === "workspace:viewer",
@@ -162,18 +170,28 @@ export default async function DashboardPage({
                       />
                     ) : (
                       <>
+                        {/*
+                          The account is reachable and has nothing in it, so the useful
+                          action is to put something in it. This used to lead with Check
+                          again, which is the right answer only for the narrow case of a
+                          project created elsewhere seconds ago — it stays, demoted.
+                        */}
+                        <CreateProjectButton
+                          variant="primary"
+                          triggerLabel={tCreate("triggerFirst")}
+                        />
                         {/* Asking Railway again is both cheaper and likelier to help
                               than a consent screen that already granted everything. */}
                         <RefreshButton
                           label={t("noProjectsRetry")}
                           pendingLabel={t("noProjectsRetryPending")}
-                          variant="primary"
+                          variant="secondary"
                           size="sm"
                         />
                         <SignInButton
                           label={t("chooseProjects")}
                           consent
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
                         />
                       </>

@@ -179,6 +179,33 @@ export const spinUpSchema = z
     }
   });
 
+/*
+ * The two create schemas.
+ *
+ * Names are bounded and trimmed and nothing else. There is no charset rule on purpose:
+ * `toManagedName` does not run here — this app never destroys a project or an environment,
+ * so there is no ownership prefix to derive and no slug to keep round-trippable — and the
+ * name is passed to Railway verbatim, rendered as text, and never interpolated into a
+ * path, a URL or a shell. A pattern here would only reject project names people legitimately
+ * write, which is the failure mode the RAILWAY_ID_PATTERN comment above warns about.
+ */
+export const projectCreateSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "validation.projectNameRequired")
+    .max(LIMITS.PROJECT_NAME_MAX, "validation.projectNameTooLong"),
+});
+
+export const environmentCreateSchema = z.object({
+  projectId: railwayId("validation.projectRequired"),
+  name: z
+    .string()
+    .trim()
+    .min(1, "validation.environmentNameRequired")
+    .max(LIMITS.ENVIRONMENT_NAME_MAX, "validation.environmentNameTooLong"),
+});
+
 export const spinDownSchema = z.object({
   projectId: railwayId("validation.projectRequired"),
   environmentId: railwayId("validation.environmentRequired"),
@@ -193,6 +220,8 @@ export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.variableValueTooLong": { max: LIMITS.VARIABLE_VALUE_MAX },
   "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
   "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
+  "validation.projectNameTooLong": { max: LIMITS.PROJECT_NAME_MAX },
+  "validation.environmentNameTooLong": { max: LIMITS.ENVIRONMENT_NAME_MAX },
 };
 
 /**
@@ -222,4 +251,8 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.variablesTooMany",
   "validation.variablesTooLarge",
   "validation.variablesMalformed",
+  "validation.projectNameRequired",
+  "validation.projectNameTooLong",
+  "validation.environmentNameRequired",
+  "validation.environmentNameTooLong",
 ]);

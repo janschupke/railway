@@ -185,6 +185,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (url.pathname === "/__test/faults" && req.method === "POST") {
     const patch = JSON.parse((await readBody(req)) || "{}");
     store.faults = { ...store.faults, ...patch };
+    /*
+     * The one fault that is a state change rather than a response filter. `projectsEmpty`
+     * means the account holds nothing — so it empties the store here, once, instead of
+     * being consulted on every read. That is what lets a project created later in the same
+     * spec show up: the create pushes into the list this cleared, and both sources answer
+     * with it exactly as Railway would.
+     */
+    if (patch.projectsEmpty === true) store.projects = [];
     return json(res, 200, store.faults);
   }
 

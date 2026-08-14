@@ -12,8 +12,8 @@ do. When the two disagree, the README is the record and this file is stale — f
 ## What the app is
 
 One Next.js 16 App Router application. A visitor signs into **their own** Railway account
-over OIDC, picks a project and environment, and creates or destroys Docker-image services
-with live build and deploy logs streamed into the browser.
+over OIDC, picks or creates a project and environment, and creates or destroys Docker-image
+services with live build and deploy logs streamed into the browser.
 
 Single package — not a monorepo. `pnpm-workspace.yaml` exists only to carry `allowBuilds`
 toggles; there is no `packages:` list. That is not a reason to move to npm: `allowBuilds` is
@@ -96,6 +96,14 @@ than hidden metadata.
 
 **Changing `MANAGED_PREFIX` after containers exist orphans them.** They stay in Railway and
 become read-only in this app. Say so if you ever propose changing it.
+
+**Projects and environments are created but never destroyed, and so carry no marker.** The
+prefix exists to gate destroy; `projectDelete` and `environmentDelete` are deliberately
+absent from `operations.ts` entirely, which is a stronger guarantee than a guarded call
+site. Prefixing them would put `spun-` on a name the user typed and reads back in Railway's
+own dashboard, in exchange for guarding nothing. Deleting a project takes every service,
+environment and volume in it, including the ones this app did not create — if you ever
+propose adding it, that is the sentence to start from.
 
 ## The URL is the state; there is no client store
 

@@ -217,6 +217,13 @@ export type LogEvent =
   | "dashboard"
   | "dashboard.render"
   | "dashboard.selection_dropped"
+  /*
+   * Neither has a `.destroyed` counterpart, and that is the design rather than a gap: this
+   * app creates projects and environments and never deletes them, which is also why they
+   * carry no MANAGED_PREFIX. See actions.ts.
+   */
+  | "environment.created"
+  | "project.created"
   | "health.env_invalid"
   | "proxy.env_invalid"
   | "railway.deploy_failed"

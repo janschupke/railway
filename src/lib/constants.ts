@@ -222,6 +222,23 @@ export const LIMITS = {
   CONTAINER_NAME_MAX: 40,
   IMAGE_REF_MAX: 255,
   /**
+   * Project name length.
+   *
+   * Wider than a container name because a project name is prose people write for
+   * themselves — "Client work, 2026" — where a container name is a slug this app derives
+   * a service name from. Railway's own limit is not published; this bounds what reaches
+   * the mutation and comfortably fits the picker's `w-64` trigger before it truncates.
+   */
+  PROJECT_NAME_MAX: 64,
+  /**
+   * Environment name length.
+   *
+   * Deliberately short. Real environment names are `production`, `staging`, `pr-142` — the
+   * value is read in a picker beside the project name and repeated in Railway's own URLs,
+   * and nothing legible needs more than this.
+   */
+  ENVIRONMENT_NAME_MAX: 32,
+  /**
    * Environment variables one spin-up may carry.
    *
    * A long way past every preset in the catalog — the largest declares two — and past the

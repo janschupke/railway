@@ -165,6 +165,16 @@ export type Faults = {
   rejectWorkspaces: boolean;
   rejectPersonal: boolean;
   /**
+   * The account genuinely holds no projects, as a new Railway account does.
+   *
+   * Not the same state as `projectsSource: "none"`, and the difference is the whole point
+   * of the create flow. That fault makes the *sources* answer with nothing while the store
+   * still holds projects — an account whose projects are somewhere this app does not look.
+   * This one empties the store, so a project created during a spec becomes visible in the
+   * very next read, which is what a first-run flow has to prove.
+   */
+  projectsEmpty: boolean;
+  /**
    * Hold every GraphQL response for this many ms.
    *
    * Busy state is, by definition, only observable while a request is in flight. Against
@@ -187,25 +197,42 @@ const DEFAULT_FAULTS: Faults = {
   variablesFail: false,
   rejectWorkspaces: false,
   rejectPersonal: false,
+  projectsEmpty: false,
   slowMs: 0,
 };
 
+export type Project = {
+  id: string;
+  name: string;
+  environments: Array<{ id: string; name: string }>;
+};
+
+/**
+ * The seeded account, rebuilt per reset.
+ *
+ * A factory rather than a shared constant, and no longer a `readonly` field initialised
+ * once: projects are mutable now that a spec can create one, so a run that seeded from a
+ * shared array would leak the created project into every later spec — Playwright is
+ * workers: 1 against one fixture process, so that leak is guaranteed rather than likely.
+ */
+const seedProjects = (): Project[] => [
+  {
+    id: "proj_demo",
+    name: "Demo Project",
+    environments: [
+      { id: "env_prod", name: "production" },
+      { id: "env_staging", name: "staging" },
+    ],
+  },
+  {
+    id: "proj_other",
+    name: "Second Project",
+    environments: [{ id: "env_other", name: "production" }],
+  },
+];
+
 export class Store {
-  readonly projects = [
-    {
-      id: "proj_demo",
-      name: "Demo Project",
-      environments: [
-        { id: "env_prod", name: "production" },
-        { id: "env_staging", name: "staging" },
-      ],
-    },
-    {
-      id: "proj_other",
-      name: "Second Project",
-      environments: [{ id: "env_other", name: "production" }],
-    },
-  ];
+  projects: Project[] = seedProjects();
 
   services = new Map<string, Service>();
   deployments = new Map<string, Deployment>();
@@ -343,9 +370,30 @@ export class Store {
     if (this.#timer) clearInterval(this.#timer);
   }
 
+  addProject(name: string): Project {
+    const project: Project = {
+      id: this.id("proj"),
+      name,
+      // Railway makes one alongside the project, and the whole create flow depends on it
+      // arriving in the same response — see PROJECT_CREATE_MUTATION.
+      environments: [{ id: this.id("env"), name: "production" }],
+    };
+    this.projects.push(project);
+    return project;
+  }
+
+  addEnvironment(projectId: string, name: string): { id: string; name: string } | null {
+    const project = this.projects.find((p) => p.id === projectId);
+    if (!project) return null;
+    const environment = { id: this.id("env"), name };
+    project.environments.push(environment);
+    return environment;
+  }
+
   reset(): void {
     this.services.clear();
     this.deployments.clear();
+    this.projects = seedProjects();
     this.faults = { ...DEFAULT_FAULTS };
     this.addService({
       name: "postgres",

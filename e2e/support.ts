@@ -33,6 +33,7 @@ export async function injectFaults(
     projectsSource: ProjectsSource;
     rejectWorkspaces: boolean;
     rejectPersonal: boolean;
+    projectsEmpty: boolean;
     slowMs: number;
   }>,
 ) {

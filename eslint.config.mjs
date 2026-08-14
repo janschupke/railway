@@ -257,6 +257,13 @@ const eslintConfig = defineConfig([
                */
               "nameFieldName",
               "valueFieldName",
+              /*
+               * CreateNameDialog's field name, which is an `ActionField` member — the same
+               * closed set `variant` and `size` come from. It is both the rendered input's
+               * `name` and the key the Server Action attributes an error to, and it is
+               * never shown to anyone.
+               */
+              "field",
               ".*[Cc]lassName",
             ],
           },
