@@ -422,6 +422,7 @@ export function ContainerRow({
                     lines={stream.logs}
                     status={stream.status}
                     emptyLabel={t("waitingForOutput")}
+                    label={container.displayName}
                   />
                 ) : (
                   <Banner tone="info">{t("noDeployment")}</Banner>

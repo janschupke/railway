@@ -202,6 +202,30 @@ export const LIMITS = {
 export const UI = {
   /** Distance from the bottom within which the log pane stays auto-scrolled. */
   AUTOSCROLL_THRESHOLD_PX: 24,
+  /**
+   * Shortest log needle worth highlighting.
+   *
+   * A bound on the DOM rather than a nicety. A single character matches most of a
+   * thousand buffered lines, which is tens of thousands of <mark> elements rebuilt on
+   * every keystroke for a result that tells the reader nothing. The scan itself costs
+   * microseconds; the elements do not.
+   */
+  LOG_SEARCH_MIN_CHARS: 2,
+  /**
+   * Ceiling on the log needle. Longer than LIST.QUERY_MAX, and for a different reason:
+   * that one is sized to a container name, this one to a phrase lifted out of a stack
+   * trace, which is what people actually paste into a log search.
+   */
+  LOG_QUERY_MAX: 120,
+  /**
+   * Severity values the log filter will render chips for.
+   *
+   * The control is built from whatever the buffer contains, because Railway's `severity`
+   * has never been observed carrying a value here. If it turns out to be free-form rather
+   * than an enum, a thousand lines could yield hundreds of distinct values and the
+   * toolbar would become the page. Above this the control declines to render at all.
+   */
+  LOG_SEVERITY_MAX: 6,
 } as const;
 
 /**

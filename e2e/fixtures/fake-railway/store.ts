@@ -6,7 +6,12 @@
  * against a frozen fixture.
  */
 
-type LogLine = { timestamp: string; message: string };
+/**
+ * `severity` because the app's log documents all request it and the pane's filter is
+ * built from whatever values arrive. Without it here the adaptive control has no browser
+ * coverage at all — it correctly renders nothing, which is indistinguishable from broken.
+ */
+type LogLine = { timestamp: string; message: string; severity: string };
 
 export type Deployment = {
   id: string;
@@ -237,6 +242,9 @@ export class Store {
       const line: LogLine = {
         timestamp: new Date().toISOString(),
         message: `[fake-railway] ${deployment.status.toLowerCase()} ${deployment.id}`,
+        // Two values, so the filter has something to choose between rather than a single
+        // chip that narrows to everything.
+        severity: deployment.status === "FAILED" ? "error" : "info",
       };
       if (deployment.logPhase === "both" || deployment.logPhase === "build") {
         deployment.logs.build.push(line);

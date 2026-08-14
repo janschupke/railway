@@ -2,6 +2,9 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { LogPane } from "./log-pane";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
+import { ToastProvider } from "./ui/toast";
+
+const toolbar = () => document.querySelector("[data-log-toolbar]");
 
 describe("LogPaneSkeleton", () => {
   it("presents the log region before the pane's chunk arrives", () => {
@@ -21,8 +24,34 @@ describe("LogPaneSkeleton", () => {
     expect(screen.getByRole("log")).toHaveClass("h-pane-log");
     unmount();
 
-    render(<LogPane lines={[]} status="connecting" />);
+    render(
+      <ToastProvider>
+        <LogPane lines={[]} status="connecting" label="cache" />
+      </ToastProvider>,
+    );
     // LogPane puts the height on ScrollArea's root, one level above the log viewport.
     expect(screen.getByRole("log").parentElement).toHaveClass("h-pane-log");
+  });
+
+  it("reserves the toolbar row the real pane occupies", () => {
+    /*
+     * The placeholder is hand-written rather than the toolbar itself, because importing
+     * that here would pull it out of the pane's dynamic chunk and into /dashboard's first
+     * load. Which means two files own the height, and only this keeps them together.
+     */
+    const { unmount } = render(<LogPaneSkeleton />);
+    expect(toolbar()).toHaveClass("h-control-md", "mb-2");
+    unmount();
+
+    render(
+      <ToastProvider>
+        <LogPane lines={[]} status="connecting" label="cache" />
+      </ToastProvider>,
+    );
+    const real = screen.getByRole("group", { name: "Log controls" });
+    expect(real).toHaveClass("mb-2");
+    // One control row: the search field sets the height, and everything beside it is a
+    // small button centred against it. A second row would break the parity above.
+    expect(real.querySelector(".h-control-md")).toBeInTheDocument();
   });
 });

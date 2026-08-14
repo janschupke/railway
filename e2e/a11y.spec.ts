@@ -184,6 +184,33 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `log-panel/${theme}`);
     });
 
+    test(`the log pane's search and filters have no violations (${theme})`, async ({
+      page,
+    }) => {
+      /*
+       * Scanned with a needle typed and wrapping on, because the pane at rest draws none
+       * of what this checks: the <mark> pairs are the one place a highlight can read in
+       * one theme and vanish in the other, and the severity chips only exist once the
+       * stream has emitted a line carrying a severity.
+       */
+      await signIn(page);
+      await spinUp(page, "cache");
+      await setTheme(page, theme);
+
+      const cache = row(page, "cache");
+      await disclosure(page, "cache").click();
+      await expect(cache.getByRole("log")).toBeVisible();
+      await expect(cache.getByRole("toolbar", { name: "Severity" })).toBeVisible();
+
+      await cache
+        .getByRole("searchbox", { name: "Search these log lines" })
+        .fill("fake");
+      await expect(cache.locator("mark").first()).toBeVisible();
+      await cache.getByRole("button", { name: "Wrap long lines" }).click();
+
+      await expectNoA11yViolations(page, `log-search/${theme}`);
+    });
+
     test(`a failed row's explanation has no violations (${theme})`, async ({
       page,
     }) => {

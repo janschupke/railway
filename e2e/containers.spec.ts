@@ -44,6 +44,52 @@ test.describe("container lifecycle", () => {
     await expect(log).toContainText("[fake-railway]", { timeout: 20_000 });
   });
 
+  test("downloads the buffered lines as a file named after the container", async ({
+    page,
+  }) => {
+    /*
+     * The object-URL dance is the part a component test cannot prove: jsdom has no
+     * download at all, so the anchor, the blob and the revoke-on-the-next-task are only
+     * ever asserted as calls. Here the browser actually produces a file.
+     *
+     * The clipboard deliberately has no equivalent spec — reading it needs
+     * clipboard-read granted on a context this config shares across every test, and for
+     * chromium only. The success toast is what proves that path.
+     */
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+
+    const download = page.waitForEvent("download");
+    await cache.getByRole("button", { name: "Download these lines" }).click();
+
+    expect((await download).suggestedFilename()).toMatch(/^cache-logs-.+\.txt$/);
+  });
+
+  test("narrows the log pane to the severities the stream actually sent", async ({
+    page,
+  }) => {
+    // The control is built from what arrived rather than a vocabulary this app invented,
+    // so this is also the assertion that severity survives query, subscription, SSE route
+    // and hook without anything dropping it.
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+
+    // A toolbar, not a group: ToggleGroup implements roving focus, so it claims the role
+    // that promises arrow-key navigation — which is why the strip around it does not.
+    const severity = cache.getByRole("toolbar", { name: "Severity" });
+    await expect(severity.getByRole("button", { name: "info" })).toBeVisible();
+  });
+
   test("says a finished deployment had no output, instead of connecting forever", async ({
     page,
   }) => {

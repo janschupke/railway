@@ -313,6 +313,57 @@ test.describe("keyboard operation", () => {
     ).toBeVisible();
   });
 
+  test("finds a line in the log pane and steps through matches without a mouse", async ({
+    page,
+  }) => {
+    /*
+     * The find-bar model, and the reason it is Enter rather than a shortcut: the repo has
+     * no global keyboard layer, several panes can be open at once, and capturing the
+     * browser's own find would be hostile. So the field is an ordinary tab stop and Enter
+     * only does something when there is somewhere to go.
+     */
+    await signIn(page);
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toBeVisible();
+
+    const search = cache.getByRole("searchbox", { name: "Search these log lines" });
+    await search.focus();
+    await page.keyboard.type("fake-railway");
+
+    const counter = cache.getByText(/^Match \d+ of \d+$/);
+    await expect(counter).toHaveText(/^Match 1 of \d+$/);
+
+    await page.keyboard.press("Enter");
+    await expect(counter).toHaveText(/^Match 2 of \d+$/);
+
+    await page.keyboard.press("Shift+Enter");
+    await expect(counter).toHaveText(/^Match 1 of \d+$/);
+
+    await page.keyboard.press("Escape");
+    await expect(search).toHaveValue("");
+    await expect(cache.locator("mark")).toHaveCount(0);
+  });
+
+  test("reports the wrap toggle's state rather than only drawing it", async ({
+    page,
+  }) => {
+    // A lone two-state control, so aria-pressed on a button rather than a Radix Toggle.
+    await signIn(page);
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await disclosure(page, "cache").click();
+    const wrap = cache.getByRole("button", { name: "Wrap long lines" });
+
+    await expect(wrap).toHaveAttribute("aria-pressed", "false");
+    await wrap.focus();
+    await page.keyboard.press("Enter");
+    await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("keeps a visible focus indicator on every interactive control", async ({
     page,
   }) => {

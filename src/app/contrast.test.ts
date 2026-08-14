@@ -226,6 +226,39 @@ describe.each(THEMES)("%s theme", (themeName, theme) => {
     );
   });
 
+  it("a search match is readable on the log pane's own fill", () => {
+    /*
+     * The same pair as the preset chip below, over a different backdrop: the pane fills
+     * with --rc-subtle rather than --rc-surface, and those are two different colours in
+     * the light theme. The <mark> wash is nearly invisible on it either way, which is
+     * why the glyph colour is what actually distinguishes a match.
+     */
+    const pane = surface("--rc-subtle");
+    const fill = resolve("--rc-accent-bg", theme, pane);
+    const text = resolve("--rc-accent", theme, fill);
+    expect(
+      Number(contrast(text, fill).toFixed(2)),
+      `log match in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_NORMAL);
+  });
+
+  it("the current search match is the loudest thing in the log pane", () => {
+    // Opaque, so it composites over nothing — but it still has to stand off the pane it
+    // sits in, which is the half the primary-button assertion above does not cover.
+    const pane = surface("--rc-subtle");
+    const fill = surface("--rc-accent");
+    expect(
+      Number(contrast(fill, pane).toFixed(2)),
+      `current match block in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_LARGE);
+
+    const label = resolve("--rc-accent-fg", theme, fill);
+    expect(
+      Number(contrast(label, fill).toFixed(2)),
+      `current match text in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_NORMAL);
+  });
+
   it("accent text is readable on the accent fill", () => {
     // The selected preset chip: accent text on a translucent accent wash.
     const cardSurface = surface("--rc-surface");

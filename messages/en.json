@@ -98,7 +98,22 @@
     "logsLabel": "Container logs",
     "jumpToLatest": "Jump to latest",
     "noTimestamp": "--:--:--",
-    "rawStatus": " (Railway status: {status})"
+    "rawStatus": " (Railway status: {status})",
+    "logToolbarLabel": "Log controls",
+    "logSearchLabel": "Search these log lines",
+    "logSearchPlaceholder": "Find in the lines below",
+    "logSearchMinChars": "Type at least {count, plural, one {# character} other {# characters}} to search.",
+    "logNoMatches": "No matches in these lines.",
+    "logMatchCount": "Match {index, number} of {total, number}",
+    "logPreviousMatch": "Previous match",
+    "logNextMatch": "Next match",
+    "logWrapLines": "Wrap long lines",
+    "logCopy": "Copy these lines",
+    "logCopied": "{count, plural, one {Copied one log line} other {Copied # log lines}}",
+    "logCopyFailed": "The log lines could not be copied",
+    "logCopyFailedDetail": "The browser refused access to the clipboard. Select the lines and copy them, or download them instead.",
+    "logDownload": "Download these lines",
+    "logSeverityLabel": "Severity"
   },
   "states": {
     "pending": "Queued",

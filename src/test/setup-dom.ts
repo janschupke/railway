@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 afterEach(cleanup);
 
@@ -96,6 +96,36 @@ if (!Element.prototype.hasPointerCapture) {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+
+/*
+ * jsdom implements no async clipboard, and the log pane copies its buffer through one.
+ *
+ * Exported like routerMock rather than stubbed inertly, because the branch worth testing
+ * is the one where the write FAILS: navigator.clipboard is undefined on an insecure
+ * origin and rejects on a denied permission, and a test cannot reach the error toast any
+ * other way. Note that user-event installs a clipboard stub of its own for the duration
+ * of a `setup()` session, so a test asserting on this one must dispatch its clicks with
+ * fireEvent — object URLs need no stub at all, since jsdom does implement those.
+ *
+ * The explicit reset matters: vitest.config.mts sets no clearMocks, so without it one
+ * spec's rejection leaks into the next.
+ */
+export const clipboardMock = { writeText: vi.fn(async () => {}) };
+
+/*
+ * Reinstalled per test rather than once, because user-event's stub is never detached: a
+ * single `setup()` anywhere earlier in a file leaves its own clipboard on the navigator
+ * for every test after it, and the assertions here would then be made against an object
+ * nothing writes to.
+ */
+beforeEach(() => {
+  Object.defineProperty(navigator, "clipboard", {
+    value: clipboardMock,
+    configurable: true,
+  });
+  clipboardMock.writeText.mockReset();
+  clipboardMock.writeText.mockResolvedValue(undefined);
+});
 
 // Next's router is not present in a component test; components only ever call refresh
 // and push, so a spy pair is enough and keeps assertions on navigation possible.

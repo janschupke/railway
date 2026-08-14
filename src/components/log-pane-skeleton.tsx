@@ -19,6 +19,16 @@ export function LogPaneSkeleton() {
 
   return (
     <div className="relative">
+      {/*
+        Reserves the row LogPane's toolbar occupies, so the panel does not grow by a
+        control's height when the chunk lands.
+
+        Deliberately the placeholder and not the toolbar itself: importing it here would
+        pull it and its icons out of the pane's dynamic chunk and into /dashboard's first
+        load, for every visitor who never expands a row. log-pane-skeleton.test.tsx pins
+        the height against the real thing so the two cannot drift.
+      */}
+      <div data-log-toolbar aria-hidden className="h-control-md mb-2" />
       <div
         role="log"
         aria-busy="true"
