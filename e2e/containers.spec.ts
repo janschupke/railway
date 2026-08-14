@@ -5,6 +5,7 @@ import {
   dismissWithEscape,
   expect,
   field,
+  fillAdvanced,
   fixtureServices,
   fixtureStats,
   injectFaults,
@@ -1181,6 +1182,158 @@ test.describe("refusals the user is told about", () => {
  * was running or what it was costing. These are the two halves of that: per-row usage,
  * which Railway gives per service, and spend, which it only gives per workspace.
  */
+/**
+ * The resource controls, which nothing on the page renders back.
+ *
+ * Every assertion here reads the fixture rather than the DOM, and that is the point: the
+ * question is whether a value reached Railway, not whether it reached the form. The form's
+ * own behaviour — what clears, what survives, what opens — is covered in
+ * spin-up-form.test.tsx, where it costs milliseconds instead of a browser.
+ */
+test.describe("resource controls on a spin-up", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  const created = async (page: Page, name: string) =>
+    (await fixtureServices(page)).find((service) => service.name === `spun-${name}`);
+
+  test("carries every advanced value through to the service", async ({ page }) => {
+    await onlyVisible(
+      page.getByRole("button", { name: /show preset images/i }),
+    ).click();
+    await onlyVisible(page.getByRole("option", { name: /^Redis/ })).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await field(page, "Name").fill("tuned");
+
+    await fillAdvanced(page, {
+      region: "us-west2",
+      replicas: "2",
+      cpu: "0.5",
+      memory: "1",
+      restartPolicy: "ON_FAILURE",
+      restartRetries: "4",
+      startCommand: "redis-server --appendonly yes",
+    });
+    await button(page, /spin up container/i).click();
+
+    await expect(row(page, "tuned")).toBeVisible();
+    expect((await created(page, "tuned"))?.settings).toEqual({
+      region: "us-west2",
+      replicas: 2,
+      restartPolicy: "ON_FAILURE",
+      restartRetries: 4,
+      startCommand: "redis-server --appendonly yes",
+      vcpus: 0.5,
+      memoryGB: 1,
+    });
+  });
+
+  /*
+   * Collapsing the panel is "tidy this away", not "throw this away". Asserted in a real
+   * browser as well as in jsdom, because the property belongs to `<details>` rather than to
+   * this app — and the day somebody swaps it for a component that unmounts its closed
+   * content, the jsdom test and this one fail together.
+   */
+  test("keeps a value that was set and then hidden again", async ({ page }) => {
+    await field(page, "Image reference").fill("nginx:1.27-alpine");
+    await field(page, "Name").fill("folded");
+    await fillAdvanced(page, { replicas: "3" });
+
+    await page.getByText("Advanced settings").click();
+    await expect(page.locator("details[open]")).toHaveCount(0);
+
+    await button(page, /spin up container/i).click();
+
+    await expect(row(page, "folded")).toBeVisible();
+    expect((await created(page, "folded"))?.settings.replicas).toBe(3);
+  });
+
+  /*
+   * The round-trip guarantee, in a browser. Nothing was asked for, so neither mutation was
+   * sent — and since the fixture only ever writes these fields from those two mutations, all
+   * null is the proof that a spin-up nobody customised costs what it always cost.
+   */
+  test("sends no settings at all when the panel is left alone", async ({ page }) => {
+    await spinUp(page, "plain");
+
+    await expect(row(page, "plain")).toBeVisible();
+    expect((await created(page, "plain"))?.settings).toEqual({
+      region: null,
+      replicas: null,
+      restartPolicy: null,
+      restartRetries: null,
+      startCommand: null,
+      vcpus: null,
+      memoryGB: null,
+    });
+  });
+
+  test("refuses an out-of-range replica count before anything is created", async ({
+    page,
+  }) => {
+    await field(page, "Image reference").fill("nginx:1.27-alpine");
+    await field(page, "Name").fill("toobig");
+    await fillAdvanced(page, { replicas: "99" });
+    await button(page, /spin up container/i).click();
+
+    await expect(page.getByText(/run at most 5 replicas here/i)).toBeVisible();
+    await expect(row(page, "toobig")).toHaveCount(0);
+  });
+
+  /*
+   * The two refusals that leave a service behind, and they say different things because the
+   * remedies differ: a refused size is answered by asking for less, and a refused setting is
+   * not. Both leave the container un-deployed, which is the state the user has to act on.
+   */
+  test("says the size was refused, and leaves the container un-deployed", async ({
+    page,
+  }) => {
+    await injectFaults(page, { limitsFail: true });
+
+    await field(page, "Image reference").fill("nginx:1.27-alpine");
+    await field(page, "Name").fill("toobig");
+    await fillAdvanced(page, { cpu: "8" });
+    await button(page, /spin up container/i).click();
+
+    await expect(toast(page, /usually a limit of the plan/i)).toBeVisible();
+    // Created, and never deployed: the row is there to be destroyed.
+    await expect(row(page, "toobig")).toBeVisible();
+  });
+
+  test("says the settings were refused, in its own sentence", async ({ page }) => {
+    await injectFaults(page, { settingsFail: true });
+
+    await field(page, "Image reference").fill("nginx:1.27-alpine");
+    await field(page, "Name").fill("unsettled");
+    await fillAdvanced(page, { replicas: "2" });
+    await button(page, /spin up container/i).click();
+
+    await expect(toast(page, /refused the settings you asked for/i)).toBeVisible();
+    await expect(row(page, "unsettled")).toBeVisible();
+  });
+
+  /*
+   * Both filters in `toRegionOptions`, end to end. The fixture lists four regions: one with
+   * no id, which would post an empty string and silently mean "Railway chooses", and one
+   * Railway is retiring, which is a container that stops working later.
+   */
+  test("offers only the regions worth choosing", async ({ page }) => {
+    await fillAdvanced(page, {});
+
+    const region = page.getByLabel("Region");
+    await expect(region.getByRole("option")).toHaveCount(3);
+    await expect(
+      region.getByRole("option", { name: "Railway chooses" }),
+    ).toBeAttached();
+    await expect(
+      region.getByRole("option", { name: "US West (Oregon)" }),
+    ).toBeAttached();
+    await expect(region.getByRole("option", { name: /no identifier/i })).toHaveCount(0);
+    await expect(region.getByRole("option", { name: /retiring/i })).toHaveCount(0);
+  });
+});
+
 test.describe("usage and spend", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page);

@@ -16,7 +16,7 @@ import { ErrorBlock } from "@/components/ui/error-block";
 import { EmptyState } from "@/components/ui/misc";
 import { LINKS } from "@/lib/constants";
 import { ContainerSection } from "./container-section";
-import { loadDashboardShell, managedNames } from "./data";
+import { deployRegions, loadDashboardShell, managedNames } from "./data";
 import { PageMain } from "@/components/ui/page";
 import { Heading } from "@/components/ui/text";
 
@@ -57,6 +57,17 @@ export default async function DashboardPage({
     project && environment
       ? managedNames(project.id, environment.id)
       : Promise.resolve([]);
+
+  /*
+   * Not awaited either, for the same reason and with one difference worth naming: this read
+   * shares no memo with anything on the page, so it is a Railway round trip of its own —
+   * memoised for ten minutes in lib/railway/regions.ts, which is what stops a select nobody
+   * opens costing a request per render.
+   *
+   * Keyed on the project alone. Regions are a project-scoped list, and including the
+   * environment would halve the memo's hit rate for a value it does not depend on.
+   */
+  const regions = project ? deployRegions(project.id) : Promise.resolve([]);
 
   /*
    * The empty list has two causes that need opposite advice. Without project access
@@ -241,6 +252,7 @@ export default async function DashboardPage({
                 environmentId={environment?.id ?? ""}
                 disabled={!project || !environment}
                 names={names}
+                regions={regions}
               />
 
               {/*

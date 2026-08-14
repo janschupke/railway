@@ -26,17 +26,18 @@ upstream call.
 
 ### Input surfaces
 
-Six things cross from a browser into a Railway mutation. None is trusted; each is
+Seven things cross from a browser into a Railway mutation. None is trusted; each is
 bounded.
 
-| Input                 | Bound                                                                                                                              | Where                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/registry/reference.ts`, `src/lib/validation.ts` |
-| Container name        | 40 characters, and prefixed before it is sent — on a rename as well as on create                                                   | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
-| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                                  |
-| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
-| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
-| Public port           | decimal digits only, 1–65 535; blank means no domain is minted at all                                                              | `src/lib/validation.ts`                                  |
+| Input                 | Bound                                                                                                                                                                                     | Where                                                    |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                                                                           | `src/lib/registry/reference.ts`, `src/lib/validation.ts` |
+| Container name        | 40 characters, and prefixed before it is sent — on a rename as well as on create                                                                                                          | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
+| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix                                                        | `src/lib/validation.ts`                                  |
+| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation.ts`                                  |
+| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation.ts`                                  |
+| Public port           | decimal digits only, 1–65 535; blank means no domain is minted at all                                                                                                                     | `src/lib/validation.ts`                                  |
+| Resource controls     | region `[a-z0-9-]`, 32 characters; 1–5 replicas; over 0 and up to 8 vCPU; over 0 and up to 8 GB; one of three restart policies; 0–10 retries; 512 characters of single-line start command | `src/lib/validation.ts`                                  |
 
 The port is the newest of these and the narrowest. It reaches exactly one place —
 `ServiceDomainCreateInput.targetPort` — on a service the requester's own grant already
@@ -52,14 +53,36 @@ follows, where the catalog grants and the request does not ask. So the one surfa
 aim a domain at an arbitrary port is the create form, where the container being aimed at is
 the one being created.
 
-A seventh input crosses from the browser and reaches no mutation at all: the spin-up form's
+**The region is bounded by charset and length, not by membership of the list the form
+offered.** Checking it against Railway's own `regions` answer would mean a second Railway
+read inside the Server Action to refuse a value no browser can produce — the options are a
+closed `<select>` this app rendered. What a bound here has to stop is a hand-crafted request
+putting arbitrary text into a GraphQL variable, and a charset plus a ceiling stops exactly
+that. The value becomes one string in one mutation input; it is never a host, a path, a
+filename or a command on this server.
+
+**The start command is a command line, and it runs inside the user's own container on the
+user's own Railway account.** Nothing on this server interprets it — it is a string in a
+mutation input carried by the requester's own token, into a service they asked this app to
+create in a project their grant already reaches. That is the same blast-radius argument the
+environment-variables row rests on, and it is worth stating rather than leaving to be
+inferred, because "a form field that becomes a shell command" reads alarming until the two
+accounts involved are the same one. What is bounded is shape: 512 characters, and no line
+breaks, for the reason `VARIABLE_VALUE_PATTERN` exists.
+
+Both are recorded the way their cardinality allows. `container.created` and
+`railway.settings_failed` carry the region, the replica count, the size and the policy —
+all closed or tightly bounded — and `start_command_length` rather than the command, which
+is the same split that names preset variables and counts the user's.
+
+An eighth input crosses from the browser and reaches no mutation at all: the spin-up form's
 idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation.ts`. Both ends of
 that are deliberate. The floor is unguessability — a guessed key is answered with somebody
 else's result instead of the container they asked for — and the ceiling is memory, since
 the value becomes half of a key in a map that lives as long as the process. The charset is
 the one every Railway identifier here uses, which keeps it greppable in a log line.
 
-**An eighth reaches no Railway mutation either, and is the first that reaches anything
+**A ninth reaches no Railway mutation either, and is the first that reaches anything
 outside this app at all**: `?ref=` on `/api/image-check`, the reference the spin-up form
 asks a registry about. It is bounded five ways before a byte leaves — a session is
 required, `IMAGE_PATTERN` and 255 characters apply as they do on submit, the host must
@@ -67,7 +90,7 @@ resolve to one of three allowlisted registries, the user holds at most two probe
 and a shared answer cache with a per-registry cool-off bounds the rate. See the outbound
 hosts section below for why the allowlist is the control that matters.
 
-**A ninth is the first that reads a secret rather than writing one**: the three ids on
+**A tenth is the first that reads a secret rather than writing one**: the three ids on
 `/api/service-variables`, which the edit dialog sends to find out which variables a service
 already has. All three are held to `RAILWAY_ID_PATTERN` before the session is read, and none
 of them is logged at any level.
@@ -80,7 +103,7 @@ on any path**, which is what lets the edit form show an existing variable as a n
 empty cell, and what keeps the e2e assertion that a minted credential never appears in page
 content true after this feature as it was before it.
 
-**A tenth reaches no Railway call at all and decides what this app says about itself**: the
+**An eleventh reaches no Railway call at all and decides what this app says about itself**: the
 `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` headers, from which `src/lib/origin.ts`
 derives the origin this request is served at. It is bounded three ways before anything reads
 it — the parse must round-trip to exactly the host it was given, with no path, credentials

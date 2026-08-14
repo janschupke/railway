@@ -8,6 +8,7 @@ import { LIMITS } from "@/lib/constants";
  * be the source of it: importing anything from here drags zod into /dashboard's first load.
  */
 import { IMAGE_PATTERN } from "@/lib/registry/reference";
+import type { RestartPolicyType } from "@/lib/railway/graphql.generated";
 
 /**
  * Deployment id, as it arrives from the URL of the stream route.
@@ -239,6 +240,158 @@ const port = z
   )
   .optional();
 
+/**
+ * A whole number somebody may leave blank, checked as digits before it becomes one.
+ *
+ * The shape `port` above established, for the two reasons written there: `parseInt("3abc")`
+ * is 3, so a typo silently becomes a working value, and `Number` reads `"0x10"` and `"1e3"`
+ * as numbers a field asking for a count never meant. Blank survives as `undefined` rather
+ * than collapsing to 0 — every field built from this means "leave it to Railway" when it is
+ * empty, and 0 is a request Railway would honour.
+ *
+ * Two messages, not one: a value that is not a number and a value that is out of range are
+ * different mistakes with different corrections, and the ceiling one interpolates the bound
+ * so the sentence can say what it is.
+ */
+const COUNT_PATTERN = /^\d+$/;
+
+const optionalCount = (bounds: {
+  min: number;
+  max: number;
+  invalid: string;
+  tooLarge: string;
+}) =>
+  z
+    .string()
+    .trim()
+    .refine((value) => value === "" || COUNT_PATTERN.test(value), bounds.invalid)
+    .transform((value) => (value === "" ? undefined : Number(value)))
+    .refine((value) => value === undefined || value >= bounds.min, bounds.invalid)
+    .refine((value) => value === undefined || value <= bounds.max, bounds.tooLarge)
+    .optional();
+
+/**
+ * A positive decimal somebody may leave blank. CPU and memory, and nothing else.
+ *
+ * Separate from `optionalCount` because Railway types both as `Float` and a quarter of a
+ * vCPU is a real request — so the digits rule has to admit a decimal point, and the floor is
+ * "greater than zero" rather than a minimum anyone chose. A service with 0 vCPU is not a
+ * smaller service, it is a refused mutation.
+ */
+const AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
+
+const optionalAmount = (bounds: { max: number; invalid: string; tooLarge: string }) =>
+  z
+    .string()
+    .trim()
+    .refine((value) => value === "" || AMOUNT_PATTERN.test(value), bounds.invalid)
+    .transform((value) => (value === "" ? undefined : Number(value)))
+    .refine((value) => value === undefined || value > 0, bounds.invalid)
+    .refine((value) => value === undefined || value <= bounds.max, bounds.tooLarge)
+    .optional();
+
+/**
+ * Railway's region identifiers, bounded by charset and length rather than by membership.
+ *
+ * The form's options come from Railway's own `regions` list, so a person cannot type one of
+ * these at all — which is what makes checking the value against that list a second Railway
+ * round trip inside the Server Action to refuse something no browser produces. What this has
+ * to stop is a hand-crafted request putting arbitrary text into a GraphQL variable, and a
+ * charset and a ceiling stop exactly that. See SECURITY.md, "Input surfaces".
+ *
+ * Linear, disjoint atom classes, no nested quantifier — not ReDoS-able, for the reason
+ * VARIABLE_NAME_PATTERN is not. Matches the empty string on purpose: blank is the ordinary
+ * value, and it means Railway chooses.
+ */
+const REGION_PATTERN = /^[a-z0-9-]*$/;
+
+/**
+ * The three restart policies Railway offers.
+ *
+ * Typed against the generated `RestartPolicyType` rather than declared free-standing, so a
+ * member Railway adds or removes fails `pnpm typecheck` here rather than being discovered by
+ * a user whose choice is refused.
+ */
+const RESTART_POLICIES: readonly RestartPolicyType[] = [
+  "ALWAYS",
+  "NEVER",
+  "ON_FAILURE",
+];
+
+/**
+ * The resource controls behind the form's Advanced disclosure.
+ *
+ * Deliberately NOT in `containerFields`, and this is the one place where the tidier-looking
+ * change is a data-loss bug. That object is shared with `containerEditSchema`, so an edit
+ * form carrying these would post seven blank values for a service that is already running —
+ * and blank means `undefined`, which `serviceInstanceUpdate` reads as "no change" only
+ * because this app never sends the member at all. The moment an edit path builds an input
+ * from these it is sending "unset the region, unset the replica count" to a container
+ * somebody configured. An edit form can carry them once it reads the current values back off
+ * `ServiceInstance` first, and not before.
+ *
+ * Every one is optional, every one means "leave it to Railway" when blank, and none of them
+ * is settable on `ServiceCreateInput` — they are two follow-up mutations, which is why
+ * createContainer has two more outcomes than it used to.
+ */
+const advancedFields = {
+  region: z
+    .string()
+    .trim()
+    .max(LIMITS.REGION_MAX, "validation.regionInvalid")
+    .regex(REGION_PATTERN, "validation.regionInvalid")
+    .transform((value) => (value === "" ? undefined : value))
+    .optional(),
+  replicas: optionalCount({
+    min: 1,
+    max: LIMITS.REPLICAS_MAX,
+    invalid: "validation.replicasInvalid",
+    tooLarge: "validation.replicasTooMany",
+  }),
+  cpu: optionalAmount({
+    max: LIMITS.VCPU_MAX,
+    invalid: "validation.cpuInvalid",
+    tooLarge: "validation.cpuTooLarge",
+  }),
+  memory: optionalAmount({
+    max: LIMITS.MEMORY_GB_MAX,
+    invalid: "validation.memoryInvalid",
+    tooLarge: "validation.memoryTooLarge",
+  }),
+  restartPolicy: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        value === "" || (RESTART_POLICIES as readonly string[]).includes(value),
+      "validation.restartPolicyInvalid",
+    )
+    .transform((value) => (value === "" ? undefined : (value as RestartPolicyType)))
+    .optional(),
+  /*
+   * Zero is a value someone means — "do not retry this at all" — so the floor is 0 and not
+   * 1. It is also the number an obvious tidy-up would raise to match `replicas` above.
+   */
+  restartRetries: optionalCount({
+    min: 0,
+    max: LIMITS.RESTART_RETRIES_MAX,
+    invalid: "validation.restartRetriesInvalid",
+    tooLarge: "validation.restartRetriesTooMany",
+  }),
+  startCommand: z
+    .string()
+    .trim()
+    .max(LIMITS.START_COMMAND_MAX, "validation.startCommandTooLong")
+    /*
+     * The exclusion a variable value carries, for the same reason: a line break is invisible
+     * in a single-line input — the browser's own sanitiser strips it out of a pasted string
+     * — and it changes the shape of what is being set rather than its content.
+     */
+    .regex(VARIABLE_VALUE_PATTERN, "validation.startCommandInvalid")
+    .transform((value) => (value === "" ? undefined : value))
+    .optional(),
+};
+
 export const spinUpSchema = z
   .object({
     projectId: railwayId("validation.projectRequired"),
@@ -252,6 +405,13 @@ export const spinUpSchema = z
      * a container without an address gets one.
      */
     port,
+    /*
+     * After every visible field and before the key, which is error priority rather than
+     * tidiness: zod reports shape issues in declaration order and the action reads
+     * `issues[0]`, so a typo in the name — which is on screen — outranks a replica count
+     * behind a closed disclosure, and both outrank a form that arrived without its key.
+     */
+    ...advancedFields,
     /*
      * Last on purpose. Zod reports shape issues in declaration order and the action reads
      * `issues[0]`, so anything a person can actually fix — the name, the image, a variable
@@ -363,6 +523,11 @@ export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
   "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
   "validation.portInvalid": { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
+  "validation.replicasTooMany": { max: LIMITS.REPLICAS_MAX },
+  "validation.cpuTooLarge": { max: LIMITS.VCPU_MAX },
+  "validation.memoryTooLarge": { max: LIMITS.MEMORY_GB_MAX },
+  "validation.restartRetriesTooMany": { max: LIMITS.RESTART_RETRIES_MAX },
+  "validation.startCommandTooLong": { max: LIMITS.START_COMMAND_MAX },
   "validation.tooManyContainers": { max: LIMITS.BULK_DESTROY_MAX },
   "validation.projectNameTooLong": { max: LIMITS.PROJECT_NAME_MAX },
   "validation.environmentNameTooLong": { max: LIMITS.ENVIRONMENT_NAME_MAX },
@@ -396,6 +561,18 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.variablesTooLarge",
   "validation.variablesMalformed",
   "validation.portInvalid",
+  "validation.regionInvalid",
+  "validation.replicasInvalid",
+  "validation.replicasTooMany",
+  "validation.cpuInvalid",
+  "validation.cpuTooLarge",
+  "validation.memoryInvalid",
+  "validation.memoryTooLarge",
+  "validation.restartPolicyInvalid",
+  "validation.restartRetriesInvalid",
+  "validation.restartRetriesTooMany",
+  "validation.startCommandInvalid",
+  "validation.startCommandTooLong",
   "validation.tooManyContainers",
   "validation.submissionInvalid",
   "validation.projectNameRequired",

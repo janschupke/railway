@@ -23,10 +23,12 @@ import {
   PROJECT_CREATE_MUTATION,
   PROJECT_METRICS_QUERY,
   PROJECT_QUERY,
+  REGIONS_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
   SERVICE_DOMAIN_CREATE_MUTATION,
+  SERVICE_INSTANCE_LIMITS_UPDATE_MUTATION,
   SERVICE_INSTANCE_UPDATE_MUTATION,
   SERVICE_UPDATE_MUTATION,
   SERVICE_VARIABLES_QUERY,
@@ -50,6 +52,7 @@ import {
   toContainers,
   toProject,
   toProjects,
+  toRegionOptions,
   toWorkspaceSpend,
   type ViewerNode,
 } from "./mappers";
@@ -60,8 +63,10 @@ import type {
   LogLine,
   RailwayEnvironment,
   RailwayProject,
+  RegionOption,
   WorkspaceSpend,
 } from "./types";
+import type { RestartPolicyType } from "./graphql.generated";
 import type { Refusable, TypedDocument } from "./typed-document";
 
 export type Viewer = { id: string; name?: string; email?: string };
@@ -336,6 +341,26 @@ export async function getEnvironmentVolumes(
 }
 
 /**
+ * The regions a container can be created in, for the spin-up form's select.
+ *
+ * Throws, and the caller catches. The read is one Railway round trip that no other part of
+ * the dashboard shares, so it is memoised a layer up in ./regions — this function is the
+ * uncached truth and that module decides how often it is asked for.
+ */
+export async function listRegions(
+  accessToken: string,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<RegionOption[]> {
+  const data = await gql(
+    REGIONS_QUERY,
+    { projectId },
+    { accessToken, operationName: "Regions", signal },
+  );
+  return toRegionOptions(data.regions);
+}
+
+/**
  * A new personal project, with whatever environment Railway created alongside it.
  *
  * Returns the mapped `RailwayProject` rather than the raw node so the caller can select it
@@ -380,6 +405,34 @@ export async function createEnvironment(
   return { id: data.environmentCreate.id, name: data.environmentCreate.name };
 }
 
+/**
+ * The resource controls the spin-up form's Advanced panel carries.
+ *
+ * Named types rather than inline members because two call sites build them — the action
+ * assembles them from a parsed form, and the tests assemble them by hand — and because the
+ * emptiness check below has to take one thing rather than two shapes.
+ *
+ * None of these is settable on `ServiceCreateInput`. Every one is a follow-up mutation
+ * against a service that already exists, which is why they can fail after something has been
+ * created.
+ */
+export type ContainerSettings = {
+  region?: string;
+  replicas?: number;
+  restartPolicy?: RestartPolicyType;
+  restartRetries?: number;
+  startCommand?: string;
+};
+
+export type ContainerLimits = {
+  cpu?: number;
+  memory?: number;
+};
+
+/** Whether a person asked for anything at all, which decides whether a request is made. */
+const asked = (values: object): boolean =>
+  Object.values(values).some((value) => value !== undefined);
+
 export async function createContainer(
   accessToken: string,
   params: {
@@ -401,6 +454,22 @@ export async function createContainer(
      * public internet. See `port` in lib/validation.ts on why one field carries both.
      */
     targetPort?: number;
+    /**
+     * What the service should be, beyond the image it runs.
+     *
+     * Two objects rather than one, and the split is Railway's rather than this app's:
+     * `serviceInstanceUpdate` takes the first and `serviceInstanceLimitsUpdate` takes the
+     * second, and the second is gated by the plan behind the token where the first is not.
+     * Collapsing them here would mean one refusal for two different problems with two
+     * different remedies — see the outcome union below.
+     *
+     * Every member is optional and an absent one is not sent at all. That is what keeps a
+     * spin-up nobody customised at the three round trips it has always taken: an object with
+     * nothing in it issues no mutation, which `api.integration.test.ts` asserts rather than
+     * this comment promising.
+     */
+    settings?: ContainerSettings;
+    limits?: ContainerLimits;
   },
   signal?: AbortSignal,
 ): Promise<{
@@ -421,12 +490,18 @@ export async function createContainer(
   /**
    * What happened after `serviceCreate` returned.
    *
-   * All three failure values mean the same thing to the caller — the service exists and is
+   * All five failure values mean the same thing to the caller — the service exists and is
    * not running — but they are different sentences to a user and different lines in the
-   * audit log, so they are not collapsed into a boolean. Reaching any of the four means a
+   * audit log, so they are not collapsed into a boolean. Reaching any of the six means a
    * service was created; only a throw from this function means none was.
    */
-  outcome: "deployed" | "volume_failed" | "variables_failed" | "deploy_failed";
+  outcome:
+    | "deployed"
+    | "settings_failed"
+    | "limits_failed"
+    | "volume_failed"
+    | "variables_failed"
+    | "deploy_failed";
 }> {
   const created = await gql(
     SERVICE_CREATE_MUTATION,
@@ -442,6 +517,112 @@ export async function createContainer(
   );
 
   const serviceId = created.serviceCreate.id;
+
+  /*
+   * The settings FIRST, ahead of the volume as well as the deploy.
+   *
+   * `region` is the member that fixes the order. A volume is provisioned for the service as
+   * it stands when `volumeCreate` runs, so a region applied afterwards is a region applied to
+   * a service whose storage was already placed — and this app has no way to move it. Setting
+   * it before anything else exists is the one ordering with nothing to reconcile.
+   *
+   * The rest of the members have no such constraint and are sent here anyway, because a
+   * container's replica count and start command belong to the service before its first
+   * deployment rather than to a redeploy afterwards. There is only one deployment on this
+   * path, and it should be the one the user described.
+   *
+   * A refusal does not deploy, on the argument the volume and variables branches below both
+   * make: an un-deployed service is visible, prefixed and destroyable, where a container
+   * running in a region nobody asked for — or with one replica where five were requested —
+   * is a container quietly not doing what the form said it would.
+   */
+  if (params.settings && asked(params.settings)) {
+    const settings = params.settings;
+    try {
+      await gql(
+        SERVICE_INSTANCE_UPDATE_MUTATION,
+        {
+          serviceId,
+          /*
+           * Always sent, for the reason SERVICE_INSTANCE_UPDATE_MUTATION's own comment
+           * gives: an omitted environment updates the service in every environment that is
+           * not a fork, which is a blast radius nobody asked for from a form naming one.
+           */
+          environmentId: params.environmentId,
+          input: {
+            ...(settings.region === undefined ? {} : { region: settings.region }),
+            ...(settings.replicas === undefined
+              ? {}
+              : { numReplicas: settings.replicas }),
+            ...(settings.restartPolicy === undefined
+              ? {}
+              : { restartPolicyType: settings.restartPolicy }),
+            ...(settings.restartRetries === undefined
+              ? {}
+              : { restartPolicyMaxRetries: settings.restartRetries }),
+            ...(settings.startCommand === undefined
+              ? {}
+              : { startCommand: settings.startCommand }),
+          },
+        },
+        { accessToken, operationName: "ServiceInstanceUpdate", signal },
+      );
+    } catch (error) {
+      /*
+       * The length of the start command, never the command.
+       *
+       * Everything else here is closed or tightly bounded — a region out of Railway's own
+       * list, a count under LIMITS.REPLICAS_MAX, one of three policy names — so naming them
+       * keeps the record diagnostic without making it attacker-chosen. The command is the
+       * one free-text field on the panel, which is the same split `container.created` makes
+       * between preset variable names and a count of the user's.
+       */
+      log.warn("railway.settings_failed", {
+        service_id: serviceId,
+        region: settings.region ?? "",
+        replicas: settings.replicas ?? 0,
+        restart_policy: settings.restartPolicy ?? "",
+        restart_retries: settings.restartRetries ?? -1,
+        start_command_length: settings.startCommand?.length ?? 0,
+        error,
+      });
+      return { serviceId, deploymentId: null, url: null, outcome: "settings_failed" };
+    }
+  }
+
+  /*
+   * Sizing, as its own step and its own outcome.
+   *
+   * Railway gates this one by plan and does not gate the one above, so the two refusals mean
+   * different things and have different remedies — "ask for less, or leave both blank" against
+   * "the settings themselves were rejected". A single try around both would have to pick one
+   * sentence for both cases, and the one it picked would be wrong half the time.
+   */
+  if (params.limits && asked(params.limits)) {
+    const limits = params.limits;
+    try {
+      await gql(
+        SERVICE_INSTANCE_LIMITS_UPDATE_MUTATION,
+        {
+          input: {
+            environmentId: params.environmentId,
+            serviceId,
+            ...(limits.cpu === undefined ? {} : { vCPUs: limits.cpu }),
+            ...(limits.memory === undefined ? {} : { memoryGB: limits.memory }),
+          },
+        },
+        { accessToken, operationName: "ServiceInstanceLimitsUpdate", signal },
+      );
+    } catch (error) {
+      log.warn("railway.limits_failed", {
+        service_id: serviceId,
+        vcpus: limits.cpu ?? 0,
+        memory_gb: limits.memory ?? 0,
+        error,
+      });
+      return { serviceId, deploymentId: null, url: null, outcome: "limits_failed" };
+    }
+  }
 
   /*
    * The volume BEFORE the deploy, and before the variables, for a reason the variables note

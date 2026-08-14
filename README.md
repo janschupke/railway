@@ -196,10 +196,40 @@ SSE route multiplexes deployment status and log output into the open tab.
   inference is undocumented. If it picks wrong, the fix is to destroy the container and spin
   it up again with the port filled in.
 
+- **Resource controls are set once, when the container is created.** Region, replicas, CPU,
+  memory, restart policy and start command are on the spin-up form, behind an Advanced
+  disclosure. `ServiceCreateInput` accepts none of them, so they are two follow-up mutations —
+  `serviceInstanceUpdate` for the settings and `serviceInstanceLimitsUpdate` for the size,
+  which Railway splits because the second is gated by the plan behind the token. Both run
+  before the deploy, and a refusal of either leaves the service created and un-deployed with
+  its own sentence, on the same argument the volume step makes: a container running in a
+  region nobody asked for is a container quietly not doing what the form said.
+
+  **They cannot be changed here afterwards.** An edit form carrying them would post seven
+  blank values for a service that is already running, and blank means "unset it" — so an edit
+  path can only carry them once it reads the current values back off `ServiceInstance` first.
+
+- **Ports, healthchecks and app sleep are not on that panel.** The target port is on the form
+  already, because it belongs to the public address rather than to sizing. The healthcheck
+  path is deliberately absent and follows it: Railway probes the path against the service's
+  target port, so a path set for a container with no address is a deployment that hangs in
+  `DEPLOYING` and then fails, on a control this app offered. `sleepApplication` is excluded
+  because a sleeping service makes three existing readouts lie — derived uptime, the
+  CPU/memory snapshot, and the watcher's fingerprint, which sees no change and reports a
+  healthy container that is not running. `drainingSeconds` and `overlapSeconds` are excluded
+  because nothing here renders them and nobody could check they applied.
+
+- **There is no entrypoint control, because there is no entrypoint member.**
+  `ServiceInstanceUpdateInput` has `startCommand` and nothing else, so a start command
+  replaces the image's CMD and its ENTRYPOINT still runs. Changing that means rebuilding the
+  image.
+
 - **Editing a container is a name, an image and its variables — nothing else.**
-  `ServiceInstanceUpdateInput` carries twenty-odd other members: region, replicas, healthcheck,
-  start command, restart policy. Sending only `source` is what leaves every one of them alone,
-  and each is a feature with its own ticket rather than a field to pass through.
+  `ServiceInstanceUpdateInput` carries twenty-odd other members. The six the spin-up form now
+  sets are listed above and are create-time only; the rest — healthcheck, cron schedule, build
+  and Nixpacks configuration, watch patterns, private-registry credentials — are untouched on
+  both paths, and each is a feature with its own ticket rather than a field to pass through.
+  Sending only `source` on an edit is what leaves every one of them alone.
 
   Two things about that mutation are worth writing down, because both cost time to find.
   **The name is not on it.** Railway splits a service in two — `Service` holds the name,
@@ -216,7 +246,9 @@ SSE route multiplexes deployment status and log output into the open tab.
   back — this app has no transaction to roll back into — so the refreshed row shows what
   actually applied rather than what was asked for. The alternative was reporting the whole
   edit as failed while half of it had happened, which is worse in the only way that matters.
-- **Cost is a workspace figure, not this app's.** The dashboard shows what the workspace a
+- **Cost is a workspace figure, not this app's — and the form can now multiply it.** Replicas
+  times vCPU times memory is the first thing this app lets anyone set that changes the bill,
+  and it still cannot say by how much. The dashboard shows what the workspace a
   project belongs to has spent this billing period, and says so in the same sentence, because
   that is the only monetary number Railway exposes: `Customer.currentUsage` and
   `CustomerSubscription.nextInvoiceCurrentTotal`, both workspace-wide. `estimatedUsage`
@@ -229,7 +261,9 @@ SSE route multiplexes deployment status and log output into the open tab.
   `ProjectMetrics` document is now validated against the schema for — three types below a root
   field and no longer invisible, since `pnpm codegen` reads `customer { currentUsage
 billingPeriod { start end } }` as part of the document. All three render a link to Railway's own billing
-  page rather than a number this app would have to caveat further.
+  page rather than a number this app would have to caveat further. The one record of what was
+  asked for is the `container.created` log line, which carries the region, the replica count
+  and the size — Railway keeps nothing once a service is destroyed.
 - **Uptime is derived, and it counts the build.** There is no started-at anywhere in the
   schema, so it is measured from `latestDeployment.createdAt` — when the deployment was
   _queued_. For a Docker image source, which is all this app creates (ADR-6), that overstates

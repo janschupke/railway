@@ -110,6 +110,15 @@ export type ServiceDomainCreateInput = {
   targetPort?: number | null | undefined;
 };
 
+export type ServiceInstanceLimitsUpdateInput = {
+  environmentId: string;
+  /** Amount of memory in GB to allocate to the service instance */
+  memoryGB?: number | null | undefined;
+  serviceId: string;
+  /** Number of vCPUs to allocate to the service instance */
+  vCPUs?: number | null | undefined;
+};
+
 export type ServiceInstanceUpdateInput = {
   buildCommand?: string | null | undefined;
   builder?: Builder | null | undefined;
@@ -285,6 +294,20 @@ export type ProjectMetricsQuery = {
   };
 };
 
+export type RegionsQueryVariables = Exact<{
+  projectId?: string | null | undefined;
+}>;
+
+export type RegionsQuery = {
+  regions: Array<{
+    id: string | null;
+    name: string;
+    location: string;
+    country: string;
+    deploymentConstraints: { deprecationInfo: { isDeprecated: boolean } | null } | null;
+  }>;
+};
+
 export type ProjectCreateMutationVariables = Exact<{
   input: ProjectCreateInput;
 }>;
@@ -325,6 +348,14 @@ export type ServiceInstanceUpdateMutationVariables = Exact<{
 }>;
 
 export type ServiceInstanceUpdateMutation = { serviceInstanceUpdate: boolean };
+
+export type ServiceInstanceLimitsUpdateMutationVariables = Exact<{
+  input: ServiceInstanceLimitsUpdateInput;
+}>;
+
+export type ServiceInstanceLimitsUpdateMutation = {
+  serviceInstanceLimitsUpdate: boolean;
+};
 
 export type ServiceInstanceDeployV2MutationVariables = Exact<{
   serviceId: string;

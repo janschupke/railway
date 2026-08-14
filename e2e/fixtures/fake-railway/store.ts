@@ -86,6 +86,23 @@ export type Service = {
    * state the app's own guard exists to prevent.
    */
   domains: string[];
+  /**
+   * The resource controls a spin-up asked for, as Railway would hold them.
+   *
+   * Never rendered by the app — nothing reads a service's region back — so a spec asserts
+   * them through /__test/services, which is the same route the variable names are checked
+   * by and for the same reason: it is the only way to prove the values reached Railway
+   * rather than merely reached the form.
+   */
+  settings: {
+    region: string | null;
+    replicas: number | null;
+    restartPolicy: string | null;
+    restartRetries: number | null;
+    startCommand: string | null;
+    vcpus: number | null;
+    memoryGB: number | null;
+  };
 };
 
 /**
@@ -200,6 +217,22 @@ export type Faults = {
    */
   domainFails: boolean;
   /**
+   * `serviceInstanceUpdate` is refused, stranding a customised service before its deploy.
+   *
+   * Not deploying is the point, on the volume branch's argument: a container running in a
+   * region nobody asked for, or with one replica where three were requested, is a container
+   * quietly not doing what the form said it would.
+   */
+  settingsFail: boolean;
+  /**
+   * `serviceInstanceLimitsUpdate` is refused, as it is for a plan that does not allow the
+   * size asked for.
+   *
+   * Its own knob rather than a share of `settingsFail`, because the two refusals mean
+   * different things to a user: this one is answered by asking for less, and that one is not.
+   */
+  limitsFail: boolean;
+  /**
    * `volumeCreate` is refused, stranding a stateful service before its deploy.
    *
    * The branch this exists for is the one that must NOT deploy: a database whose volume
@@ -275,6 +308,8 @@ const DEFAULT_FAULTS: Faults = {
   deploymentsFail: false,
   volumeCreateFail: false,
   volumesFail: false,
+  settingsFail: false,
+  limitsFail: false,
   logPhase: "both",
   failureField: "error",
   deploymentEventsFail: false,
@@ -389,6 +424,15 @@ export class Store {
       deploymentId: null,
       variables: {},
       domains: input.domains ?? [],
+      settings: {
+        region: null,
+        replicas: null,
+        restartPolicy: null,
+        restartRetries: null,
+        startCommand: null,
+        vcpus: null,
+        memoryGB: null,
+      },
     };
     this.services.set(service.id, service);
     if (input.deployed || input.status) {

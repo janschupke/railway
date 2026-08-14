@@ -219,6 +219,28 @@ export type ContainerVolume = {
 };
 
 /**
+ * One place a container can be created in, as the form offers it.
+ *
+ * Three fields where Railway's `Region` has six, and the two dropped ones say what this is
+ * for: `region` is a grouping Railway uses internally and `workspaceId` is scoping the query
+ * already did. What is left is what a select needs — the value it posts, the sentence it
+ * shows, and the heading it sits under.
+ *
+ * `id` is `String!` here and nullable on Railway's own type. That narrowing is the mapper's
+ * job and it is the reason the mapper exists at all: a region with no id is a row that would
+ * post an empty string, which reads as "let Railway choose" rather than as the choice the
+ * person made.
+ */
+export type RegionOption = {
+  /** The airport code the mutation takes, e.g. `us-west2`. */
+  id: string;
+  /** Railway's own human string, e.g. "US West (Oregon)". */
+  label: string;
+  /** The `<optgroup>` heading. Railway's own country name, not a code. */
+  country: string;
+};
+
+/**
  * Current-period spend, for the workspace a project belongs to.
  *
  * The scope is in the type name on purpose. This figure covers every service in the

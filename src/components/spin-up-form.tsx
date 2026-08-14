@@ -12,8 +12,9 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useImageCheck } from "@/hooks/use-image-check";
+import { useResolved } from "@/hooks/use-resolved";
 import { spinUp } from "@/app/dashboard/actions";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionField, ActionResult } from "@/lib/action-result";
 import { LIMITS } from "@/lib/constants";
 import {
   DEFAULT_IMAGE,
@@ -25,9 +26,12 @@ import {
 } from "@/lib/presets";
 import { newIdempotencyKey } from "@/lib/random-id";
 import { managedSlug } from "@/lib/railway/slug";
+import type { RegionOption } from "@/lib/railway/types";
+import { AdvancedSettings } from "./advanced-settings";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
+import { Disclosure } from "./ui/disclosure";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 import { KeyValueEditor, type KeyValueRow } from "./ui/key-value-editor";
@@ -75,6 +79,25 @@ const portFor = (image: string): string => {
 const isVariableField = (field: string | undefined) =>
   field === "variableKey" || field === "variableValue";
 
+/**
+ * The fields that live behind the Advanced disclosure.
+ *
+ * Read for one thing only: an inline error inside a closed panel is silence, so a failure
+ * naming one of these opens the panel before the browser paints. `region` and
+ * `restartPolicy` are absent because neither is an `ActionField` at all — see the note on
+ * that type.
+ */
+const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
+  "replicas",
+  "cpu",
+  "memory",
+  "restartRetries",
+  "startCommand",
+]);
+
+/** A stable empty list, so the resolved-name seed is not a new array every render. */
+const NO_NAMES: readonly string[] = [];
+
 /** Whether a failure names a row, as opposed to the list as a whole. */
 const hasIndex = (result: ActionResult) => !result.ok && result.index !== undefined;
 
@@ -102,6 +125,7 @@ export function SpinUpForm({
   environmentId,
   disabled,
   names,
+  regions,
 }: {
   projectId: string;
   environmentId: string;
@@ -115,6 +139,16 @@ export function SpinUpForm({
    * and lose the check with nothing to show for it.
    */
   names: Promise<string[]>;
+  /**
+   * Where a container may be created, unawaited, for the Advanced panel's region select.
+   *
+   * Unawaited on the same terms as `names` and required for the same reason. It differs in
+   * one way worth knowing here: an empty array is a designed answer rather than only an
+   * unresolved one — the read is allowed to fail into it — so the select says the choice is
+   * unavailable instead of rendering a list of nothing. See deployRegions in
+   * app/dashboard/data.ts.
+   */
+  regions: Promise<RegionOption[]>;
 }) {
   const t = useTranslations("spinUp");
   const tActions = useTranslations("actions");
@@ -153,7 +187,11 @@ export function SpinUpForm({
    * component, so every spin-up in a session would carry the same key.
    */
   const [submissionKey, setSubmissionKey] = useState(newIdempotencyKey);
-  const [takenNames, setTakenNames] = useState<readonly string[]>([]);
+  /*
+   * The panel, so a validation error inside it can open it. Nothing else reads or writes
+   * `open` — see the effect below, and ui/disclosure.tsx on why the primitive holds no state.
+   */
+  const advancedRef = useRef<HTMLDetailsElement>(null);
   /*
    * The local half of what used to be a server-side lookup. Held separately from `result`
    * because no submission produced it: nothing was sent.
@@ -285,6 +323,15 @@ export function SpinUpForm({
       setSubmissionKey(newIdempotencyKey());
       toast({ title: result.message, tone: "success" });
       startRefresh(() => router.refresh());
+    } else if (ADVANCED_FIELDS.has(result.field ?? "")) {
+      /*
+       * The error renders inline beside its field like every other one — but that field is
+       * inside a panel the person may have collapsed, and an error nobody can see is a form
+       * that failed silently. Opening it is a DOM write in the same register as clearing the
+       * name input above, and for the same reason: `open` is the platform's own state and
+       * nothing else here reads it.
+       */
+      if (advancedRef.current) advancedRef.current.open = true;
     } else if (!result.field || (isVariableField(result.field) && !hasIndex(result))) {
       /*
        * Field-attributed errors render inline next to the input instead — except a
@@ -297,22 +344,18 @@ export function SpinUpForm({
 
   /*
    * Read in an effect rather than with `use`, which is the point of taking a promise at
-   * all: `use` would suspend this form until the container list arrived, and the whole
-   * reason that list sits behind its own boundary is so the form does not wait for it.
+   * all — see useResolved, which is where that argument and the ordering flag now live. It
+   * was written twice the moment the region list arrived beside the name list.
    *
-   * A fresh promise arrives on every render of the page, which is how the check learns
-   * about the container this form just made. The flag is for the ordering that follows
-   * from that: a slow earlier read must not land on top of a newer one.
+   * `null` rather than `[]` as the region seed, because the two states it would otherwise
+   * collapse need different UI: a read that has not answered yet leaves the select alone,
+   * and a read that answered with nothing disables it and says so. `[]` cannot tell them
+   * apart, and the honest half of the pair is the one that would be lost.
    */
-  useEffect(() => {
-    let live = true;
-    void names.then((resolved) => {
-      if (live) setTakenNames(resolved);
-    });
-    return () => {
-      live = false;
-    };
-  }, [names]);
+  const takenNames = useResolved<readonly string[]>(names, NO_NAMES);
+  const resolvedRegions = useResolved<RegionOption[] | null>(regions, null);
+  const regionOptions = resolvedRegions ?? [];
+  const regionsUnavailable = resolvedRegions !== null && resolvedRegions.length === 0;
 
   /**
    * The check that replaced the server's, at no round trip.
@@ -368,7 +411,7 @@ export function SpinUpForm({
     return presetFor(image) ? null : { mountPath: null };
   })();
 
-  const fieldError = (field: "name" | "image" | "port") => {
+  const fieldError = (field: ActionField) => {
     // The local check first: it is the more recent statement about this field, and it is
     // the only one when nothing was submitted.
     if (field === "name" && duplicate) return duplicate;
@@ -550,6 +593,30 @@ export function SpinUpForm({
           maxReachedLabel={t("variablesFull")}
           disabled={disabled}
         />
+
+        {/*
+          Last before the button, and closed. The two fields on this form that every
+          spin-up needs are still the two visible ones; everything Railway will otherwise
+          default is here, where it costs a click to see and nothing to ignore.
+
+          `key` on the child, never on the `<details>`. `submissionKey` is re-minted only on
+          success, so keying this subtree clears every advanced value exactly once per
+          container created — the rule the name field and the variable rows already follow —
+          while the element around it stays mounted, so a panel someone opened stays open.
+          Keying the `<details>` instead looks identical in review and snaps the panel shut
+          on every success. It also means the note at `setSubmissionKey` above is
+          load-bearing here: re-minting the key on failure too would start throwing away
+          settings somebody is in the middle of correcting.
+        */}
+        <Disclosure ref={advancedRef} summary={t("advancedSummary")}>
+          <AdvancedSettings
+            key={submissionKey}
+            regions={regionOptions}
+            regionsUnavailable={regionsUnavailable}
+            fieldError={fieldError}
+            disabled={disabled}
+          />
+        </Disclosure>
 
         <div className="flex items-center gap-3">
           {/*

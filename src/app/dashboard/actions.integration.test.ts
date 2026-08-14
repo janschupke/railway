@@ -1062,6 +1062,209 @@ describe("spinUp", () => {
   });
 });
 
+describe("spinUp, with the advanced resource controls", () => {
+  /** The three answers a customised spin-up needs, with what each was sent recorded. */
+  const stubs = (
+    sent: { settings?: Record<string, unknown>; limits?: Record<string, unknown> },
+    over: { settingsFail?: boolean; limitsFail?: boolean } = {},
+  ) => [
+    api.mutation("ServiceCreate", () =>
+      HttpResponse.json({
+        data: { serviceCreate: { id: "svc_new", name: "spun-cache" } },
+      }),
+    ),
+    api.mutation("ServiceInstanceUpdate", ({ variables }) => {
+      sent.settings = (variables as { input: Record<string, unknown> }).input;
+      return over.settingsFail
+        ? HttpResponse.json({ errors: [{ message: "refused" }] })
+        : HttpResponse.json({ data: { serviceInstanceUpdate: true } });
+    }),
+    api.mutation("ServiceInstanceLimitsUpdate", ({ variables }) => {
+      sent.limits = (variables as { input: Record<string, unknown> }).input;
+      return over.limitsFail
+        ? HttpResponse.json({ errors: [{ message: "refused" }] })
+        : HttpResponse.json({ data: { serviceInstanceLimitsUpdate: true } });
+    }),
+    api.mutation("ServiceInstanceDeployV2", () =>
+      HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+    ),
+  ];
+
+  it("carries the panel's values through to the two mutations", async () => {
+    const sent: {
+      settings?: Record<string, unknown>;
+      limits?: Record<string, unknown>;
+    } = {};
+    server.use(...stubs(sent));
+
+    const result = await spinUp(
+      null,
+      spinUpForm({
+        region: "us-west2",
+        replicas: "2",
+        cpu: "0.5",
+        memory: "1",
+        restartPolicy: "ON_FAILURE",
+        restartRetries: "4",
+        startCommand: "redis-server --appendonly yes",
+      }),
+    );
+
+    expect(result).toEqual({ ok: true, message: "Spinning up cache" });
+    expect(sent.settings).toEqual({
+      region: "us-west2",
+      numReplicas: 2,
+      restartPolicyType: "ON_FAILURE",
+      restartPolicyMaxRetries: 4,
+      startCommand: "redis-server --appendonly yes",
+    });
+    expect(sent.limits).toMatchObject({ vCPUs: 0.5, memoryGB: 1 });
+  });
+
+  /*
+   * The common case, asserted rather than described: a form nobody opened the panel on
+   * issues the requests it always issued. `onUnhandledRequest: "error"` is what makes the
+   * absence of the two new mutations an assertion — neither is stubbed here.
+   */
+  it("sends neither mutation when the panel was left alone", async () => {
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_new", name: "spun-cache" } },
+        }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+      ),
+    );
+
+    const result = await spinUp(null, spinUpForm());
+
+    expect(result.ok).toBe(true);
+  });
+
+  /*
+   * A retry count only means something under ON_FAILURE. The form disables the field for the
+   * other two policies and a disabled input posts nothing, so this covers the request that
+   * did not come from the form — dropped rather than refused, because carrying a number a
+   * policy ignores is not a mistake anyone can act on.
+   */
+  it("drops a retry count sent with a policy that ignores it", async () => {
+    const sent: { settings?: Record<string, unknown> } = {};
+    server.use(...stubs(sent));
+
+    const result = await spinUp(
+      null,
+      spinUpForm({ restartPolicy: "ALWAYS", restartRetries: "7" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(sent.settings).toEqual({ restartPolicyType: "ALWAYS" });
+  });
+
+  it("says the settings were refused, and that the container was not deployed", async () => {
+    const sent = {};
+    server.use(...stubs(sent, { settingsFail: true }));
+
+    const result = await spinUp(null, spinUpForm({ replicas: "3" }));
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Created cache, but Railway refused the settings you asked for, so it was not deployed. Destroy it and try again, with the advanced settings left alone.",
+    });
+  });
+
+  it("names the plan when the size is refused, without asserting it", async () => {
+    const sent = {};
+    server.use(...stubs(sent, { limitsFail: true }));
+
+    const result = await spinUp(null, spinUpForm({ cpu: "8" }));
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain("usually a limit of the plan");
+  });
+
+  /*
+   * The audit trail is the only record anywhere of how big a container was asked to be:
+   * replicas times vCPU times memory is what multiplies the bill, the usage readout is a
+   * workspace figure, and Railway keeps nothing once a service is destroyed.
+   */
+  it("records the size that was asked for, and never the start command", async () => {
+    const sent = {};
+    server.use(...stubs(sent));
+
+    await spinUp(
+      null,
+      spinUpForm({
+        region: "us-west2",
+        replicas: "2",
+        cpu: "0.5",
+        memory: "1",
+        restartPolicy: "ON_FAILURE",
+        restartRetries: "4",
+        startCommand: "redis-server --requirepass hunter2",
+      }),
+    );
+
+    expect(record("container.created")).toMatchObject({
+      region: "us-west2",
+      replicas: 2,
+      vcpus: 0.5,
+      memory_gb: 1,
+      restart_policy: "ON_FAILURE",
+      restart_retries: 4,
+      start_command_length: "redis-server --requirepass hunter2".length,
+    });
+    expect(rawLogLines().join("\n")).not.toContain("hunter2");
+  });
+
+  it("records zero for every control nobody set", async () => {
+    server.use(
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({
+          data: { serviceCreate: { id: "svc_new", name: "spun-cache" } },
+        }),
+      ),
+      api.mutation("ServiceInstanceDeployV2", () =>
+        HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+      ),
+    );
+
+    await spinUp(null, spinUpForm());
+
+    expect(record("container.created")).toMatchObject({
+      region: "",
+      replicas: 0,
+      vcpus: 0,
+      memory_gb: 0,
+      restart_policy: "",
+      start_command_length: 0,
+    });
+  });
+
+  it("refuses an out-of-range replica count and attributes it to the field", async () => {
+    // No handlers: a refused form must reach no mutation at all, which is what
+    // `onUnhandledRequest: "error"` turns into an assertion.
+    const result = await spinUp(null, spinUpForm({ replicas: "99" }));
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Run at most 5 replicas here. Scale further on Railway.",
+      field: "replicas",
+    });
+  });
+
+  it("refuses a region it could not have offered, with no field to correct", async () => {
+    const result = await spinUp(null, spinUpForm({ region: "NOT A REGION" }));
+
+    expect(result).toEqual({
+      ok: false,
+      error: "That is not a region Railway offers. Reload the page and try again.",
+    });
+  });
+});
+
 describe("spinDown", () => {
   const downForm = (serviceId: string) =>
     form({ projectId: "p1", environmentId: "e1", serviceId });

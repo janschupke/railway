@@ -3,11 +3,25 @@ import { log } from "@/lib/logger";
 import { reportError } from "@/lib/report-error";
 import type { MessageDescriptor } from "@/lib/messages";
 
-/** Field names a Server Action can attribute an error to. */
+/**
+ * Field names a Server Action can attribute an error to.
+ *
+ * Not every field that can fail is here, and the gap is deliberate. `region` and
+ * `restartPolicy` are closed-set selects whose options this app rendered, so a person cannot
+ * produce an invalid one at all — their only reachable failure is a stale page or a
+ * hand-crafted request, and both are answered by a sentence about the page rather than about
+ * a control. Adding them would put "reload the page" under a dropdown the user just used
+ * correctly. See action-result.test.ts, which asserts they are absent.
+ */
 export type ActionField =
   | "name"
   | "image"
   | "port"
+  | "replicas"
+  | "cpu"
+  | "memory"
+  | "restartRetries"
+  | "startCommand"
   | "variableKey"
   | "variableValue"
   | "projectName"
@@ -77,6 +91,11 @@ const FIELDS: ReadonlySet<string> = new Set([
   "name",
   "image",
   "port",
+  "replicas",
+  "cpu",
+  "memory",
+  "restartRetries",
+  "startCommand",
   "variableKey",
   "variableValue",
   "projectName",

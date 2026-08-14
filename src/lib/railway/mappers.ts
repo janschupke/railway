@@ -5,6 +5,7 @@ import {
   type ContainerMetrics,
   type ContainerVolume,
   type RailwayProject,
+  type RegionOption,
   type WorkspaceSpend,
 } from "./types";
 
@@ -312,6 +313,50 @@ export function toContainerVolumes(
   }
 
   return byService;
+}
+
+export type RegionNode = {
+  id: string | null;
+  name: string;
+  location: string;
+  country: string;
+  deploymentConstraints: { deprecationInfo: { isDeprecated: boolean } | null } | null;
+};
+
+/**
+ * The regions worth offering, in the order a select should show them.
+ *
+ * Two filters, and each drops a row that would be a worse choice than no choice:
+ *
+ *   - **No `id`.** The field is nullable on Railway's own type while `name` and `location`
+ *     are not, so a region can be listed with nothing to submit. An option posting the empty
+ *     string is indistinguishable from the blank one above it, which means Railway picks —
+ *     so the user would choose a region and silently get a different one.
+ *   - **Deprecated.** Railway carries a replacement region beside the flag, so these are
+ *     datacentres with an end date. Offering one is offering a container that stops working
+ *     later, at a moment nothing in this app will explain.
+ *
+ * `location` rather than `name` as the label: `name` is the identifier again in most rows,
+ * where `location` is the sentence a person reads. Sorted by country then label, because the
+ * country is the `<optgroup>` heading and an unsorted list would repeat headings.
+ */
+export function toRegionOptions(regions: RegionNode[]): RegionOption[] {
+  return regions
+    .filter(
+      (region) =>
+        region.id !== null &&
+        !region.deploymentConstraints?.deprecationInfo?.isDeprecated,
+    )
+    .map((region) => ({
+      id: region.id!,
+      label: region.location,
+      country: region.country,
+    }))
+    .sort(
+      (left, right) =>
+        left.country.localeCompare(right.country) ||
+        left.label.localeCompare(right.label),
+    );
 }
 
 /**

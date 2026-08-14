@@ -107,6 +107,12 @@ describe("isField", () => {
     expect(isField("image")).toBe(true);
     expect(isField("variableKey")).toBe(true);
     expect(isField("variableValue")).toBe(true);
+    expect(isField("port")).toBe(true);
+    expect(isField("replicas")).toBe(true);
+    expect(isField("cpu")).toBe(true);
+    expect(isField("memory")).toBe(true);
+    expect(isField("restartRetries")).toBe(true);
+    expect(isField("startCommand")).toBe(true);
   });
 
   it("rejects anything else, including zod's numeric array indices", () => {
@@ -115,6 +121,15 @@ describe("isField", () => {
      * path is ["variableKey", 3], so an index is now genuinely passed through here.
      */
     expect(isField("projectId")).toBe(false);
+    /*
+     * The two advanced controls that are deliberately not attributable, so completing the
+     * set has to be an argument with this test rather than a one-line addition. Both are
+     * closed `<select>`s whose options this app rendered: nobody can type an invalid value,
+     * so the only reachable failure is a stale page, and "reload the page" under a dropdown
+     * somebody just used correctly is a worse answer than a toast.
+     */
+    expect(isField("region")).toBe(false);
+    expect(isField("restartPolicy")).toBe(false);
     expect(isField("variables")).toBe(false);
     expect(isField(0)).toBe(false);
     expect(isField(3)).toBe(false);

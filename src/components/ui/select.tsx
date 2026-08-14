@@ -11,6 +11,90 @@ import { byGroup, type GroupedOption } from "./group-options";
 type SelectOption = GroupedOption;
 
 /**
+ * A single-select that reaches `FormData`, on the platform's own `<select>`.
+ *
+ * Two selects in one file is a real asymmetry and it is worth stating rather than leaving
+ * for someone to find. The Radix one below earns its bytes on the project picker: a control
+ * everyone uses, on every visit, that never submits anything — its value goes into the URL.
+ * This one is for controls behind a disclosure that must submit and must be able to say
+ * "nothing chosen", and it wins on three counts that are not about size:
+ *
+ *   - **An empty option.** `<Select.Item value="">` throws at runtime in Radix, and blank is
+ *     the default and most common state of both controls that use this — it is how a person
+ *     says "let Railway decide". Working around it means a sentinel string mapped back on the
+ *     server, which is a magic value in the schema, the action and the e2e fixture.
+ *   - **An error.** `Field` gives this one `aria-invalid` and a `role="alert"` message
+ *     through the render prop, for free. The Radix wrapper takes no `error` prop, and adding
+ *     one is a change to the component the project picker depends on.
+ *   - **Groups.** `<optgroup>` is one element. Radix needs a portal, a popper and a Presence
+ *     per control to draw the same headings.
+ *
+ * What is genuinely lost is Radix's typeahead and Home/End, which is what the swap below was
+ * made for. A native select has its own typeahead in every browser; what it does not have is
+ * the styling, and these controls are inside a panel most people never open.
+ */
+export function NativeSelect({
+  label,
+  hint,
+  error,
+  options,
+  disabledReason,
+  ...props
+}: React.ComponentProps<"select"> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  options: SelectOption[];
+  /** Why the control cannot be used, on the terms the Radix Select states below. */
+  disabledReason?: string;
+}) {
+  // Nothing to choose is a disabled control, whatever the caller passed — the Radix one's
+  // rule, and for its reason: an enabled select with one blank row is not a choice.
+  const empty = options.length === 0;
+  const inert = Boolean(props.disabled) || empty;
+
+  return (
+    <Field
+      label={label}
+      {...(inert && disabledReason ? { hint: disabledReason } : hint ? { hint } : {})}
+      {...(error ? { error } : {})}
+    >
+      {({ id, "aria-describedby": describedBy, invalid }) => (
+        <select
+          {...props}
+          id={id}
+          aria-describedby={describedBy}
+          aria-invalid={invalid || undefined}
+          disabled={inert}
+          className={cn(
+            "focus-ring border-border bg-surface text-text w-full",
+            "text-body h-control-md px-control-md rounded-md border",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            invalid && "border-danger-border",
+          )}
+        >
+          {byGroup(options).map(([group, groupOptions]) => {
+            const items = groupOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ));
+            // Ungrouped options are not wrapped, for the Radix one's reason: an unlabelled
+            // group is a group a screen reader announces with no name.
+            if (group === null) return items;
+            return (
+              <optgroup key={group} label={group}>
+                {items}
+              </optgroup>
+            );
+          })}
+        </select>
+      )}
+    </Field>
+  );
+}
+
+/**
  * Styled single-select on Radix.
  *
  * A native <select> is the more accessible default and was what this replaced; Radix

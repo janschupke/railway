@@ -33,6 +33,8 @@ export async function injectFaults(
     domainFails: boolean;
     volumeCreateFail: boolean;
     volumesFail: boolean;
+    settingsFail: boolean;
+    limitsFail: boolean;
     metricsFail: boolean;
     workspaceFail: boolean;
     noWorkspace: boolean;
@@ -432,24 +434,75 @@ export async function seedServices(
   await page.request.post(`${FIXTURE_URL}/__test/services`, { data: options });
 }
 
+/** What the fixture holds for a service, which is more than any page renders. */
+export type FixtureService = {
+  name: string;
+  image: string | null;
+  variables: Record<string, string>;
+  domains: string[];
+  /**
+   * The resource controls the spin-up applied.
+   *
+   * Nothing renders these back, so this is the only way a spec can tell a value that reached
+   * Railway from one that only reached the form. All null means no `serviceInstanceUpdate`
+   * and no `serviceInstanceLimitsUpdate` was sent at all, which is the round-trip guarantee
+   * the common case depends on.
+   */
+  settings: {
+    region: string | null;
+    replicas: number | null;
+    restartPolicy: string | null;
+    restartRetries: number | null;
+    startCommand: string | null;
+    vcpus: number | null;
+    memoryGB: number | null;
+  };
+};
+
 /** Service records from the fixture, including the environment each was created with. */
-export async function fixtureServices(page: Page): Promise<
-  Array<{
-    name: string;
-    image: string | null;
-    variables: Record<string, string>;
-    domains: string[];
-  }>
-> {
+export async function fixtureServices(page: Page): Promise<FixtureService[]> {
   const response = await page.request.get(`${FIXTURE_URL}/__test/services`);
-  return response.json() as Promise<
-    Array<{
-      name: string;
-      image: string | null;
-      variables: Record<string, string>;
-      domains: string[];
-    }>
-  >;
+  return response.json() as Promise<FixtureService[]>;
+}
+
+/**
+ * Opens the spin-up form's Advanced panel and fills whichever controls were named.
+ *
+ * `<select>` and `<input>` in the same helper because the panel mixes them and a caller
+ * should not have to know which is which. Leaves the panel OPEN: closing it is a behaviour
+ * one spec asserts deliberately rather than something every caller should pay for.
+ */
+export async function fillAdvanced(
+  page: Page,
+  values: Partial<{
+    region: string;
+    replicas: string;
+    cpu: string;
+    memory: string;
+    restartPolicy: string;
+    restartRetries: string;
+    startCommand: string;
+  }>,
+) {
+  const summary = page.getByText("Advanced settings");
+  if ((await page.locator("details[open]").count()) === 0) await summary.click();
+
+  if (values.region !== undefined) {
+    await page.getByLabel("Region").selectOption(values.region);
+  }
+  if (values.restartPolicy !== undefined) {
+    await page.getByLabel("Restart policy").selectOption(values.restartPolicy);
+  }
+  const typed: Array<[string, string | undefined]> = [
+    ["Replicas", values.replicas],
+    ["vCPU", values.cpu],
+    ["Memory (GB)", values.memory],
+    ["Retries", values.restartRetries],
+    ["Start command", values.startCommand],
+  ];
+  for (const [label, value] of typed) {
+    if (value !== undefined) await page.getByLabel(label, { exact: true }).fill(value);
+  }
 }
 
 /**

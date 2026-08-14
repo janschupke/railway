@@ -7,9 +7,15 @@ import {
   toContainerVolumes,
   toContainers,
   toProject,
+  toRegionOptions,
   toWorkspaceSpend,
 } from "./mappers";
-import type { MetricsResultNode, ServiceNode, VolumeInstanceNode } from "./mappers";
+import type {
+  MetricsResultNode,
+  RegionNode,
+  ServiceNode,
+  VolumeInstanceNode,
+} from "./mappers";
 import type { Container } from "./types";
 
 const service = (overrides: Partial<ServiceNode> = {}): ServiceNode => ({
@@ -401,5 +407,71 @@ describe("toWorkspaceSpend", () => {
     // The name is decoration — the copy falls back to "this project's workspace" — and
     // dropping a real spend figure over a missing label would be the wrong trade.
     expect(toWorkspaceSpend({ ...workspace, name: null })?.workspaceName).toBeNull();
+  });
+});
+
+describe("toRegionOptions", () => {
+  const region = (over: Partial<RegionNode> = {}): RegionNode => ({
+    id: "us-west2",
+    name: "us-west2",
+    location: "US West (Oregon)",
+    country: "United States",
+    deploymentConstraints: null,
+    ...over,
+  });
+
+  it("maps a region to the value a select posts and the sentence it shows", () => {
+    expect(toRegionOptions([region()])).toEqual([
+      { id: "us-west2", label: "US West (Oregon)", country: "United States" },
+    ]);
+  });
+
+  /*
+   * `Region.id` is nullable on the live schema while `name` and `location` are not, so a
+   * listed region can carry nothing to submit. An option posting the empty string is
+   * indistinguishable from the blank row above it — which means Railway picks — so somebody
+   * would choose a region and silently get a different one.
+   */
+  it("drops a region with no id, which would post an empty string", () => {
+    expect(toRegionOptions([region({ id: null }), region()])).toHaveLength(1);
+  });
+
+  /*
+   * Railway carries a replacement region beside the flag, so a deprecated one is a
+   * datacentre with an end date. Offering it is offering a container that stops working
+   * later, at a moment nothing in this app will explain.
+   */
+  it("drops a deprecated region", () => {
+    const retiring = region({
+      id: "us-west1",
+      location: "US West (old)",
+      deploymentConstraints: {
+        deprecationInfo: { isDeprecated: true },
+      },
+    });
+    expect(toRegionOptions([retiring, region()]).map((option) => option.id)).toEqual([
+      "us-west2",
+    ]);
+  });
+
+  it("keeps a region whose constraints say nothing about deprecation", () => {
+    const constrained = region({
+      deploymentConstraints: { deprecationInfo: null },
+    });
+    expect(toRegionOptions([constrained])).toHaveLength(1);
+  });
+
+  // Country first, because it is the optgroup heading and an unsorted list repeats headings.
+  it("sorts by country and then by label", () => {
+    const listed = toRegionOptions([
+      region({ id: "us-east4", location: "US East", country: "United States" }),
+      region({ id: "eu-west4", location: "Amsterdam", country: "Netherlands" }),
+      region({ id: "us-west2", location: "US West", country: "United States" }),
+    ]);
+    expect(listed.map((option) => option.id)).toEqual([
+      "eu-west4",
+      "us-east4",
+      "us-west2",
+    ]);
   });
 });

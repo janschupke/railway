@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import { REGISTRY } from "@/lib/constants";
 import type { ActionResult } from "@/lib/action-result";
+import type { RegionOption } from "@/lib/railway/types";
 
 const spinUp = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
 vi.mock("@/app/dashboard/actions", () => ({
@@ -13,20 +14,44 @@ vi.mock("@/app/dashboard/actions", () => ({
 const { SpinUpForm } = await import("./spin-up-form");
 const { ToastProvider } = await import("./ui/toast");
 
+const OREGON = {
+  id: "us-west2",
+  label: "US West (Oregon)",
+  country: "United States",
+};
+
 const renderForm = ({
   names = [],
+  regions = [OREGON],
   ...props
-}: { disabled?: boolean; names?: string[] | Promise<string[]> } = {}) =>
+}: {
+  disabled?: boolean;
+  names?: string[] | Promise<string[]>;
+  regions?: RegionOption[] | Promise<RegionOption[]>;
+} = {}) =>
   render(
     <ToastProvider>
       <SpinUpForm
         projectId="p1"
         environmentId="e1"
         names={Array.isArray(names) ? Promise.resolve(names) : names}
+        regions={Array.isArray(regions) ? Promise.resolve(regions) : regions}
         {...props}
       />
     </ToastProvider>,
   );
+
+/** Opens the Advanced panel, which every case below has to do before it can type. */
+const openAdvanced = async (user: UserEvent) => {
+  await user.click(screen.getByText("Advanced settings"));
+};
+
+/*
+ * By its summary rather than by role: `<details>`, `<fieldset>` and `<optgroup>` all report
+ * role="group", and the variable editor and the region select each contribute one.
+ */
+const advanced = () =>
+  screen.getByText("Advanced settings").closest("details") as HTMLDetailsElement;
 
 const submitButton = () => screen.getByRole("button", { name: /spin up container/i });
 /** The image control is one editable combobox now, so this is a real <input>. */
@@ -850,5 +875,250 @@ describe("the public port", () => {
       await screen.findByText("Give a port between 1 and 65,535, or leave it blank"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Could not spin up")).not.toBeInTheDocument();
+  });
+});
+
+describe("the advanced panel", () => {
+  beforeEach(() => {
+    spinUp.mockReset();
+    spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
+    routerMock.refresh.mockClear();
+    fetchMock.mockReset();
+    imageCheckAnswers("available");
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /*
+   * The ticket's own constraint: the common case stays the fields it was. Everything Railway
+   * would otherwise default is a click away rather than on screen.
+   */
+  it("is closed on first render, with image and name outside it", () => {
+    renderForm();
+    expect(advanced().open).toBe(false);
+    expect(advanced()).not.toContainElement(image());
+    expect(advanced()).not.toContainElement(screen.getByLabelText("Name"));
+  });
+
+  it("submits every advanced field under the name the schema reads", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await waitFor(() => expect(screen.getByLabelText("Region")).not.toBeDisabled());
+
+    await openAdvanced(user);
+    await user.selectOptions(screen.getByLabelText("Region"), "us-west2");
+    await user.type(screen.getByLabelText("Replicas"), "3");
+    await user.type(screen.getByLabelText("vCPU"), "0.5");
+    await user.type(screen.getByLabelText("Memory (GB)"), "2");
+    await user.selectOptions(screen.getByLabelText("Restart policy"), "ON_FAILURE");
+    await user.type(screen.getByLabelText("Retries"), "4");
+    await user.type(screen.getByLabelText("Start command"), "serve --port 80");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    const submitted = spinUp.mock.calls[0]![1];
+    expect(submitted.get("region")).toBe("us-west2");
+    expect(submitted.get("replicas")).toBe("3");
+    expect(submitted.get("cpu")).toBe("0.5");
+    expect(submitted.get("memory")).toBe("2");
+    expect(submitted.get("restartPolicy")).toBe("ON_FAILURE");
+    expect(submitted.get("restartRetries")).toBe("4");
+    expect(submitted.get("startCommand")).toBe("serve --port 80");
+  });
+
+  /*
+   * Collapsing the panel is "tidy this away", not "throw this away". The primitive's own
+   * test asserts the mechanism; this asserts it survives being wired into a real form, which
+   * is the version that would break if the panel were ever conditionally rendered.
+   */
+  it("keeps a value that was set and then hidden again", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await openAdvanced(user);
+    await user.type(screen.getByLabelText("Replicas"), "2");
+    await user.click(screen.getByText("Advanced settings"));
+    expect(advanced().open).toBe(false);
+
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    expect(spinUp.mock.calls[0]![1].get("replicas")).toBe("2");
+  });
+
+  /*
+   * The `key={submissionKey}` behaviour, both halves. The values clear because the subtree
+   * remounts; the panel stays open because the `<details>` around it does not. Keying the
+   * `<details>` instead looks identical in review and fails the second assertion.
+   */
+  it("clears its values on success without closing the panel", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await openAdvanced(user);
+    await user.type(screen.getByLabelText("Replicas"), "3");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(screen.getByLabelText("Replicas")).toHaveValue(""));
+    expect(advanced().open).toBe(true);
+  });
+
+  /*
+   * The other half of the same rule. A failed submission left nothing on Railway and the
+   * person is about to correct one field — throwing away the other six would be the form
+   * punishing them for a typo.
+   */
+  it("keeps its values when the submission failed", async () => {
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "Run at most 5 replicas here. Scale further on Railway.",
+      field: "replicas",
+    });
+    renderForm();
+
+    await openAdvanced(user);
+    await user.type(screen.getByLabelText("Replicas"), "9");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await screen.findByText("Run at most 5 replicas here. Scale further on Railway.");
+    expect(screen.getByLabelText("Replicas")).toHaveValue("9");
+  });
+
+  it("renders an advanced failure beside its field rather than as a toast", async () => {
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "Ask for at most 8 vCPU here. Size a bigger service on Railway.",
+      field: "cpu",
+    });
+    renderForm();
+
+    await openAdvanced(user);
+    await user.type(screen.getByLabelText("vCPU"), "99");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    expect(
+      await screen.findByText(
+        "Ask for at most 8 vCPU here. Size a bigger service on Railway.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not spin up")).not.toBeInTheDocument();
+  });
+
+  /*
+   * An inline error inside a closed panel is a form that failed silently. This is the one
+   * thing the form writes to `open`, and it is why Disclosure forwards a ref at all.
+   */
+  it("opens itself when a failure names a field inside it", async () => {
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "Replicas is a whole number, one or more, or blank",
+      field: "replicas",
+    });
+    renderForm();
+
+    expect(advanced().open).toBe(false);
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(advanced().open).toBe(true));
+    expect(
+      screen.getByText("Replicas is a whole number, one or more, or blank"),
+    ).toBeInTheDocument();
+  });
+
+  /*
+   * The two controls that are deliberately not attributable to a field. Their only reachable
+   * failure is a stale page, which is a sentence about the page — so it toasts, where the
+   * other five render inline. See the note on ActionField.
+   */
+  it("toasts a region failure, which names no control to correct", async () => {
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "That is not a region Railway offers. Reload the page and try again.",
+    });
+    renderForm();
+
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    expect(await screen.findByText("Could not spin up")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "That is not a region Railway offers. Reload the page and try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  /*
+   * Retries only means something under ON_FAILURE, and a disabled input is not submitted at
+   * all — so the coupling is what stops a retry count reaching a policy that ignores it,
+   * rather than a cross-field rule in the schema.
+   */
+  it("enables retries only for the policy the number applies to", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await openAdvanced(user);
+    expect(screen.getByLabelText("Retries")).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Restart policy"), "ON_FAILURE");
+    expect(screen.getByLabelText("Retries")).toBeEnabled();
+
+    await user.type(screen.getByLabelText("Retries"), "4");
+    await user.selectOptions(screen.getByLabelText("Restart policy"), "ALWAYS");
+    expect(screen.getByLabelText("Retries")).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    expect(spinUp.mock.calls[0]![1].get("restartRetries")).toBeNull();
+  });
+
+  it("offers the regions it was given, grouped by country", async () => {
+    const user = userEvent.setup();
+    renderForm({
+      regions: [OREGON, { id: "eu-west4", label: "Amsterdam", country: "Netherlands" }],
+    });
+
+    await openAdvanced(user);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "US West (Oregon)" }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(screen.getByLabelText("Region"))
+        .getAllByRole("group")
+        .map((group) => group.getAttribute("label")),
+    ).toEqual(["United States", "Netherlands"]);
+  });
+
+  /*
+   * The read is allowed to fail into an empty list — see deployRegions — and the honest
+   * answer to that is a disabled control that says Railway will choose, not a dropdown whose
+   * only row is "Railway chooses".
+   */
+  it("disables the region select and says so when the list came back empty", async () => {
+    const user = userEvent.setup();
+    renderForm({ regions: [] });
+
+    await openAdvanced(user);
+    await waitFor(() => expect(screen.getByLabelText("Region")).toBeDisabled());
+    expect(
+      screen.getByText("Railway did not offer a region list, so it will choose one."),
+    ).toBeInTheDocument();
   });
 });

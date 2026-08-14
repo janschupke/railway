@@ -265,16 +265,40 @@ export function execute(
     }
 
     case "ServiceInstanceUpdate": {
+      if (store.faults.settingsFail) {
+        // Railway's real refusal shape: HTTP 200 with a field-level error.
+        return { errors: [{ message: "Not Authorized" }] };
+      }
       const serviceId = variables.serviceId as string;
-      const input = variables.input as { source?: { image?: string } };
+      const input = variables.input as {
+        source?: { image?: string };
+        region?: string;
+        numReplicas?: number;
+        restartPolicyType?: string;
+        restartPolicyMaxRetries?: number;
+        startCommand?: string;
+      };
       const service = store.services.get(serviceId);
       if (!service) return { errors: [{ message: "Service not found" }] };
       /*
-       * Only what was sent. The app sends `source` alone, and a fake that overwrote the
-       * rest would hide the very thing SERVICE_INSTANCE_UPDATE_MUTATION is careful about —
-       * that every other member of the input is left alone.
+       * Only what was sent. The edit path sends `source` alone and the spin-up path sends
+       * the resource controls alone, and a fake that overwrote the rest would hide the very
+       * thing SERVICE_INSTANCE_UPDATE_MUTATION is careful about — that every other member of
+       * the input is left alone.
        */
       if (input.source?.image) service.image = input.source.image;
+      if (input.region !== undefined) service.settings.region = input.region;
+      if (input.numReplicas !== undefined)
+        service.settings.replicas = input.numReplicas;
+      if (input.restartPolicyType !== undefined) {
+        service.settings.restartPolicy = input.restartPolicyType;
+      }
+      if (input.restartPolicyMaxRetries !== undefined) {
+        service.settings.restartRetries = input.restartPolicyMaxRetries;
+      }
+      if (input.startCommand !== undefined) {
+        service.settings.startCommand = input.startCommand;
+      }
       /*
        * Deliberately does NOT start a deployment, even though the real Railway may.
        * The app issues its own deploy on the next line and keys the row on the id that
@@ -329,6 +353,74 @@ export function execute(
       if (!service) return { errors: [{ message: "Service not found" }] };
       service.variables = { ...service.variables, ...input.variables };
       return { data: { variableCollectionUpsert: 1 } };
+    }
+
+    case "ServiceInstanceLimitsUpdate": {
+      if (store.faults.limitsFail) {
+        // What a plan that does not allow the size answers, which is the whole reason this
+        // is a separate mutation with a separate outcome.
+        return { errors: [{ message: "Not Authorized" }] };
+      }
+      const input = variables.input as {
+        serviceId: string;
+        vCPUs?: number;
+        memoryGB?: number;
+      };
+      const service = store.services.get(input.serviceId);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      if (input.vCPUs !== undefined) service.settings.vcpus = input.vCPUs;
+      if (input.memoryGB !== undefined) service.settings.memoryGB = input.memoryGB;
+      return { data: { serviceInstanceLimitsUpdate: true } };
+    }
+
+    case "Regions": {
+      /*
+       * No fault knob, unlike every other read here. The app memoises this list in process
+       * for ten minutes (lib/railway/regions.ts), and the server outlives a spec — so a
+       * refusal switched on mid-run would be answered from a cache the fixture cannot reach,
+       * and the spec would pass or fail on ordering. The degrade is proved where it can be:
+       * deployRegions answering `[]` in data.test.ts, and the disabled select in
+       * spin-up-form.test.tsx.
+       */
+      /*
+       * Four rows, two of which exist to be dropped. A region with no id would post an empty
+       * string, and a deprecated one is a datacentre with an end date — so both filters in
+       * `toRegionOptions` run end to end here rather than only in a unit test.
+       */
+      return {
+        data: {
+          regions: [
+            {
+              id: "us-west2",
+              name: "us-west2",
+              location: "US West (Oregon)",
+              country: "United States",
+              deploymentConstraints: null,
+            },
+            {
+              id: "europe-west4-drams3a",
+              name: "europe-west4-drams3a",
+              location: "Europe West (Amsterdam)",
+              country: "Netherlands",
+              deploymentConstraints: { deprecationInfo: { isDeprecated: false } },
+            },
+            {
+              id: null,
+              name: "unnamed",
+              location: "Somewhere with no identifier",
+              country: "Nowhere",
+              deploymentConstraints: null,
+            },
+            {
+              id: "us-west1",
+              name: "us-west1",
+              location: "US West (retiring)",
+              country: "United States",
+              deploymentConstraints: { deprecationInfo: { isDeprecated: true } },
+            },
+          ],
+        },
+      };
     }
 
     case "ServiceInstanceDeployV2": {

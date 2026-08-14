@@ -363,6 +363,63 @@ export const LIMITS = {
    */
   PORT_MIN: 1,
   PORT_MAX: 65_535,
+  /**
+   * Replicas one container may be created with.
+   *
+   * A billing bound rather than a platform one — Railway's own ceiling is plan-gated and
+   * this app cannot read the plan. Replicas are the one control here that multiplies a cost
+   * the app can never attribute back: the usage readout is a workspace figure, so five
+   * copies of a container show up as a bigger number with nothing saying which container
+   * made it bigger. Five is the point past which someone is scaling rather than spinning
+   * something up, and should be doing it on Railway's own page where the price sits next to
+   * the number.
+   */
+  REPLICAS_MAX: 5,
+  /**
+   * vCPUs one container may be asked for.
+   *
+   * Railway publishes a per-service ceiling of 8 vCPU on Hobby and 32 on Pro, and this is
+   * the lower of the two on purpose. A value Railway refuses costs a created, un-deployed
+   * service the person has to go and destroy; a form error costs a sentence. A Pro user who
+   * wants more sizes the service on Railway, and the README says so.
+   */
+  VCPU_MAX: 8,
+  /**
+   * Memory in GB one container may be asked for.
+   *
+   * Hobby's per-service ceiling, by VCPU_MAX's argument. Written as its own number rather
+   * than derived from that one, because Railway prices and gates the two separately and a
+   * shared constant would imply they move together.
+   */
+  MEMORY_GB_MAX: 8,
+  /**
+   * Restart attempts before Railway gives up, when the policy is ON_FAILURE.
+   *
+   * Railway's own default, which is also what its dashboard offers. A larger number here
+   * would be a value only this app can set and only Railway can refuse — and the cost of a
+   * refusal is a created, un-deployed service rather than a form error.
+   */
+  RESTART_RETRIES_MAX: 10,
+  /**
+   * Start command length.
+   *
+   * A legibility bound, not a platform one: Linux's own limits are ARG_MAX and
+   * MAX_ARG_STRLEN, neither of which an honest command approaches. Sized for a docker CMD
+   * and a handful of flags. Deliberately well below VARIABLE_VALUE_MAX — a variable value
+   * is an opaque blob somebody pastes, a start command is text they have to read back off a
+   * single-line field and check.
+   */
+  START_COMMAND_MAX: 512,
+  /**
+   * Region identifier length.
+   *
+   * The value comes out of Railway's own `regions` list, so this bounds what a hand-crafted
+   * request can post rather than what the form can produce. Measured against the longest
+   * identifier Railway issues today — `europe-west4-drams3a`, twenty characters — with room
+   * for a longer one appearing. Paired with REGION_PATTERN in lib/validation.ts; see
+   * SECURITY.md on why membership of the fetched list is not what is checked.
+   */
+  REGION_MAX: 32,
 } as const;
 
 /**
@@ -448,6 +505,37 @@ export const REGISTRY = {
    * costs a request rather than a render.
    */
   DEBOUNCE_MS: 500,
+} as const;
+
+/**
+ * The list of places a container can be created in, and the memo that pays for it.
+ *
+ * The read itself is one Railway round trip, and the reason it needs a memo at all is that
+ * nothing else on the dashboard shares it. `managedNames` costs nothing because it goes
+ * through `loadContainers`, which the page already pays for; this has no such carrier, and
+ * `/dashboard` is `force-dynamic` — so uncached it would be a request per render, per
+ * `router.refresh()`, per watcher tick, against a quota Railway documents at 1,000 an hour
+ * on Hobby, for a list of datacentres that changes about twice a year.
+ */
+export const REGIONS = {
+  /**
+   * How long a fetched list is kept.
+   *
+   * REGISTRY.ANSWER_TTL_MS's number and REGISTRY.ANSWER_TTL_MS's argument: long enough that
+   * a session costs one request, short enough that a region added or retired during a long
+   * session is eventually seen. Nothing here is urgent — a region appearing ten minutes
+   * late costs a choice nobody was waiting for.
+   */
+  TTL_MS: 10 * 60 * 1000,
+  /**
+   * Ceiling on the memo.
+   *
+   * Smaller than REGISTRY.CACHE_MAX_ENTRIES because the key is bounded where that one's is
+   * not: this is keyed by user id and project id, both of which are ids Railway issued, so
+   * the working set is people times their projects rather than anything a form field can
+   * enumerate. Evicted oldest-written-first.
+   */
+  CACHE_MAX_ENTRIES: 200,
 } as const;
 
 /** Presentation thresholds that are not styling. */

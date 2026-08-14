@@ -8,7 +8,7 @@ import { ErrorBlock } from "./error-block";
 import { EmptyState, PendingStatus } from "./misc";
 import { Skeleton } from "./skeleton";
 import { ScrollArea } from "./scroll-area";
-import { Select } from "./select";
+import { NativeSelect, Select } from "./select";
 import { Tooltip, TooltipProvider } from "./tooltip";
 
 describe("Button", () => {
@@ -388,6 +388,99 @@ describe("Select", () => {
 
     await user.click(screen.getByRole("combobox"));
     expect(screen.queryByRole("option")).toBeNull();
+  });
+});
+
+describe("NativeSelect", () => {
+  const options = [
+    { value: "", label: "Railway chooses" },
+    { value: "us-west2", label: "US West (Oregon)", group: "United States" },
+    { value: "eu-west4", label: "Amsterdam", group: "Netherlands" },
+  ];
+
+  /*
+   * The reason this exists beside the Radix one: it submits. The Radix select's value goes
+   * into the URL, and every control that uses this one is a form field the action reads.
+   */
+  it("reaches FormData under its name", async () => {
+    const user = userEvent.setup();
+    render(
+      <form aria-label="settings">
+        <NativeSelect name="region" label="Region" options={options} defaultValue="" />
+      </form>,
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Region" }),
+      "us-west2",
+    );
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    expect(new FormData(form).get("region")).toBe("us-west2");
+  });
+
+  /*
+   * The empty option is the other reason. `<Select.Item value="">` throws at runtime in
+   * Radix, and blank is the default state of both controls that use this — it is how a
+   * person says "let Railway decide", and it has to be a row they can select their way back
+   * to after picking somewhere.
+   */
+  it("carries an empty-valued option, which the Radix one cannot", async () => {
+    const user = userEvent.setup();
+    render(
+      <form aria-label="settings">
+        <NativeSelect name="region" label="Region" options={options} defaultValue="" />
+      </form>,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Region" });
+    await user.selectOptions(select, "us-west2");
+    await user.selectOptions(select, "");
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    expect(new FormData(form).get("region")).toBe("");
+  });
+
+  it("groups options by their group, so a country heading appears once", () => {
+    render(<NativeSelect label="Region" options={options} defaultValue="" />);
+    const groups = screen.getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("label"))).toEqual([
+      "United States",
+      "Netherlands",
+    ]);
+    // The ungrouped option is not wrapped: an unlabelled group announces itself with no name.
+    expect(groups).toHaveLength(2);
+  });
+
+  it("renders an error inline and marks the control invalid", () => {
+    render(
+      <NativeSelect label="Region" options={options} error="That is not a region." />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Region" });
+    expect(select).toHaveAttribute("aria-invalid", "true");
+    const message = screen.getByRole("alert");
+    expect(message).toHaveTextContent("That is not a region.");
+    expect(select).toHaveAttribute("aria-describedby", message.id);
+  });
+
+  it("disables itself and says why when there is nothing to choose", () => {
+    // The Radix Select's rule, and its reason: an enabled control with one row is not a
+    // choice, it is a dead end.
+    render(
+      <NativeSelect
+        label="Region"
+        options={[]}
+        disabledReason="Railway did not offer a region list."
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Region" });
+    expect(select).toBeDisabled();
+    expect(select).toHaveAttribute(
+      "aria-describedby",
+      screen.getByText("Railway did not offer a region list.").id,
+    );
   });
 });
 

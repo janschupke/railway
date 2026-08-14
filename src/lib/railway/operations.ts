@@ -43,6 +43,8 @@ import type {
   ProjectsPersonalQueryVariables,
   ProjectsWorkspaceQuery,
   ProjectsWorkspaceQueryVariables,
+  RegionsQuery,
+  RegionsQueryVariables,
   ServiceCreateMutation,
   ServiceCreateMutationVariables,
   ServiceDeleteMutation,
@@ -51,6 +53,8 @@ import type {
   ServiceDomainCreateMutationVariables,
   ServiceInstanceDeployV2Mutation,
   ServiceInstanceDeployV2MutationVariables,
+  ServiceInstanceLimitsUpdateMutation,
+  ServiceInstanceLimitsUpdateMutationVariables,
   ServiceInstanceUpdateMutation,
   ServiceInstanceUpdateMutationVariables,
   ServiceUpdateMutation,
@@ -325,6 +329,41 @@ export const PROJECT_METRICS_QUERY: TypedDocument<
 `;
 
 /**
+ * Where a container can be created, read live rather than committed.
+ *
+ * A hardcoded list would be a list that goes stale silently, and the failure mode of a stale
+ * one is the worst shape available here: a create refused for a region this app's own form
+ * offered. Railway adds datacentres and retires them, and neither event produces a build
+ * failure anywhere.
+ *
+ * Scoped by `projectId`. The argument is nullable and is sent anyway — availability is not
+ * established to be global, and a list that is right for the project the form is pointed at
+ * is the only list worth offering.
+ *
+ * `id` is nullable on `Region` while `name`, `location` and `country` are not, so a region
+ * Railway lists can carry no identifier to submit; the mapper drops those rather than
+ * offering a choice that posts an empty string. `deprecationInfo` is selected for the same
+ * class of reason — a deprecated region is a future failure with a date on it, and offering
+ * one is offering a container that stops working later.
+ */
+export const REGIONS_QUERY: TypedDocument<RegionsQuery, RegionsQueryVariables> =
+  /* GraphQL */ `
+    query Regions($projectId: String) {
+      regions(projectId: $projectId) {
+        id
+        name
+        location
+        country
+        deploymentConstraints {
+          deprecationInfo {
+            isDeprecated
+          }
+        }
+      }
+    }
+  `;
+
+/**
  * A new project on the signed-in user's personal account.
  *
  * Selects `...ProjectFields` rather than a bare `id`, and that is what the create flow is
@@ -450,6 +489,28 @@ export const SERVICE_INSTANCE_UPDATE_MUTATION: TypedDocument<
       environmentId: $environmentId
       input: $input
     )
+  }
+`;
+
+/**
+ * How much CPU and memory a service may have, which is not on ServiceInstanceUpdateInput.
+ *
+ * Railway splits sizing into its own mutation and its own input, and the split is
+ * load-bearing rather than cosmetic: this one is gated by the plan behind the token where
+ * the other is not. A refusal here means "your plan does not allow a service that size" and
+ * a refusal there means the settings themselves were rejected, so `createContainer` sends
+ * them as two steps with two outcomes rather than one — see the outcome union there.
+ *
+ * `Float`, both members, and the form deliberately imposes no step grid on them: a quarter
+ * of a vCPU is a value Railway accepts and a `step="0.5"` input would refuse before the
+ * server ever saw it.
+ */
+export const SERVICE_INSTANCE_LIMITS_UPDATE_MUTATION: TypedDocument<
+  ServiceInstanceLimitsUpdateMutation,
+  ServiceInstanceLimitsUpdateMutationVariables
+> = /* GraphQL */ `
+  mutation ServiceInstanceLimitsUpdate($input: ServiceInstanceLimitsUpdateInput!) {
+    serviceInstanceLimitsUpdate(input: $input)
   }
 `;
 
@@ -933,6 +994,21 @@ export const DEGRADING_OPERATIONS: Array<{ operationName: string; note: string }
   {
     operationName: "EnvironmentVolumes",
     note: "container rows show no volume, and destroy keeps the data instead of offering the choice",
+  },
+  /*
+   * The region list on the spin-up form's advanced panel.
+   *
+   * Losing it costs a choice rather than a capability: the select renders disabled with a
+   * reason and Railway picks the region, which is exactly what happened before this app
+   * offered one. The same trade ProjectMetrics makes, and it is worth naming what is
+   * deliberately NOT here beside it — `ServiceInstanceLimitsUpdate` is a hard dependency,
+   * because its withdrawal would leave a CPU field and a memory field that a person fills in
+   * and that silently do nothing. A control that lies is the failure this job exists to
+   * catch; a control that is honestly unavailable is not.
+   */
+  {
+    operationName: "Regions",
+    note: "the spin-up form offers no region choice, and Railway picks",
   },
 ];
 

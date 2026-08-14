@@ -11,6 +11,7 @@ import {
   listProjects,
 } from "@/lib/railway/api";
 import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
+import { cachedRegions } from "@/lib/railway/regions";
 import { reportError } from "@/lib/report-error";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
@@ -21,6 +22,7 @@ import type {
   ContainerVolume,
   RailwayEnvironment,
   RailwayProject,
+  RegionOption,
   WorkspaceSpend,
 } from "@/lib/railway/types";
 
@@ -358,4 +360,34 @@ export async function managedNames(
   // Only this app's own names can be taken: it prefixes what it creates, and a service
   // created elsewhere is listed for context but occupies none of that namespace.
   return containers.filter((c) => c.managed).map((c) => c.displayName);
+}
+
+/**
+ * Where a container may be created, for the spin-up form's region select.
+ *
+ * Carries `managedNames`' contract above word for word: it cannot reject, and must not be
+ * made to. The result crosses into a client component as an unawaited promise, and a
+ * rejected one surfaces there as an error in the client tree rather than as a choice that
+ * quietly did not appear — so everything is caught here, where the answer to a failure is a
+ * designed one.
+ *
+ * `[]` is that designed answer rather than a failure: the select renders disabled with a
+ * reason and Railway picks the region, which is what happened before this app offered a
+ * choice at all. See DEGRADING_OPERATIONS in lib/railway/operations.ts.
+ *
+ * Unlike `managedNames` it does not share `loadContainers`' memo — nothing else reads
+ * regions — so it is the one read on this page with a cache of its own. See
+ * lib/railway/regions.ts for why that cache exists and what it costs.
+ */
+export async function deployRegions(projectId: string): Promise<RegionOption[]> {
+  try {
+    const session = await getSession();
+    if (!session) return [];
+    return await cachedRegions(session.accessToken, session.user.id, projectId);
+  } catch (error) {
+    // Debug, beside the two reads above and for their reason: this runs on every render, and
+    // a choice the app degrades out of by design is not an incident.
+    log.debug("dashboard.regions_failed", { error });
+    return [];
+  }
 }

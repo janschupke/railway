@@ -7,6 +7,7 @@ import {
   expect,
   expectNoA11yViolations,
   field,
+  fillAdvanced,
   injectFaults,
   onlyVisible,
   openDestroyDialog,
@@ -274,6 +275,43 @@ test.describe("accessibility", () => {
       await expect(alerts(page).first()).toBeVisible();
 
       await expectNoA11yViolations(page, `form-errors/${theme}`);
+    });
+
+    test(`the open advanced panel has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Two things at once, and the panel being open is what makes both scannable: a native
+       * `<select>` styled from the tokens, which is the one control on this form the design
+       * system does not draw itself, and a disabled input — Retries, inert until the policy
+       * it applies to is chosen — whose dimmed text is the contrast pair most likely to fall
+       * under a threshold nobody checked.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await fillAdvanced(page, { region: "us-west2" });
+
+      await expectNoA11yViolations(page, `advanced-panel/${theme}`);
+    });
+
+    test(`an advanced validation error has no violations (${theme})`, async ({
+      page,
+    }) => {
+      /*
+       * The panel opens itself to show this, which is the state worth scanning: an inline
+       * `role="alert"` inside a region that was hidden a moment ago, on a control the user
+       * has to be able to find from the message.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await field(page, "Image reference").fill("nginx:1.27-alpine");
+      await page.keyboard.press("Escape");
+      await field(page, "Name").fill("toobig");
+      await fillAdvanced(page, { replicas: "99" });
+      await button(page, /spin up container/i).click();
+      await expect(alerts(page).first()).toBeVisible();
+
+      await expectNoA11yViolations(page, `advanced-errors/${theme}`);
     });
 
     test(`the image warning has no violations (${theme})`, async ({ page }) => {

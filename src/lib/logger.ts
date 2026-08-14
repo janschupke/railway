@@ -280,6 +280,8 @@ export type LogEvent =
    * incident, and a warn per render is how a log store teaches people to ignore warns.
    */
   | "dashboard.volumes_failed"
+  /* The region list behind the spin-up form's advanced panel, on the same terms. */
+  | "dashboard.regions_failed"
   /*
    * Neither has a `.destroyed` counterpart, and that is the design rather than a gap: this
    * app creates projects and environments and never deletes them, which is also why they
@@ -324,6 +326,19 @@ export type LogEvent =
   | "railway.projects.source_failed"
   | "railway.request"
   | "railway.request.retry"
+  /*
+   * The two resource-control steps of a spin-up, and they are two names rather than one for
+   * the reason `createContainer` keeps them two mutations: Railway gates sizing by plan and
+   * does not gate the rest, so a refusal of each says something different about the account.
+   * Both stop the container being deployed.
+   *
+   * `start_command_length`, never the command. Every other field on `settings_failed` is
+   * closed or bounded — a region from Railway's own list, a count under a LIMITS ceiling,
+   * one of three policy names — and the start command is the one free-text field on the
+   * panel, which is the split `container.created` already makes for variable names.
+   */
+  | "railway.settings_failed"
+  | "railway.limits_failed"
   | "railway.variables_failed"
   /*
    * The volume a stateful preset is given, and the two ways that can go.

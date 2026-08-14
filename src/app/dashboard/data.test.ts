@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logRecords } from "@/test/log-capture";
 import type { RailwaySession } from "@/lib/auth/session";
 
 const getSession = vi.fn<() => Promise<RailwaySession | null>>();
@@ -6,6 +7,7 @@ const listProjects = vi.fn();
 const getProjectContainers = vi.fn();
 const getProjectMetrics = vi.fn();
 const getEnvironmentVolumes = vi.fn();
+const cachedRegions = vi.fn();
 
 vi.mock("@/lib/auth/server", () => ({ getSession: () => getSession() }));
 vi.mock("@/lib/railway/api", () => ({
@@ -14,8 +16,12 @@ vi.mock("@/lib/railway/api", () => ({
   getProjectMetrics: (...args: unknown[]) => getProjectMetrics(...args),
   getEnvironmentVolumes: (...args: unknown[]) => getEnvironmentVolumes(...args),
 }));
+vi.mock("@/lib/railway/regions", () => ({
+  cachedRegions: (...args: unknown[]) => cachedRegions(...args),
+}));
 
-const { loadDashboardShell, loadContainers, managedNames } = await import("./data");
+const { loadDashboardShell, loadContainers, managedNames, deployRegions } =
+  await import("./data");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 /**
  * `METRICS_POLL_MS`, overridable per test without touching `process.env`.
@@ -458,5 +464,55 @@ describe("loadContainers", () => {
       expect(data.containers).toEqual([]);
       expect(data.volumes.svc_1?.mountPath).toBe("/data");
     });
+  });
+});
+
+describe("deployRegions", () => {
+  const OREGON = {
+    id: "us-west2",
+    label: "US West (Oregon)",
+    country: "United States",
+  };
+
+  beforeEach(() => {
+    getSession.mockReset();
+    getSession.mockResolvedValue(session);
+    cachedRegions.mockReset();
+  });
+
+  it("reads the memo with the session's own token and user", async () => {
+    cachedRegions.mockResolvedValue([OREGON]);
+
+    await expect(deployRegions("p1")).resolves.toEqual([OREGON]);
+    expect(cachedRegions).toHaveBeenCalledWith("token", "u1", "p1");
+  });
+
+  /*
+   * The contract managedNames carries word for word: this crosses into a client component as
+   * an unawaited promise, and a rejected one surfaces there as an error in the client tree
+   * rather than as a choice that quietly did not appear.
+   */
+  it("cannot reject, and answers with the designed empty list instead", async () => {
+    cachedRegions.mockRejectedValue(new Error("Railway said no"));
+
+    await expect(deployRegions("p1")).resolves.toEqual([]);
+  });
+
+  it("logs a failure at debug, because it runs on every render", async () => {
+    cachedRegions.mockRejectedValue(new Error("Railway said no"));
+
+    await deployRegions("p1");
+
+    const line = logRecords().find(
+      (record) => record.msg === "dashboard.regions_failed",
+    );
+    expect(line?.level).toBe("debug");
+  });
+
+  it("answers with nothing when there is no session, rather than reading anything", async () => {
+    getSession.mockResolvedValue(null);
+
+    await expect(deployRegions("p1")).resolves.toEqual([]);
+    expect(cachedRegions).not.toHaveBeenCalled();
   });
 });

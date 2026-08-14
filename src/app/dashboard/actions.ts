@@ -120,6 +120,13 @@ async function create(formData: FormData): Promise<ActionResult> {
     name: formField(formData, "name"),
     image: formField(formData, "image"),
     port: formField(formData, "port"),
+    region: formField(formData, "region"),
+    replicas: formField(formData, "replicas"),
+    cpu: formField(formData, "cpu"),
+    memory: formField(formData, "memory"),
+    restartPolicy: formField(formData, "restartPolicy"),
+    restartRetries: formField(formData, "restartRetries"),
+    startCommand: formField(formData, "startCommand"),
     variableKey: formList(formData, "variableKey"),
     variableValue: formList(formData, "variableValue"),
     idempotencyKey: formField(formData, "idempotencyKey"),
@@ -221,8 +228,22 @@ async function attempt(
    * above, since that one is the namespaced overload.
    */
   const t = await getTranslations();
-  const { projectId, environmentId, name, image, port, variableKey, variableValue } =
-    data;
+  const {
+    projectId,
+    environmentId,
+    name,
+    image,
+    port,
+    region,
+    replicas,
+    cpu,
+    memory,
+    restartPolicy,
+    restartRetries,
+    startCommand,
+    variableKey,
+    variableValue,
+  } = data;
 
   /*
    * The two parallel lists are one row per index. The schema has already refused a
@@ -267,6 +288,32 @@ async function attempt(
   );
 
   /*
+   * The resource controls, in the two shapes Railway's two mutations take. Absent members
+   * are absent rather than null: `createContainer` sends only what is here, and an empty
+   * object issues no request at all.
+   *
+   * `restartRetries` is dropped unless the policy is ON_FAILURE, which is the only policy
+   * the number means anything under. The form disables that field for the other two and a
+   * disabled input posts nothing, so this is unreachable from a browser — and it is a drop
+   * rather than a refusal because a request carrying a retry count for a policy that ignores
+   * it has said nothing wrong. Refusing it would be this app guessing stricter than the
+   * platform, which is the failure mode lib/validation.ts warns about twice.
+   */
+  const settings = {
+    ...(region === undefined ? {} : { region }),
+    ...(replicas === undefined ? {} : { replicas }),
+    ...(restartPolicy === undefined ? {} : { restartPolicy }),
+    ...(restartRetries === undefined || restartPolicy !== "ON_FAILURE"
+      ? {}
+      : { restartRetries }),
+    ...(startCommand === undefined ? {} : { startCommand }),
+  };
+  const limits = {
+    ...(cpu === undefined ? {} : { cpu }),
+    ...(memory === undefined ? {} : { memory }),
+  };
+
+  /*
    * Scoped to this one call, not to the whole action.
    *
    * `create`'s catch also covers the session read, where no create was ever attempted and
@@ -293,6 +340,8 @@ async function attempt(
        * destination is `ServiceDomainCreateInput.targetPort`.
        */
       ...(port === undefined ? {} : { targetPort: port }),
+      settings,
+      limits,
     });
   } catch (error) {
     // Rethrown immediately: `describeActionError` still owns what the user is told. This
@@ -360,6 +409,28 @@ async function attempt(
      */
     target_port: port ?? 0,
     domain_created: created.url !== null,
+    /*
+     * How big the thing that was created is, which is new to this record and is the half
+     * that costs money.
+     *
+     * Replicas times vCPU times memory is the first thing this app lets anyone set that
+     * multiplies the bill, and the app can never say what that came to: the usage readout is
+     * a workspace figure — see WorkspaceSpend — and Railway keeps no record a service existed
+     * once it is destroyed. So this line is the only place anywhere that says a container was
+     * asked to be five copies of eight gigabytes. Zero reads as "not asked for", which is
+     * what a blank field means everywhere else on this form.
+     *
+     * The start command's length rather than the command, on the split the variable names
+     * above already make: everything else here is closed or bounded, and that one is free
+     * text somebody typed.
+     */
+    region: region ?? "",
+    replicas: replicas ?? 0,
+    vcpus: cpu ?? 0,
+    memory_gb: memory ?? 0,
+    restart_policy: restartPolicy ?? "",
+    restart_retries: settings.restartRetries ?? -1,
+    start_command_length: startCommand?.length ?? 0,
   });
 
   revalidatePath("/dashboard");
@@ -385,6 +456,25 @@ async function attempt(
      */
     return {
       value: { ok: false, error: t("actions.createdButNoVolume", { name }) },
+      retain: true,
+    };
+  }
+  if (created.outcome === "settings_failed") {
+    return {
+      value: { ok: false, error: t("actions.createdButNoSettings", { name }) },
+      retain: true,
+    };
+  }
+  if (created.outcome === "limits_failed") {
+    /*
+     * Its own sentence rather than a share of the one above, because the likely cause is
+     * different and so is the remedy: this is usually the plan behind the token refusing a
+     * service that size, which is fixed by asking for less rather than by asking again.
+     * Said as "usually" — the app cannot read the plan, and asserting a cause it cannot
+     * check would be the same mistake as rendering upstream failure text.
+     */
+    return {
+      value: { ok: false, error: t("actions.createdButNoLimits", { name }) },
       retain: true,
     };
   }

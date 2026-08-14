@@ -286,6 +286,40 @@ test.describe("keyboard operation", () => {
     await expect(field(page, "Name")).toBeFocused();
   });
 
+  /*
+   * The half of the disclosure's keyboard contract jsdom cannot prove: it does not implement
+   * the activation behaviour that turns these keys into a click on a `<summary>`, so
+   * asserting it there would be asserting against the simulation. Both keys, because both
+   * are part of what makes a `<summary>` worth using instead of a div with a handler.
+   */
+  test("opens and closes the advanced panel with Enter and Space", async ({ page }) => {
+    await signIn(page);
+
+    const summary = page.getByText("Advanced settings");
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("details[open]")).toHaveCount(1);
+
+    await page.keyboard.press(" ");
+    await expect(page.locator("details[open]")).toHaveCount(0);
+  });
+
+  test("reaches the advanced panel after the variable editor, not before the name", async ({
+    page,
+  }) => {
+    /*
+     * The panel sits last on the form, which is what keeps the Image → Tab → Name order the
+     * test above pins. Asserted from the other end: the editor's Add button is the last stop
+     * before it.
+     */
+    await signIn(page);
+
+    await button(page, /add variable/i).focus();
+    await page.keyboard.press("Tab");
+
+    await expect(page.getByText("Advanced settings")).toBeFocused();
+  });
+
   test("expands the log panel from the keyboard", async ({ page }) => {
     await signIn(page);
 
@@ -492,6 +526,7 @@ test.describe("keyboard operation", () => {
       ["variable value cell", page.getByLabel("Variable value 1")],
       ["remove variable", button(page, "Remove MY_FLAG")],
       ["add variable", button(page, /add variable/i)],
+      ["advanced summary", page.getByText("Advanced settings")],
       ["submit", button(page, /spin up container/i)],
       ["search", searchBox(page)],
       ["status filter", button(page, /^Status/)],

@@ -700,6 +700,249 @@ describe("createContainer, attaching a volume", () => {
   });
 });
 
+describe("createContainer, applying the advanced resource controls", () => {
+  /*
+   * The four calls every case here needs, with the operation sequence recorded.
+   *
+   * The capture callbacks are on the stub rather than passed as a second `server.use`
+   * handler for the same operation, because MSW answers with the first match — an override
+   * registered after this one never runs, and the assertion silently reads `undefined`.
+   * Same shape `volumeOk` above uses, for the same reason.
+   */
+  const stubs = (
+    calls: string[],
+    over: {
+      settingsFail?: boolean;
+      limitsFail?: boolean;
+      onSettings?: (variables: Record<string, unknown>) => void;
+      onLimits?: (input: Record<string, unknown>) => void;
+    } = {},
+  ) => [
+    api.mutation("ServiceCreate", () => {
+      calls.push("create");
+      return HttpResponse.json({
+        data: { serviceCreate: { id: "svc_1", name: "spun-x" } },
+      });
+    }),
+    api.mutation("ServiceInstanceUpdate", ({ variables }) => {
+      calls.push("settings");
+      over.onSettings?.(variables as Record<string, unknown>);
+      return over.settingsFail
+        ? HttpResponse.json({ errors: [{ message: "refused" }] }, { status: 200 })
+        : HttpResponse.json({ data: { serviceInstanceUpdate: true } });
+    }),
+    api.mutation("ServiceInstanceLimitsUpdate", ({ variables }) => {
+      calls.push("limits");
+      over.onLimits?.((variables as { input: Record<string, unknown> }).input);
+      return over.limitsFail
+        ? HttpResponse.json({ errors: [{ message: "refused" }] }, { status: 200 })
+        : HttpResponse.json({ data: { serviceInstanceLimitsUpdate: true } });
+    }),
+    api.mutation("ServiceInstanceDeployV2", () => {
+      calls.push("deploy");
+      return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } });
+    }),
+  ];
+
+  const create = (params: Record<string, unknown> = {}) =>
+    createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-x",
+      image: "nginx:1.27-alpine",
+      ...params,
+    });
+
+  /*
+   * The guarantee the whole design turns on: adding seven optional controls costs a spin-up
+   * that used none of them exactly nothing. `onUnhandledRequest: "error"` is what makes the
+   * absence an assertion rather than a claim — a request to either new mutation fails the
+   * test with no handler to answer it.
+   */
+  it("issues no extra request when nothing was asked for", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls));
+
+    await create({ settings: {}, limits: {} });
+
+    expect(calls).toEqual(["create", "deploy"]);
+  });
+
+  it("issues no extra request when the caller passes neither object", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls));
+
+    await create();
+
+    expect(calls).toEqual(["create", "deploy"]);
+  });
+
+  /*
+   * Settings before the volume, which is the ordering `region` fixes: a volume is
+   * provisioned for the service as it stands, so a region applied afterwards is applied to a
+   * service whose storage was already placed, and this app cannot move it.
+   */
+  it("applies the settings before the volume and before the deploy", async () => {
+    const calls: string[] = [];
+    server.use(
+      ...stubs(calls),
+      volumeOk(() => calls.push("volume")),
+      api.mutation("VariableCollectionUpsert", () => {
+        calls.push("variables");
+        return HttpResponse.json({ data: { variableCollectionUpsert: 1 } });
+      }),
+    );
+
+    await create({
+      image: "postgres:16-alpine",
+      variables: { POSTGRES_PASSWORD: "x" },
+      settings: { region: "us-west2" },
+      limits: { cpu: 0.5 },
+    });
+
+    expect(calls).toEqual([
+      "create",
+      "settings",
+      "limits",
+      "volume",
+      "variables",
+      "deploy",
+    ]);
+  });
+
+  it("sends only the members that were asked for", async () => {
+    const calls: string[] = [];
+    let sent: Record<string, unknown> | undefined;
+    server.use(...stubs(calls, { onSettings: (variables) => (sent = variables) }));
+
+    await create({ settings: { replicas: 3 } });
+
+    expect(sent).toMatchObject({
+      serviceId: "svc_1",
+      // Always sent: an omitted environment updates the service in every non-fork
+      // environment, which is a blast radius nobody asked for from a form naming one.
+      environmentId: "e1",
+      input: { numReplicas: 3 },
+    });
+    expect(Object.keys((sent?.input ?? {}) as object)).toEqual(["numReplicas"]);
+  });
+
+  it("maps every setting onto the member Railway names it", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...stubs(calls, {
+        onSettings: (variables) =>
+          (input = (variables as { input: Record<string, unknown> }).input),
+      }),
+    );
+
+    await create({
+      settings: {
+        region: "us-west2",
+        replicas: 2,
+        restartPolicy: "ON_FAILURE",
+        restartRetries: 4,
+        startCommand: "serve",
+      },
+    });
+
+    expect(input).toEqual({
+      region: "us-west2",
+      numReplicas: 2,
+      restartPolicyType: "ON_FAILURE",
+      restartPolicyMaxRetries: 4,
+      startCommand: "serve",
+    });
+  });
+
+  it("sends CPU and memory to their own mutation, and only when asked", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(...stubs(calls, { onLimits: (sent) => (input = sent) }));
+
+    await create({ limits: { cpu: 0.5, memory: 2 } });
+
+    expect(calls).toEqual(["create", "limits", "deploy"]);
+    expect(input).toEqual({
+      environmentId: "e1",
+      serviceId: "svc_1",
+      vCPUs: 0.5,
+      memoryGB: 2,
+    });
+  });
+
+  /*
+   * A refusal does not deploy, on the argument the volume and variables branches make: a
+   * container running in a region nobody asked for is a container quietly not doing what the
+   * form said it would, and an un-deployed service is visible, prefixed and destroyable.
+   */
+  it("stops before the deploy when the settings are refused", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls, { settingsFail: true }));
+
+    const result = await create({ settings: { replicas: 3, startCommand: "serve" } });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: null,
+      url: null,
+      outcome: "settings_failed",
+    });
+    expect(calls).toEqual(["create", "settings"]);
+  });
+
+  it("stops before the deploy when the size is refused, which is usually the plan", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls, { limitsFail: true }));
+
+    const result = await create({ limits: { cpu: 32 } });
+
+    expect(result.outcome).toBe("limits_failed");
+    expect(calls).toEqual(["create", "limits"]);
+  });
+
+  /*
+   * The start command is the one free-text field on the panel, so it is counted rather than
+   * named — the split `container.created` already makes between preset variable names and a
+   * count of the user's. Everything else here is closed or bounded and is named.
+   */
+  it("records the length of the start command and never the command", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls, { settingsFail: true }));
+
+    await create({
+      settings: {
+        region: "us-west2",
+        replicas: 3,
+        restartPolicy: "ALWAYS",
+        startCommand: "serve --secret hunter2",
+      },
+    });
+
+    const record = logRecords().find((line) => line.msg === "railway.settings_failed");
+    expect(record).toMatchObject({
+      service_id: "svc_1",
+      region: "us-west2",
+      replicas: 3,
+      restart_policy: "ALWAYS",
+      start_command_length: "serve --secret hunter2".length,
+    });
+    expect(rawLogLines().join("\n")).not.toContain("hunter2");
+  });
+
+  it("records the size that was refused", async () => {
+    const calls: string[] = [];
+    server.use(...stubs(calls, { limitsFail: true }));
+
+    await create({ limits: { cpu: 32, memory: 64 } });
+
+    expect(
+      logRecords().find((line) => line.msg === "railway.limits_failed"),
+    ).toMatchObject({ service_id: "svc_1", vcpus: 32, memory_gb: 64 });
+  });
+});
+
 describe("createContainer, minting a public domain", () => {
   /** Railway answering `serviceDomainCreate`, with the input handed to the caller. */
   const domainOk = (onCall?: (input: Record<string, unknown>) => void) =>
