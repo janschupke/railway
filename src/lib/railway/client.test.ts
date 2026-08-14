@@ -1,6 +1,8 @@
 import { HttpResponse, graphql, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { NETWORK } from "@/lib/constants";
+import { logRecords } from "@/test/log-capture";
 import { gql, railwayApiUrl } from "./client";
 import { RailwayApiError } from "./errors";
 
@@ -168,6 +170,53 @@ describe("gql", () => {
     expect(error.kind).toBe("server");
     expect(error.status).toBe(502);
   }, 10_000);
+
+  it("abandons a retry backoff when the caller aborts, rather than waiting it out", async () => {
+    /*
+     * The backoff was the one place a cancelled call still cost real time. An abort
+     * during the `fetch` was always honoured; an abort during the wait *between* attempts
+     * was not, so a caller that had already hung up held a timer for the full
+     * RETRY_BASE_MS before the next attempt failed on the same signal it was already
+     * carrying. The call rejects either way — the elapsed time is what changed, which is
+     * why it is the assertion.
+     */
+    const controller = new AbortController();
+    let attempts = 0;
+    server.use(
+      http.post(ENDPOINT, () => {
+        attempts += 1;
+        /*
+         * Fires once this response has been handed back. `execute` does not read a 5xx
+         * body, so the next thing it does is log the retry and wait — the abort lands in
+         * the backoff, which is the path under test.
+         */
+        setTimeout(() => controller.abort(), 0);
+        return new HttpResponse(null, { status: 502 });
+      }),
+    );
+
+    const startedAt = Date.now();
+    const error = await gql(
+      QUERY,
+      {},
+      { accessToken: "t0ken", operationName: "Ping", signal: controller.signal },
+    ).catch((e: unknown) => e);
+    const elapsed = Date.now() - startedAt;
+
+    // Proves the first attempt completed and the backoff was entered, rather than the
+    // abort having simply raced the fetch.
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({ msg: "railway.request.retry", reason: "server" }),
+    );
+    expect(elapsed).toBeLessThan(NETWORK.RETRY_BASE_MS);
+    expect(attempts).toBe(1);
+    /*
+     * The caller's own reason comes back, not a RailwayApiError. An abort is a decision
+     * this app made, not a failure Railway needs classifying, logging or explaining — and
+     * the watch route's `if (signal.aborted) return` depends on not being handed one.
+     */
+    expect(error).toBe(controller.signal.reason);
+  });
 
   it("never leaks the token into a client-facing error", async () => {
     server.use(http.post(ENDPOINT, () => new HttpResponse(null, { status: 401 })));

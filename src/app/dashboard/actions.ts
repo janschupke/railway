@@ -149,6 +149,10 @@ async function create(formData: FormData): Promise<ActionResult> {
      * twice creates two identical services. Checking first is not airtight (nothing
      * short of a lock is), but it turns the common case into a clear message instead
      * of a duplicate container.
+     *
+     * Uncancellable, like every Railway call on this side: a Server Action has no access
+     * to the inbound request's signal in Next 16. The reasoning, and what was rejected
+     * instead, is written out once at `containerList` in ./data.ts.
      */
     const managedName = toManagedName(name);
     const { containers } = await getProjectContainers(
@@ -465,6 +469,12 @@ async function destroy(formData: FormData): Promise<ActionResult> {
      * Re-derive ownership server-side. The client sends a service id and nothing else
      * is trusted: if the service was not created by this app, the delete is refused
      * here even though the user's own token would happily perform it.
+     *
+     * Uncancellable for the same reason as the read in `create` above — see
+     * `containerList` in ./data.ts. It is also the read this app would least want to give
+     * a deadline to: a signal that fired here would have to refuse the destroy, never
+     * fall through to one, so it buys a new failure mode for a check that must not fail
+     * open.
      */
     const { containers } = await getProjectContainers(
       accessToken,

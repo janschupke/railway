@@ -110,6 +110,29 @@ function logRetry(
 }
 
 /**
+ * The retry backoff, which gives up the moment the caller does.
+ *
+ * `sleep` resolves on abort rather than rejecting — it is a delay, not a request — so the
+ * caller's decision has to be re-read here. Without this, a cancelled call waited out the
+ * full backoff before the *next* attempt's fetch rejected on the same already-aborted
+ * signal: the abort was honoured, a second and a half late, having pinned a timer for a
+ * request nobody was waiting on. `sleep` has taken a signal all along for exactly this
+ * reason; the three call sites below simply never passed one.
+ *
+ * Throws `signal.reason` rather than a `RailwayApiError`, which is the same contract the
+ * fetch catch keeps: a caller-initiated abort is the caller's own value coming back, not a
+ * Railway failure to classify, log or explain to anyone.
+ *
+ * Each `logRetry` line stays where it is, above the wait: it records that a retry was
+ * *scheduled*, which is true even when the caller then leaves, and moving it below would
+ * delay every one of them by the backoff it is there to make visible.
+ */
+async function backoff(ms: number, signal?: AbortSignal): Promise<void> {
+  await sleep(ms, signal);
+  if (signal?.aborted) throw signal.reason;
+}
+
+/**
  * Single choke point for every Railway GraphQL call.
  *
  * Handles the three things that make this API awkward to use naively:
@@ -161,7 +184,7 @@ async function execute<T>(
         });
       }
       logRetry(operationName, attempt, "network", backoffMs(attempt));
-      await sleep(backoffMs(attempt));
+      await backoff(backoffMs(attempt), signal);
       continue;
     }
 
@@ -190,7 +213,7 @@ async function execute<T>(
         backoffMs(attempt, retryAfterSeconds),
         429,
       );
-      await sleep(backoffMs(attempt, retryAfterSeconds));
+      await backoff(backoffMs(attempt, retryAfterSeconds), signal);
       continue;
     }
 
@@ -203,7 +226,7 @@ async function execute<T>(
         });
       }
       logRetry(operationName, attempt, "server", backoffMs(attempt), response.status);
-      await sleep(backoffMs(attempt));
+      await backoff(backoffMs(attempt), signal);
       continue;
     }
 

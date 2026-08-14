@@ -208,6 +208,27 @@ async function containerList(
   if (!session) return { containers: [], error: null };
 
   try {
+    /*
+     * No signal, and that is a framework limit rather than an oversight — see the note
+     * below before adding one.
+     *
+     * `getProjectContainers` takes an optional AbortSignal and the watch route passes one,
+     * so this reads like an inconsistency worth closing. It is not: Next 16 exposes the
+     * inbound request's signal only on `NextRequest`, which exists in a route handler and
+     * nowhere else. A Server Component, a data loader and a Server Action have no
+     * accessor for it — `next/server` exports none, and the signals inside app-render are
+     * the prerender and cache ones, which say nothing about the client hanging up. So a
+     * project switch remounts the Suspense boundary and this call runs on to its own
+     * completion, up to NETWORK.MAX_ATTEMPTS × REQUEST_TIMEOUT_MS.
+     *
+     * A synthetic deadline was the obvious substitute and is deliberately not here: it
+     * would bound the render that nobody is waiting for by failing the one that somebody
+     * is, since the two are indistinguishable from this side. The retry backoff is now
+     * cancellable for the callers that *do* hold a real signal (see `backoff` in
+     * lib/railway/client.ts), which is the part of this that was genuinely broken.
+     *
+     * If a Next release exposes a request signal, this is the first place it belongs.
+     */
     const { containers } = await getProjectContainers(
       session.accessToken,
       projectId,

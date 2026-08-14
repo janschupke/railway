@@ -43,6 +43,17 @@ Three lanes, and a change belongs in exactly one of them.
 `"use client"` is a bundle decision as much as an interactivity one — see
 [performance.md](performance.md). Default to a Server Component.
 
+**Only the stream lane can be cancelled by the client.** Next 16 exposes the inbound
+request's `AbortSignal` on `NextRequest` and nowhere else, so a route handler can thread
+`request.signal` into the Railway client and a data loader or Server Action cannot — there
+is no accessor for it in a Server Component, and the signals inside app-render are the
+prerender and cache ones, which say nothing about the client hanging up. A read on the
+first two lanes therefore runs to completion after the user has navigated away, bounded
+only by `NETWORK.MAX_ATTEMPTS × REQUEST_TIMEOUT_MS`. Do not close that gap with a
+synthetic deadline: it cannot tell an abandoned render from a slow one, so it bounds the
+first by failing the second. The retry backoff _is_ cancellable — `backoff` in
+`src/lib/railway/client.ts` — which is what the callers holding a real signal needed.
+
 ## `src/proxy.ts` is Next 16's middleware, and it is where refresh lives
 
 Server Components can read cookies but cannot write them, so a token that expires
