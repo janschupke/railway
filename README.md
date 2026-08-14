@@ -20,7 +20,8 @@ and deploy logs streamed while it happens.
 **Reference** — [Decisions (11 ADRs)](#decisions) · [Tests](#tests) ·
 [Design system](#design-system) · [Internationalisation](#internationalisation) ·
 [Performance](#performance) · [Accessibility](#accessibility) · [Logs](#logs) ·
-[Schema verification](#schema-verification) · [Security](SECURITY.md)
+[Schema verification](#schema-verification) · [Security](SECURITY.md) ·
+[License](#license)
 
 ---
 
@@ -61,11 +62,18 @@ pnpm check          # format + lint (0 warnings) + types + knip + coverage gate
 pnpm test:e2e       # Playwright against the fake Railway fixture
 pnpm build && pnpm size   # per-route first-load JS against bundle-budgets.json
 pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
+pnpm verify:schema  # pinned OIDC metadata against Railway's discovery document
 ```
 
-CI runs these on every push and pull request to `master`, as five parallel jobs behind a
-single `All checks` gate for branch protection to require. Enabling that protection is a
-GitHub repo setting, not a file — it is the one manual step.
+CI runs these on every push and pull request to `master`, as four parallel jobs behind a
+single `All checks` gate. `.github/pull_request_template.md` names the same five commands,
+so a pull request states which of them ran locally rather than leaving the split to prose.
+
+Enabling branch protection is a GitHub repo setting, not a file — Settings → Branches → Add
+branch protection rule, pattern `master`, _Require status checks to pass before merging_
+with **All checks** selected. That one name is the whole contract: `required` is an
+aggregator that fails unless every job it needs reported success, so the list never has to
+be re-edited when a job is added. It is the one manual step.
 
 ---
 
@@ -679,3 +687,9 @@ which text members were populated, and what the app's own picker chose from them
 populated member is not the one that won, reorder `TEXT_MEMBERS` in
 `src/lib/railway/failure-reason.ts` and correct the Limitations entry — nothing else in the
 app depends on which one it is.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). Clone it, run it, take what is useful.

@@ -32,7 +32,7 @@ dead. That is why `src/test/log-capture.ts` imports nothing from `src/lib`.
 
 ## CI
 
-`.github/workflows/ci.yml`, on push and PR to `master`, five jobs plus an aggregator:
+`.github/workflows/ci.yml`, on push and PR to `master`, four jobs plus an aggregator:
 
 | Job        | What it runs                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------- |

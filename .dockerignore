@@ -23,8 +23,10 @@ test-results
 .lighthouseci
 .lighthouse-cookie
 
-# History and editor state.
+# History, editor state, and the agent rule files. None of it is read at build or run
+# time; .ai/rules alone is over a thousand lines of prose crossing into the context.
 .git
 .github
 .cursor
+.ai
 *.tsbuildinfo
