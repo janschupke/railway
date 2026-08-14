@@ -189,6 +189,46 @@ export const WATCH = {
   MAX_PER_USER: 2,
 } as const;
 
+/**
+ * The usage readout.
+ *
+ * Separate from WATCH because it owns no cadence of its own: metrics are read on the render
+ * the watcher already causes, and the only thing that decides how often that happens is
+ * METRICS_POLL_MS in env.ts — which is there rather than here for the same reason
+ * WATCH_POLL_MS is. What is left over is the shape of the one query, which is what these
+ * three numbers are.
+ */
+export const METRICS = {
+  /**
+   * How far back the metrics query reaches.
+   *
+   * Five minutes is a floor and a ceiling at once. Below it, a container that started
+   * moments ago may have produced no sample at all and would read as "—" while plainly
+   * running. Above it, the newest point is still the newest point — the extra history is
+   * response weight for a readout that renders exactly one number per measurement.
+   */
+  WINDOW_MS: 5 * 60 * 1000,
+  /**
+   * `sampleRateSeconds`. What actually bounds the response.
+   *
+   * WINDOW_MS / 60 is five points per service per measurement, so a twenty-service
+   * environment is 200 points. Railway's own default resolution over the same window would
+   * be thousands, for data this app throws away on the next line — the app reads the newest
+   * point and nothing else. The rest is what a sparkline would need, and a sparkline is a
+   * different ticket that would pay for it deliberately.
+   */
+  SAMPLE_RATE_SECONDS: 60,
+  /**
+   * `averagingWindowSeconds`, matched to the sample rate rather than tuned separately.
+   *
+   * Unmatched, the two disagree about what a point means: a one-second average sampled once
+   * a minute renders whatever the container happened to be doing in that second, so a burst
+   * reads as the steady state and an idle instant hides one. Matched, each point is the mean
+   * of the interval it covers, which is what a "current usage" figure should be.
+   */
+  AVERAGING_WINDOW_SECONDS: 60,
+} as const;
+
 /** Session cookie and token lifetimes. */
 export const SESSION = {
   /** Refresh this far ahead of expiry. Railway access tokens live one hour. */
@@ -343,6 +383,15 @@ export const LIST = {
 export const LINKS = {
   RAILWAY_DASHBOARD: "https://railway.com/dashboard",
   RAILWAY_HOME: "https://railway.com",
+  /**
+   * Where the spend figure actually lives.
+   *
+   * Reached from the dashboard whenever this app cannot show a number itself — a personal
+   * project with no workspace, or a token whose scope does not reach `customer`. Not a
+   * deep link to a specific workspace: the id is not always known on those branches, and a
+   * link that 404s is worse than one that lands a click away.
+   */
+  RAILWAY_BILLING: "https://railway.com/workspace/usage",
   /** Base for a deep link into one service; see railwayServiceUrl below. */
   RAILWAY_PROJECT: "https://railway.com/project",
   REPOSITORY: "https://github.com/janschupke/railway",

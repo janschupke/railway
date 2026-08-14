@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { setSearchParams } from "@/test/setup-dom";
 import { LIST } from "@/lib/constants";
-import type { Container } from "@/lib/railway/types";
+import type { Container, ContainerMetrics } from "@/lib/railway/types";
 
 /*
  * The rows are their own component with their own tests, and one of them opens a Radix
@@ -29,6 +29,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: null,
   updatedAt: null,
+  deployedAt: null,
   managed: true,
   ...over,
 });
@@ -38,13 +39,17 @@ const many = (count: number) =>
     container({ serviceId: `svc_${i}`, displayName: `service-${i}` }),
   );
 
-const renderList = (containers: Container[]) =>
+const renderList = (
+  containers: Container[],
+  metrics: Record<string, ContainerMetrics> = {},
+) =>
   render(
     <ContainerList
       containers={containers}
       projectId="proj_1"
       environmentId="env_1"
       heading="Containers"
+      metrics={metrics}
     />,
   );
 
@@ -202,6 +207,63 @@ describe("ContainerList", () => {
       const summary = screen.getByText("3 of 3 containers created here");
       expect(summary).toHaveAttribute("aria-live", "polite");
       expect(summary).not.toHaveAttribute("role");
+    });
+  });
+
+  describe("the usage total", () => {
+    const usage = (serviceId: string, cpuCores: number, memoryGb: number) => ({
+      serviceId,
+      cpuCores,
+      memoryGb,
+      sampledAt: 1_760_000_000,
+    });
+
+    it("adds up only the containers this app created", async () => {
+      /*
+       * The scope the cost story rests on. A total that quietly included services someone
+       * else made would be exactly the misreading the copy around it is written to prevent.
+       */
+      renderList(
+        [
+          container({ serviceId: "svc_1" }),
+          container({ serviceId: "svc_2", managed: false }),
+        ],
+        {
+          svc_1: usage("svc_1", 0.25, 1.5),
+          svc_2: usage("svc_2", 9, 9),
+        },
+      );
+
+      expect(
+        await screen.findByText("0.25 vCPU and 1.5 GB across 1 container created here"),
+      ).toBeInTheDocument();
+    });
+
+    it("says nothing at all when nothing answered", async () => {
+      /*
+       * "— vCPU and — across 0 containers" is a sentence with no content. The per-row em
+       * dash at least sits under a label that explains it; this one would not.
+       */
+      renderList([container()], {});
+
+      expect(screen.queryByText(/vCPU and/)).toBeNull();
+    });
+
+    it("keeps the total outside the live region", async () => {
+      /*
+       * These numbers move on every metrics refresh. Inside the live region they would be
+       * announced each time — the announcement spam live-region.tsx's debounce exists to
+       * prevent, arriving from a different direction. The count sentence is the one worth
+       * interrupting a screen-reader user for.
+       */
+      const { container: root } = renderList([container({ serviceId: "svc_1" })], {
+        svc_1: usage("svc_1", 0.25, 1.5),
+      });
+
+      const live = root.querySelector("[aria-live]");
+      expect(live).not.toBeNull();
+      expect(live!.textContent).not.toMatch(/vCPU/);
+      expect(await screen.findByText(/0\.25 vCPU and 1\.5 GB/)).toBeInTheDocument();
     });
   });
 });

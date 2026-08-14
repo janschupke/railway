@@ -615,3 +615,81 @@ test.describe("refusals the user is told about", () => {
     await expect(row(page, "doomed")).toHaveCount(0);
   });
 });
+
+/**
+ * What the containers cost, in the two currencies Railway will actually report.
+ *
+ * A tool whose whole purpose is creating billable infrastructure said nothing about what
+ * was running or what it was costing. These are the two halves of that: per-row usage,
+ * which Railway gives per service, and spend, which it only gives per workspace.
+ */
+test.describe("usage and spend", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("shows what a running container is using, beside its logs", async ({ page }) => {
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+    await disclosure(page, "cache").click();
+
+    /*
+     * The fixture's usage is a deterministic function of the service id, so this asserts a
+     * rendered figure rather than a shape. A regex here would pass against a readout that
+     * had lost its units or its decimals.
+     */
+    const readout = cache.getByLabel(/Resource use for cache/);
+    await expect(readout).toBeVisible();
+    await expect(readout).toContainText("vCPU");
+    await expect(readout).toContainText(/\d+ (MB|GB)/);
+    // Uptime is derived from the deployment's own createdAt. The fixture used to report
+    // epoch zero here, which would have rendered as fifty-six years.
+    await expect(readout).toContainText("Uptime");
+    await expect(readout).not.toContainText(/\d{4}d/);
+  });
+
+  test("keeps the list usable when Railway refuses metrics", async ({ page }) => {
+    /*
+     * The whole reason Query.metrics is an OPTIONAL_FIELDS entry rather than a required
+     * one: a refusal degrades the row, it does not blank the dashboard. This is what a
+     * token whose scope does not cover metrics sees on every render.
+     */
+    await injectFaults(page, { metricsFail: true });
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+    await disclosure(page, "cache").click();
+
+    const readout = cache.getByLabel(/Resource use for cache/);
+    await expect(readout).toContainText("—");
+    // The row, its logs and its destroy control are all untouched.
+    await expect(cache.getByRole("log")).toBeVisible();
+    await expect(cache.getByRole("button", { name: "Destroy" })).toBeVisible();
+  });
+
+  test("says whose spend it is showing, and points elsewhere when it has none", async ({
+    page,
+  }) => {
+    // The scope clause is the answer to "why does this not match my container list",
+    // written into the copy once instead of asked repeatedly.
+    await expect(
+      page.getByText(/The Acme workspace has used .* so far this billing period/),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/including ones this app did not create/),
+    ).toBeVisible();
+
+    // A personal project has no workspace at all, which is not an error — the figure
+    // simply lives on Railway.
+    await injectFaults(page, { noWorkspace: true });
+    await page.reload();
+
+    await expect(page.getByText(/Railway reports spend per workspace/)).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Open billing on Railway" }),
+    ).toBeVisible();
+  });
+});

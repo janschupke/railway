@@ -18,6 +18,13 @@ import type { Container } from "./types";
  * The cost of that choice, stated plainly: redeploying the same image to the same state
  * changes only `updatedAt`, and this will not notice it. See ADR-10.
  *
+ * `deployedAt` is excluded for a different reason: it is redundant. It changes at exactly
+ * the moment `deploymentId` does, and that is already here — so adding it would buy nothing
+ * and leave one more field whose fluctuation the next reader has to reason about.
+ *
+ * Metric values are not excluded here because they never arrive here at all. They are not
+ * on `Container`, which is the whole point of keeping them off it — see ContainerMetrics.
+ *
  * Sorted after formatting, so Railway reordering its own `edges` is not a change.
  * Hashed rather than kept verbatim, so a watcher's memory is 28 bytes whatever the size
  * of the project.

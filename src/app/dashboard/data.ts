@@ -1,8 +1,13 @@
 import "server-only";
 
 import { getTranslations } from "next-intl/server";
+import { env } from "@/env";
 import { getSession } from "@/lib/auth/server";
-import { getProjectContainers, listProjects } from "@/lib/railway/api";
+import {
+  getProjectContainers,
+  getProjectMetrics,
+  listProjects,
+} from "@/lib/railway/api";
 import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
 import { reportError } from "@/lib/report-error";
 import { log } from "@/lib/logger";
@@ -10,8 +15,10 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import type { MessageKey } from "@/lib/messages";
 import type {
   Container,
+  ContainerMetrics,
   RailwayEnvironment,
   RailwayProject,
+  WorkspaceSpend,
 } from "@/lib/railway/types";
 
 export type DashboardShell = {
@@ -58,6 +65,17 @@ export type ContainerListData = {
   containers: Container[];
   /** Set when this environment's containers failed; the section still renders. */
   error: string | null;
+  /**
+   * Current usage per service id, for whichever containers Railway had a sample for.
+   *
+   * Keyed rather than merged onto the containers, so a value that changes every couple of
+   * minutes never reaches the watcher's fingerprint or the list's filter key. Empty when
+   * metrics were refused or failed — which reads identically to "no samples yet", and is
+   * meant to: the row renders an em dash either way.
+   */
+  metrics: Record<string, ContainerMetrics>;
+  /** Workspace-wide, and null for a personal project or an unscoped token. */
+  spend: WorkspaceSpend | null;
 };
 
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
@@ -205,7 +223,31 @@ async function containerList(
 ): Promise<ContainerListData> {
   const session = await getSession();
   // The shell already redirected an anonymous request; this is a guard, not a path.
-  if (!session) return { containers: [], error: null };
+  if (!session) return { containers: [], error: null, metrics: {}, spend: null };
+
+  /*
+   * Issued alongside the container read, never after it, and caught separately.
+   *
+   * Two independent failure modes that must not become one. A refused or broken metrics read
+   * has to leave the list exactly as it was — the whole argument for this being an optional
+   * field — and a broken container read has to keep saying so even if usage answered fine.
+   * Sequencing them would also put a second Railway round trip in front of the list on every
+   * render, which is the latency the Suspense boundary exists to avoid.
+   *
+   * Started before the container read is awaited so the two overlap. The rejection is
+   * attached here rather than left floating: an unhandled rejection from a read this app
+   * treats as optional would crash the process.
+   */
+  const usage = env().METRICS_POLL_MS
+    ? getProjectMetrics(session.accessToken, projectId, environmentId).catch(
+        (error: unknown) => {
+          // Debug for the same reason api.ts logs a refusal at debug: this runs on every
+          // render, and a readout the app degrades out of is not an incident.
+          log.debug("dashboard.metrics_failed", { error });
+          return { metrics: {}, spend: null };
+        },
+      )
+    : Promise.resolve({ metrics: {}, spend: null });
 
   try {
     /*
@@ -234,9 +276,16 @@ async function containerList(
       projectId,
       environmentId,
     );
-    return { containers, error: null };
+    return { containers, error: null, ...(await usage) };
   } catch (error) {
     const t = await getTranslations();
-    return { containers: [], error: describe(t, error, "errors.containersFailed") };
+    return {
+      containers: [],
+      error: describe(t, error, "errors.containersFailed"),
+      // Awaited even on this path so the request cannot outlive the render that started it,
+      // and spread so a spend figure survives a failed container read — the two are
+      // independent reads and the UI shows them in different places.
+      ...(await usage),
+    };
   }
 }

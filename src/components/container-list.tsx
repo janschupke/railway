@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { filterContainers, filterKey, hasActiveFilters } from "@/lib/container-filters";
-import type { Container } from "@/lib/railway/types";
+import { sumContainerMetrics } from "@/lib/container-metrics";
+import { formatMemoryGb, formatVcpu } from "@/lib/format";
+import type { Container, ContainerMetrics } from "@/lib/railway/types";
 import { useContainerFilters } from "@/hooks/use-container-filters";
 import { useIncrementalList } from "@/hooks/use-incremental-list";
 import { ContainerFilterBar } from "./container-filter-bar";
@@ -34,14 +36,19 @@ export function ContainerList({
   projectId,
   environmentId,
   heading,
+  metrics,
 }: {
   containers: Container[];
   projectId: string;
   environmentId: string;
   heading: string;
+  /** Keyed by service id; empty when Railway refused or had nothing to report. */
+  metrics: Record<string, ContainerMetrics>;
 }) {
   const t = useTranslations("dashboard");
   const tFilters = useTranslations("filters");
+  const tContainers = useTranslations("containers");
+  const locale = useLocale();
   const { filters, draft, setDraft, flushDraft, setStatuses, setOwners, clear } =
     useContainerFilters();
 
@@ -79,6 +86,38 @@ export function ContainerList({
     });
   })();
 
+  /*
+   * What the containers created here are using, added up.
+   *
+   * Over `matched` rather than `containers`, so the total describes the same set the
+   * sentence above it counts — a filtered list whose total covered the whole environment
+   * would be two numbers on one line that disagree.
+   */
+  const totals = useMemo(
+    () => sumContainerMetrics(matched, metrics),
+    [matched, metrics],
+  );
+  const totalCpu = formatVcpu(totals.cpuCores, locale);
+  const totalMemory = formatMemoryGb(totals.memoryGb, locale);
+
+  /*
+   * Rendered only when something actually answered. Nothing running, metrics refused, or a
+   * project with no containers of ours all produce the same nothing here — and a line
+   * reading "— vCPU and — across 0 containers" is a sentence with no content, where the
+   * per-row em dash at least sits under a label that explains it.
+   */
+  const totalsSentence =
+    totalCpu && totalMemory
+      ? t("containerTotals", {
+          cpu: totalCpu,
+          memory:
+            totalMemory.unit === "gb"
+              ? tContainers("memoryValueGb", { value: totalMemory.value })
+              : tContainers("memoryValueMb", { value: totalMemory.value }),
+          count: totals.containers,
+        })
+      : null;
+
   return (
     // A div, not a section: ContainerSection is already the landmark, and a nested one
     // would put a second unnamed region in the outline for the same content.
@@ -86,16 +125,29 @@ export function ContainerList({
       <ContainerSectionHeader
         heading={heading}
         summary={
-          <Text asChild variant="caption" tone="subtle">
+          <>
+            <Text asChild variant="caption" tone="subtle">
+              {/*
+                A bare live region, not role="status": toasts and Banner already own that
+                role, and a third source makes every status assertion ambiguous (see
+                ui/misc.tsx). It stays mounted and empty rather than appearing with its
+                text, which is the classic way an announcement is dropped. The debounce is
+                what keeps it to one announcement per settle rather than one per keystroke.
+              */}
+              <LiveRegion as="p">{summary}</LiveRegion>
+            </Text>
             {/*
-              A bare live region, not role="status": toasts and Banner already own that
-              role, and a third source makes every status assertion ambiguous (see
-              ui/misc.tsx). It stays mounted and empty rather than appearing with its
-              text, which is the classic way an announcement is dropped. The debounce is
-              what keeps it to one announcement per settle rather than one per keystroke.
+              Outside the live region on purpose. These numbers move on every metrics
+              refresh, and inside they would be announced each time — the announcement spam
+              live-region.tsx's debounce exists to prevent, arriving from a different
+              direction. The count sentence above is the one worth interrupting for.
             */}
-            <LiveRegion as="p">{summary}</LiveRegion>
-          </Text>
+            {totalsSentence && (
+              <Text asChild variant="caption" tone="subtle">
+                <p>{totalsSentence}</p>
+              </Text>
+            )}
+          </>
         }
       />
 
@@ -136,6 +188,7 @@ export function ContainerList({
                   container={container}
                   projectId={projectId}
                   environmentId={environmentId}
+                  metrics={metrics[container.serviceId]}
                 />
               ))}
             </ul>

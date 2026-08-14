@@ -47,6 +47,10 @@
     "endOfFilteredList": "That is every container matching these filters.",
     "scrollToTop": "Back to top",
     "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
+    "containerTotals": "{cpu} vCPU and {memory} across {count, plural, one {# container} other {# containers}} created here",
+    "workspaceSpend": "{named, select, yes {The {workspace} workspace} other {This project's workspace}} has used {amount} so far this billing period ({start} – {end}). That covers every service in the workspace, including ones this app did not create — Railway reports no per-project or per-container cost.",
+    "workspaceSpendUnavailable": "Railway reports spend per workspace, and this app cannot read it for this project. Your current usage is on Railway's own billing page.",
+    "openRailwayBilling": "Open billing on Railway",
     "noProjectsTitle": "No projects to show",
     "noProjectsDescription": "Railway returned an empty project list for this account. Your authorization is intact, so re-authorizing changes nothing — create a project here and it will appear in Railway too.",
     "noProjectsScopeTitle": "This app was not granted project access",
@@ -154,7 +158,14 @@
     "logCopyFailed": "The log lines could not be copied",
     "logCopyFailedDetail": "The browser refused access to the clipboard. Select the lines and copy them, or download them instead.",
     "logDownload": "Download these lines",
-    "logSeverityLabel": "Severity"
+    "logSeverityLabel": "Severity",
+    "metricsLabel": "Resource use for {name}",
+    "cpuLabel": "CPU",
+    "memoryLabel": "Memory",
+    "uptimeLabel": "Uptime",
+    "cpuValue": "{value} vCPU",
+    "memoryValueGb": "{value} GB",
+    "memoryValueMb": "{value} MB"
   },
   "states": {
     "pending": "Queued",

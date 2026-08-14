@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Container } from "@/lib/railway/types";
+import type { Container, ContainerMetrics } from "@/lib/railway/types";
 
 vi.mock("@/app/dashboard/actions", () => ({
   spinDown: vi.fn(async () => ({ ok: true, message: "Destroyed" })),
@@ -37,6 +37,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: "2026-08-01T00:00:00Z",
   updatedAt: "2026-08-01T00:00:00Z",
+  deployedAt: "2026-08-01T00:00:00Z",
   managed: true,
   ...over,
 });
@@ -65,12 +66,17 @@ async function expand(user: ReturnType<typeof userEvent.setup>, name = "cache") 
 }
 
 /** Mirrors the dashboard layout, which owns both providers. */
-const renderRow = (over: Partial<Container> = {}) =>
+const renderRow = (over: Partial<Container> = {}, metrics?: ContainerMetrics) =>
   render(
     <ToastProvider>
       <TooltipProvider>
         <ul>
-          <ContainerRow container={container(over)} projectId="p1" environmentId="e1" />
+          <ContainerRow
+            container={container(over)}
+            projectId="p1"
+            environmentId="e1"
+            metrics={metrics}
+          />
         </ul>
       </TooltipProvider>
     </ToastProvider>,
@@ -423,5 +429,52 @@ describe("ContainerRow", () => {
       streamState.status = "connecting";
       streamState.done = false;
     }
+  });
+
+  describe("the usage readout", () => {
+    const usage = {
+      serviceId: "svc_1",
+      cpuCores: 0.25,
+      memoryGb: 0.21,
+      sampledAt: 1_760_000_000,
+    };
+
+    it("is in the expanded panel, above the log pane", async () => {
+      /*
+       * Above rather than beside, which is a deviation from the ticket's wording. The pane
+       * is lazily loaded behind a skeleton, so a column next to it would reflow when the
+       * chunk lands — a layout shift on a page Lighthouse gates — and would need a
+       * breakpoint the app otherwise declares once in all of src/.
+       */
+      const user = userEvent.setup();
+      renderRow({}, usage);
+
+      await expand(user);
+
+      const readout = screen.getByLabelText("Resource use for cache");
+      const pane = screen.getByRole("log");
+      expect(readout).toBeInTheDocument();
+      expect(
+        readout.compareDocumentPosition(pane) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("is not rendered at all while the row is collapsed", () => {
+      // The panel is `hidden` at rest, and nothing inside it should be in the tab order or
+      // the a11y tree — the same property the log pane's own mounting rules protect.
+      renderRow({}, usage);
+      expect(screen.queryByLabelText("Resource use for cache")).toBeNull();
+    });
+
+    it("renders em dashes rather than nothing when Railway reported no usage", async () => {
+      // The refused case, which is what a token without the scope sees on every render.
+      const user = userEvent.setup();
+      renderRow({}, undefined);
+
+      await expand(user);
+
+      expect(screen.getByLabelText("Resource use for cache")).toBeInTheDocument();
+      expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    });
   });
 });

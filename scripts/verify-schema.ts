@@ -14,6 +14,7 @@
 import {
   OPTIONAL_FIELDS,
   PROBED_INPUT_TYPES,
+  REQUIRED_ENUM_MEMBERS,
   REQUIRED_FIELDS,
   REQUIRED_INPUT_TYPES,
 } from "../src/lib/railway/operations.ts";
@@ -75,6 +76,12 @@ const INPUT_TYPE_INTROSPECTION = `
       name
       inputFields { name type { kind name ofType { kind name } } }
     }
+  }
+`;
+
+const ENUM_INTROSPECTION = `
+  query VerifyEnum($name: String!) {
+    __type(name: $name) { name enumValues { name } }
   }
 `;
 
@@ -303,6 +310,51 @@ async function checkInputTypes(token: string) {
   }
 }
 
+/**
+ * Enum members sent by name.
+ *
+ * The gap this closes is the one the input-type check closes one type over: every check
+ * above proves a *field* exists, and the metrics document also names `CPU_USAGE`,
+ * `MEMORY_USAGE_GB` and `SERVICE_ID` literally. A member Railway withdraws does not degrade
+ * the readout — it fails the whole document at validation, on every request.
+ */
+async function checkEnumMembers(token: string) {
+  console.log("\nEnum members");
+
+  for (const required of REQUIRED_ENUM_MEMBERS) {
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        query: ENUM_INTROSPECTION,
+        variables: { name: required.name },
+      }),
+    });
+    const body = (await response.json()) as {
+      data?: { __type: { enumValues: Array<{ name: string }> | null } | null };
+    };
+
+    const values = body.data?.__type?.enumValues;
+    if (!values) {
+      console.log(bad(`${required.name} does not exist`));
+      failed = true;
+      continue;
+    }
+
+    const present = new Set(values.map((v) => v.name));
+    const missing = required.members.filter((m) => !present.has(m));
+    if (missing.length) {
+      console.log(bad(`${required.name} is missing: ${missing.join(", ")}`));
+      failed = true;
+    } else {
+      console.log(ok(`${required.name} offers ${required.members.join(", ")}`));
+    }
+  }
+}
+
 async function main() {
   const token = process.env.RAILWAY_TOKEN;
 
@@ -317,6 +369,7 @@ async function main() {
 
   await checkSchema(token);
   await checkInputTypes(token);
+  await checkEnumMembers(token);
 
   console.log(
     failed

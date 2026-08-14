@@ -136,7 +136,9 @@ export function execute(
                         ? {
                             id: deployment.id,
                             status: deployment.status,
-                            createdAt: service.createdAt,
+                            // The DEPLOYMENT's own creation, not the service's. Uptime is
+                            // measured from this, and service.createdAt is epoch zero here.
+                            createdAt: deployment.createdAt,
                             updatedAt: deployment.updatedAt,
                           }
                         : null,
@@ -147,6 +149,67 @@ export function execute(
             ),
           },
         },
+      };
+    }
+
+    /*
+     * Two root fields in one response, each refusable on its own — which is the behaviour
+     * gqlPartial exists for, and the only part of it a spec can observe from outside.
+     */
+    case "ProjectMetrics": {
+      const projectId = variables.projectId as string;
+      const environmentId = variables.environmentId as string;
+      const project = store.projects.find((p) => p.id === projectId);
+
+      const errors: NonNullable<Result["errors"]> = [];
+
+      let metrics: unknown[] | null = [];
+      if (store.faults.metricsFail) {
+        metrics = null;
+        errors.push({
+          message: "Not Authorized",
+          path: ["metrics"],
+          extensions: { code: "INTERNAL_SERVER_ERROR" },
+        });
+      } else {
+        const now = Math.floor(Date.now() / 1000);
+        metrics = store
+          .servicesIn(projectId)
+          .filter((service) => service.environmentId === environmentId)
+          .flatMap((service) => {
+            const usage = store.metricsFor(service);
+            // No series at all for a service that is not running. An empty result is
+            // ordinary, and it must not become a zero anywhere on the way through.
+            if (!usage) return [];
+            return [
+              {
+                measurement: "CPU_USAGE",
+                tags: { serviceId: service.id },
+                values: [{ ts: now, value: usage.cpu }],
+              },
+              {
+                measurement: "MEMORY_USAGE_GB",
+                tags: { serviceId: service.id },
+                values: [{ ts: now, value: usage.memory }],
+              },
+            ];
+          });
+      }
+
+      let workspace: unknown = null;
+      if (store.faults.workspaceFail) {
+        errors.push({
+          message: "Not Authorized",
+          path: ["project", "workspace"],
+          extensions: { code: "INTERNAL_SERVER_ERROR" },
+        });
+      } else if (!store.faults.noWorkspace) {
+        workspace = { id: "ws_e2e", name: "Acme", customer: store.customer() };
+      }
+
+      return {
+        data: { metrics, project: project ? { id: project.id, workspace } : null },
+        ...(errors.length ? { errors } : {}),
       };
     }
 

@@ -103,6 +103,41 @@ export const schema = z.object({
    * a production interval.
    */
   WATCH_POLL_MS: z.coerce.number().int().min(1_000).default(15_000),
+  /**
+   * How stale an on-screen usage readout may get before the watcher nudges the tab, in ms.
+   *
+   * The one number that decides what the metrics feature costs. Metrics are read on the
+   * render, not polled, so nothing refreshes them while a project sits unchanged — this is
+   * how often the watcher sends a second one-bit event asking the tab to re-render anyway.
+   *
+   * The arithmetic, in ADR-10's terms. At 120s a visible dashboard forces at most 30 renders
+   * an hour; a render is four Railway requests now rather than three, so 120/hour on top of
+   * the watcher's own 240, against Hobby's documented 1000. Halving this doubles that half.
+   * Only visible tabs count — the client closes the connection when the tab is hidden — and
+   * only environments with something running, because a nudge for an idle project would
+   * refresh a page whose numbers cannot have moved.
+   *
+   * `0` disables metrics outright: no nudge, no metrics request, no readout. That is the
+   * setting for an account whose quota is already committed to log streams, and it is
+   * expressed here rather than in a second METRICS_ENABLED flag so there is no state where
+   * one variable says on and the other says never.
+   *
+   * Any other value is floored at one second, matching WATCH_POLL_MS rather than being set
+   * higher on the theory that this knob is more expensive. The floor is a sanity bound, not
+   * the quota protection — a one-second watcher is already 3,600 requests an hour against
+   * Hobby's 1,000, so neither floor is what keeps an operator honest. What it buys is the
+   * same thing it buys there: the end-to-end suite can drive a staleness window without
+   * waiting out a production one.
+   */
+  METRICS_POLL_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .refine(
+      (value) => value === 0 || value >= 1_000,
+      "METRICS_POLL_MS must be 0 (disabled) or at least 1000",
+    )
+    .default(120_000),
 
   /*
    * Railway endpoints are configurable so the end-to-end suite can point the whole

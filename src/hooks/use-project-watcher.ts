@@ -10,9 +10,15 @@ const RETRY_CEILING_MS = 60_000;
 /**
  * Keeps the container list in step with Railway without polling from the browser.
  *
- * Holds one EventSource to /api/watch, which says only "something changed" — the server
- * does the polling and the diffing, and this answers by calling router.refresh() so the
- * page re-renders through the normal RSC path. No application state crosses this wire.
+ * Holds one EventSource to /api/watch, which says only that the page should re-render — the
+ * server does the polling and the diffing, and this answers by calling router.refresh() so
+ * the page goes back through the normal RSC path. No application state crosses this wire.
+ *
+ * Two events mean that, for two different reasons. `changed` is the container set moving.
+ * `stale` is the usage readouts having aged past METRICS_POLL_MS on a project where nothing
+ * has changed — metrics are read on the render rather than polled, so without this they
+ * would freeze at page load. Both are empty frames and both answer the same way, which is
+ * what keeps ADR-10's rule intact.
  *
  * Nothing is held while the tab is hidden. That is the whole reason this is cheap: a
  * dashboard left open in a background tab costs no connection and no Railway requests,
@@ -53,6 +59,9 @@ export function useProjectWatcher(
         retry = 0;
       });
       source.addEventListener("changed", refresh);
+      // Same handler, deliberately. The shared throttle in useThrottledRefresh is what stops
+      // a `stale` landing on the same tick as a `changed` from costing two round trips.
+      source.addEventListener("stale", refresh);
       source.addEventListener("error", (event) => {
         const named = (() => {
           try {

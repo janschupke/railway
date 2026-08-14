@@ -1,5 +1,11 @@
 import { isManagedName, stripPrefix } from "./managed";
-import { toContainerState, type Container, type RailwayProject } from "./types";
+import {
+  toContainerState,
+  type Container,
+  type ContainerMetrics,
+  type RailwayProject,
+  type WorkspaceSpend,
+} from "./types";
 
 /** Railway's API is Relay-style; almost every list arrives wrapped like this. */
 export type Edges<T> = { edges: Array<{ node: T }> } | null | undefined;
@@ -107,6 +113,9 @@ export function toContainer(
     deploymentId: deployment?.id ?? null,
     createdAt: service.createdAt,
     updatedAt: deployment?.updatedAt ?? null,
+    // The deployment's own creation, not the service's — uptime is measured from the
+    // current deployment, and a service redeployed this morning is a month old.
+    deployedAt: deployment?.createdAt ?? null,
     managed: isManagedName(service.name),
   };
 }
@@ -127,4 +136,116 @@ export function toContainers(
     .map((service) => toContainer(service, environmentId))
     .filter((c): c is Container => c !== null);
   return sortContainers(mapped);
+}
+
+export type MetricsResultNode = {
+  measurement: string;
+  tags: { serviceId: string | null } | null;
+  values: Array<{ ts: number; value: number }> | null;
+};
+
+export type WorkspaceNode = {
+  id: string;
+  name?: string | null;
+  customer?: {
+    currentUsage: number;
+    billingPeriod: { start: string; end: string } | null;
+  } | null;
+} | null;
+
+/** The newest sample in a series, or null if Railway returned none. */
+function newest(
+  values: Array<{ ts: number; value: number }> | null,
+): { ts: number; value: number } | null {
+  /*
+   * Max by `ts`, never `values.at(-1)`. Railway documents no ordering guarantee, and the
+   * one number this app renders is the current one — reading the wrong end of an
+   * unspecified order would show a five-minute-old figure that looks exactly like a
+   * correct one.
+   */
+  let best: { ts: number; value: number } | null = null;
+  for (const point of values ?? []) {
+    if (!best || point.ts > best.ts) best = point;
+  }
+  return best;
+}
+
+/**
+ * One `metrics` response, pivoted from measurement-major to service-major.
+ *
+ * Railway answers with one entry per (measurement, service) pair; the UI asks per row. The
+ * pivot is here rather than in the component so the numbers cross the RSC boundary in the
+ * shape they are read in.
+ *
+ * A Record rather than a Map, and that is not incidental: it crosses the RSC boundary as
+ * plain JSON, and under `noUncheckedIndexedAccess` a lookup is `ContainerMetrics |
+ * undefined` — which IS the row's "Railway said nothing about this container" state. The
+ * type system hands that branch over rather than the component having to remember it.
+ */
+export function toContainerMetrics(
+  results: MetricsResultNode[],
+): Record<string, ContainerMetrics> {
+  const byService: Record<string, ContainerMetrics> = {};
+
+  for (const result of results) {
+    const serviceId = result.tags?.serviceId;
+    // Narrowed, not asserted. `MetricTags.serviceId` is nullable on the live schema, and a
+    // result that names no service is one this app has no row to put anywhere.
+    if (!serviceId) continue;
+
+    const point = newest(result.values);
+    /*
+     * An empty `values` array is ORDINARY — a service with no running instance produces no
+     * samples — so it maps to null and stays null. Never zero: "0.00 vCPU" claims the
+     * container is running and idle, and "—" claims Railway said nothing. Those are
+     * different sentences and the UI renders them differently.
+     */
+    if (!point) continue;
+
+    const existing = byService[serviceId] ?? {
+      serviceId,
+      cpuCores: null,
+      memoryGb: null,
+      sampledAt: null,
+    };
+
+    switch (result.measurement) {
+      case "CPU_USAGE":
+        existing.cpuCores = point.value;
+        break;
+      case "MEMORY_USAGE_GB":
+        existing.memoryGb = point.value;
+        break;
+      default:
+        // Ignored rather than thrown, for the reason toContainerState gives for
+        // DeploymentStatus: Railway adds enum members without notice, and a measurement
+        // this app did not ask for must not take the readout down with it.
+        continue;
+    }
+
+    existing.sampledAt = Math.max(existing.sampledAt ?? 0, point.ts);
+    byService[serviceId] = existing;
+  }
+
+  return byService;
+}
+
+/**
+ * The workspace's current-period spend, or null when there is none to show.
+ *
+ * Null covers two situations the caller does not need to tell apart: a personal project,
+ * which belongs to no workspace at all, and a token whose scope does not reach `customer`.
+ * From the reader's side they are the same — the figure lives on Railway, not here.
+ */
+export function toWorkspaceSpend(workspace: WorkspaceNode): WorkspaceSpend | null {
+  const customer = workspace?.customer;
+  const period = customer?.billingPeriod;
+  if (!customer || !period) return null;
+
+  return {
+    currentUsage: customer.currentUsage,
+    periodStart: period.start,
+    periodEnd: period.end,
+    workspaceName: workspace?.name ?? null,
+  };
 }

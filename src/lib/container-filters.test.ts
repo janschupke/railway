@@ -22,6 +22,7 @@ const container = (overrides: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: "2026-08-01T10:00:00Z",
   updatedAt: "2026-08-01T10:05:00Z",
+  deployedAt: "2026-08-01T10:00:00Z",
   managed: true,
   ...overrides,
 });

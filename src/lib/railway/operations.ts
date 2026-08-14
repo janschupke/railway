@@ -140,6 +140,83 @@ export const PROJECT_QUERY = /* GraphQL */ `
 `;
 
 /**
+ * What the containers in one environment are using, and what the workspace has spent.
+ *
+ * Two root fields in one document because they are both root fields, both optional, and
+ * both wanted by the same render — and because `gqlPartial` means a refusal of either costs
+ * only that half.
+ *
+ * NOT folded into PROJECT_QUERY, which is the important part. That document is polled every
+ * WATCH_POLL_MS for the life of every open watcher, so a refused or withdrawn `metrics`
+ * field there would be a rejection on *every* tick — which the watch loop classifies as
+ * transient, backs off from, and rides out. The dashboard would stop noticing that
+ * containers had changed because a readout was refused. It would also force
+ * `getProjectContainers` onto `gqlPartial`, softening the app's most important read for a
+ * field nobody asked to be forgiving. Same trade DEPLOYMENT_EVENTS_QUERY makes, for the
+ * same reason.
+ *
+ * `groupBy: [SERVICE_ID]` rather than a `serviceId` argument: one request covers every
+ * service in the environment, whatever the list length. A per-row query would be exactly the
+ * third polling source ADR-10's budget cannot absorb.
+ *
+ * `tags { serviceId }` and nothing else. `deploymentId`, `environmentId`, `region`,
+ * `volumeId` and four more all exist and are all left out — each is one more field whose
+ * withdrawal takes the whole document with it, and none of them changes what the row says.
+ *
+ * `endDate` is deliberately not sent. Absent means "up to now"; sending a client-computed
+ * end is one clock-skew bug away from an empty series, and there is nothing to gain.
+ *
+ * `project.workspace` is NULLABLE on the live schema — a personal project belongs to no
+ * workspace — so null here is an ordinary state and not a failure. `customer.currentUsage`
+ * is the only monetary figure anywhere in Railway's schema, and it covers the whole
+ * workspace; `estimatedUsage` returns GB and vCPU rather than money, which is why it is not
+ * selected here. Whatever renders this has to say which of those it is showing.
+ */
+export const PROJECT_METRICS_QUERY = /* GraphQL */ `
+  query ProjectMetrics(
+    $projectId: String!
+    $environmentId: String!
+    $measurements: [MetricMeasurement!]!
+    $startDate: DateTime!
+    $sampleRateSeconds: Int
+    $averagingWindowSeconds: Int
+  ) {
+    metrics(
+      projectId: $projectId
+      environmentId: $environmentId
+      measurements: $measurements
+      startDate: $startDate
+      groupBy: [SERVICE_ID]
+      sampleRateSeconds: $sampleRateSeconds
+      averagingWindowSeconds: $averagingWindowSeconds
+    ) {
+      measurement
+      tags {
+        serviceId
+      }
+      values {
+        ts
+        value
+      }
+    }
+    project(id: $projectId) {
+      id
+      workspace {
+        id
+        name
+        customer {
+          currentUsage
+          billingPeriod {
+            start
+            end
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
  * A new project on the signed-in user's personal account.
  *
  * Selects `...ProjectFields` rather than a bare `id`, and that is what the create flow is
@@ -390,6 +467,26 @@ export const OPTIONAL_FIELDS: Array<{
     field: "deploymentEvents",
     note: "a failed row shows the status and a link, with no reason",
   },
+  /*
+   * The usage readout, and with it the only cost signal the app has.
+   *
+   * Optional rather than required because a metrics read Railway refuses must degrade the
+   * row, not blank the dashboard: the container list, its filters and every destructive
+   * action are untouched by losing this, and the readout falls back to the same em dash it
+   * shows for a container with no samples yet. Requiring it would exit `verify:schema`
+   * non-zero — and therefore fail the schema CI job — over a capability the app already has
+   * a clean answer for.
+   *
+   * The half this cannot see: `Customer.currentUsage`, which is three types below
+   * `Query.project` and so invisible to a root-field check. That withdrawal arrives at
+   * runtime, is absorbed by gqlPartial, and shows up as one debug record — the same gap
+   * DeploymentEventPayload has, stated in README's Limitations rather than papered over.
+   */
+  {
+    root: "Query",
+    field: "metrics",
+    note: "container rows show no CPU, memory or uptime, and the list shows no usage total",
+  },
   {
     root: "Mutation",
     field: "deploymentStop",
@@ -467,6 +564,25 @@ export const REQUIRED_INPUT_TYPES: Array<{ name: string; fields: string[] }> = [
     name: "EnvironmentCreateInput",
     fields: ["projectId", "name", "skipInitialDeploys"],
   },
+];
+
+/**
+ * Enum members the app sends by name.
+ *
+ * The third axis of the same defect REQUIRED_INPUT_TYPES exists for. A root-field check
+ * proves `Query.metrics` is still there; it says nothing about `CPU_USAGE` still being a
+ * member of `MetricMeasurement`, and a withdrawn member is not a degraded readout — it is
+ * GRAPHQL_VALIDATION_FAILED on every metrics request, because the whole document fails to
+ * validate. `groupBy: [SERVICE_ID]` is written into the document itself and has exactly the
+ * same exposure.
+ *
+ * Only members the app actually sends. `CPU_USAGE_2` and the limit measurements are real and
+ * are not here, for the reason ProjectCreateInput's note gives: listing something the app
+ * does not send asserts a dependency it does not have.
+ */
+export const REQUIRED_ENUM_MEMBERS: Array<{ name: string; members: string[] }> = [
+  { name: "MetricMeasurement", members: ["CPU_USAGE", "MEMORY_USAGE_GB"] },
+  { name: "MetricTag", members: ["SERVICE_ID"] },
 ];
 
 /** Printed, never enforced: the shape is unknown until the probe has been run. */

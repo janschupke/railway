@@ -76,6 +76,7 @@ start("node", [".next/standalone/server.js"], {
   MANAGED_PREFIX: "spun-",
   // Matches playwright.config.ts, so a manually served app watches at the same rate.
   WATCH_POLL_MS: "1000",
+  METRICS_POLL_MS: "2000",
   RAILWAY_ISSUER: FIXTURE_URL,
   RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
   RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,

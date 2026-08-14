@@ -5,6 +5,7 @@ import {
   row,
   setTabVisibility,
   signIn,
+  spinUp,
   test,
 } from "./support";
 
@@ -89,5 +90,59 @@ test.describe("the project watcher", () => {
     await expect
       .poll(async () => (await fixtureStats(page)).operations.Project ?? 0)
       .toBeGreaterThan(during);
+  });
+
+  test("keeps the usage readouts fresh on a project that is not changing", async ({
+    page,
+  }) => {
+    /*
+     * The second reason the watcher sends a bit. Metrics are read on the render rather
+     * than polled, so on a project where nothing changes the readouts would sit at
+     * whatever they were when the page loaded — which is most of the time, and is exactly
+     * the case the feature exists for.
+     *
+     * Counted at the fixture, on the ProjectMetrics operation, for the reason the hidden-tab
+     * spec above states: the nudge causes an RSC render, and nothing on the browser side
+     * distinguishes that from any other one.
+     */
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const before = (await fixtureStats(page)).operations.ProjectMetrics ?? 0;
+    const staleMs = Number(process.env.METRICS_POLL_MS ?? 2_000);
+
+    // Derived from the interval being tested, not a round number that felt safe — the
+    // habit that kept the watcher spec green while WATCH_POLL_MS was being ignored.
+    await expect
+      .poll(async () => (await fixtureStats(page)).operations.ProjectMetrics ?? 0, {
+        timeout: staleMs * 2,
+      })
+      .toBeGreaterThan(before);
+  });
+
+  test("does not nudge an environment with nothing running", async ({ page }) => {
+    /*
+     * Why the staleness clock is on the server rather than in the hook. An environment with
+     * nothing running has no readouts that can go stale, so a nudge there would spend four
+     * Railway requests to re-render the same nothing. A setInterval in the browser has no
+     * way to know that; the poll loop does, because it has just read the container list.
+     *
+     * `staging` is seeded empty, so the watcher is watching and there is genuinely nothing
+     * to be stale about. The default `production` holds a postgres parked at SUCCESS, which
+     * would have made this pass for the wrong reason.
+     */
+    await page.goto("/dashboard?project=proj_demo&environment=env_staging");
+    await expect(page.getByText(/nothing running in this environment/i)).toBeVisible();
+
+    const before = (await fixtureStats(page)).operations.ProjectMetrics ?? 0;
+    const staleMs = Number(process.env.METRICS_POLL_MS ?? 2_000);
+    await page.waitForTimeout(staleMs * 1.5);
+
+    expect(
+      (await fixtureStats(page)).operations.ProjectMetrics ?? 0,
+      "an idle environment was nudged anyway",
+    ).toBe(before);
   });
 });

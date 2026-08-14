@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { nodes, sortContainers, toContainer, toContainers, toProject } from "./mappers";
-import type { ServiceNode } from "./mappers";
+import {
+  nodes,
+  sortContainers,
+  toContainer,
+  toContainerMetrics,
+  toContainers,
+  toProject,
+  toWorkspaceSpend,
+} from "./mappers";
+import type { MetricsResultNode, ServiceNode } from "./mappers";
 import type { Container } from "./types";
 
 const service = (overrides: Partial<ServiceNode> = {}): ServiceNode => ({
@@ -120,6 +128,7 @@ describe("sortContainers", () => {
     deploymentId: null,
     createdAt: null,
     updatedAt: null,
+    deployedAt: null,
     managed: false,
     ...over,
   });
@@ -151,5 +160,134 @@ describe("toContainers", () => {
       "env_1",
     );
     expect(result.map((c) => c.rawName)).toEqual(["spun-cache", "postgres"]);
+  });
+});
+
+const result = (over: Partial<MetricsResultNode> = {}): MetricsResultNode => ({
+  measurement: "CPU_USAGE",
+  tags: { serviceId: "svc_1" },
+  values: [{ ts: 1_760_000_000, value: 0.25 }],
+  ...over,
+});
+
+describe("toContainerMetrics", () => {
+  it("pivots measurement-major results into one entry per service", () => {
+    // Railway answers per (measurement, service); the UI asks per row. The pivot lives here
+    // so the numbers cross the RSC boundary in the shape they are read in.
+    const metrics = toContainerMetrics([
+      result(),
+      result({
+        measurement: "MEMORY_USAGE_GB",
+        values: [{ ts: 1_760_000_000, value: 0.5 }],
+      }),
+      result({
+        tags: { serviceId: "svc_2" },
+        values: [{ ts: 1_760_000_000, value: 1.5 }],
+      }),
+    ]);
+
+    expect(metrics).toEqual({
+      svc_1: {
+        serviceId: "svc_1",
+        cpuCores: 0.25,
+        memoryGb: 0.5,
+        sampledAt: 1_760_000_000,
+      },
+      svc_2: {
+        serviceId: "svc_2",
+        cpuCores: 1.5,
+        memoryGb: null,
+        sampledAt: 1_760_000_000,
+      },
+    });
+  });
+
+  it("takes the newest sample rather than the last one in the array", () => {
+    /*
+     * Railway documents no ordering guarantee, and the one number rendered is the current
+     * one — reading the wrong end of an unspecified order shows a five-minute-old figure
+     * that looks exactly like a correct one.
+     */
+    const metrics = toContainerMetrics([
+      result({
+        values: [
+          { ts: 1_760_000_120, value: 0.9 },
+          { ts: 1_760_000_060, value: 0.1 },
+        ],
+      }),
+    ]);
+
+    expect(metrics.svc_1?.cpuCores).toBe(0.9);
+    expect(metrics.svc_1?.sampledAt).toBe(1_760_000_120);
+  });
+
+  it("leaves a service with no samples absent rather than reporting it as zero", () => {
+    /*
+     * The distinction the whole readout rests on. An empty series is ordinary — a stopped
+     * service produces none — and "0.00 vCPU" would claim the container is running and idle,
+     * which is a statement about someone's bill. Absent renders as an em dash instead.
+     */
+    expect(toContainerMetrics([result({ values: [] })])).toEqual({});
+    expect(toContainerMetrics([result({ values: null })])).toEqual({});
+  });
+
+  it("skips a result that names no service", () => {
+    // MetricTags.serviceId is nullable on the live schema, and a result with none is one
+    // this app has no row to put anywhere.
+    expect(toContainerMetrics([result({ tags: { serviceId: null } })])).toEqual({});
+    expect(toContainerMetrics([result({ tags: null })])).toEqual({});
+  });
+
+  it("ignores a measurement it did not ask for", () => {
+    // Railway adds enum members without notice — the same reasoning toContainerState gives
+    // for DeploymentStatus. An unknown one must not take the readout down with it.
+    expect(toContainerMetrics([result({ measurement: "NETWORK_RX_GB" })])).toEqual({});
+  });
+
+  it("returns nothing at all for an empty response", () => {
+    expect(toContainerMetrics([])).toEqual({});
+  });
+});
+
+describe("toWorkspaceSpend", () => {
+  const workspace = {
+    id: "ws_1",
+    name: "Acme",
+    customer: {
+      currentUsage: 18.4,
+      billingPeriod: { start: "2026-08-01T00:00:00Z", end: "2026-08-31T00:00:00Z" },
+    },
+  };
+
+  it("maps a workspace that answered", () => {
+    expect(toWorkspaceSpend(workspace)).toEqual({
+      currentUsage: 18.4,
+      periodStart: "2026-08-01T00:00:00Z",
+      periodEnd: "2026-08-31T00:00:00Z",
+      workspaceName: "Acme",
+    });
+  });
+
+  it("is null for a personal project, which belongs to no workspace", () => {
+    // Project.workspace is nullable on the live schema. This is an ordinary state, not a
+    // failure, and the UI renders the same "it is over there" note it renders for a refusal.
+    expect(toWorkspaceSpend(null)).toBeNull();
+  });
+
+  it("is null when the customer or its billing period was refused", () => {
+    expect(toWorkspaceSpend({ id: "ws_1", name: "Acme", customer: null })).toBeNull();
+    expect(
+      toWorkspaceSpend({
+        id: "ws_1",
+        name: "Acme",
+        customer: { currentUsage: 18.4, billingPeriod: null },
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the figure when only the workspace name is missing", () => {
+    // The name is decoration — the copy falls back to "this project's workspace" — and
+    // dropping a real spend figure over a missing label would be the wrong trade.
+    expect(toWorkspaceSpend({ ...workspace, name: null })?.workspaceName).toBeNull();
   });
 });

@@ -91,6 +91,11 @@ export default defineConfig({
         // can wait out — and a watcher spec that sleeps that long is a watcher spec
         // nobody runs.
         WATCH_POLL_MS: "1000",
+        // Two seconds, for the same reason: the production default is two minutes, and a
+        // spec proving the staleness nudge fires cannot wait that out any more than the
+        // watcher spec above could wait out fifteen seconds. Twice WATCH_POLL_MS, so a
+        // nudge lands on a tick rather than on the first one.
+        METRICS_POLL_MS: "2000",
         RAILWAY_ISSUER: FIXTURE_URL,
         RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
         RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,

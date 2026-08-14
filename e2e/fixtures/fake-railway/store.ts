@@ -47,6 +47,14 @@ export type Deployment = {
    * these cannot express the case the failed row now exists to render.
    */
   events: DeploymentEvent[];
+  /**
+   * When the deployment was created, which is what a row measures uptime from.
+   *
+   * A real timestamp, unlike `updatedAt`'s epoch-zero start. The Project query used to
+   * report `service.createdAt` here — `new Date(0)` — so every seeded row would have shown
+   * an uptime of fifty-six years the moment a readout existed to show it.
+   */
+  createdAt: string;
   /** Index into PROGRESSION. */
   step: number;
   failing: boolean;
@@ -153,6 +161,18 @@ export type Faults = {
   deploymentEventsFail: boolean;
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
+  /**
+   * `metrics` is refused, as it would be for a token the project scope does not cover.
+   *
+   * Separate from `workspaceFail` for the reason `rejectPersonal` and `rejectWorkspaces`
+   * are separate: the two halves of ProjectMetrics fail independently, and refusing the
+   * spend figure must leave the per-row readouts on screen.
+   */
+  metricsFail: boolean;
+  /** `project.workspace` is refused, as it is for a token without `workspace:viewer`. */
+  workspaceFail: boolean;
+  /** The project belongs to no workspace, as a personal Railway project does. */
+  noWorkspace: boolean;
   /** Where the Projects query finds projects, if anywhere. */
   projectsSource: ProjectsSource;
   /**
@@ -195,6 +215,9 @@ const DEFAULT_FAULTS: Faults = {
   deploymentEventsFail: false,
   projectsSource: "personal",
   variablesFail: false,
+  metricsFail: false,
+  workspaceFail: false,
+  noWorkspace: false,
   rejectWorkspaces: false,
   rejectPersonal: false,
   projectsEmpty: false,
@@ -301,6 +324,7 @@ export class Store {
       id: this.id("dep"),
       serviceId,
       status: "QUEUED",
+      createdAt: new Date().toISOString(),
       updatedAt: new Date(0).toISOString(),
       logs: { build: [], deploy: [] },
       events: [],
@@ -406,5 +430,34 @@ export class Store {
 
   servicesIn(projectId: string): Service[] {
     return [...this.services.values()].filter((s) => s.projectId === projectId);
+  }
+
+  /**
+   * Current usage for one service.
+   *
+   * A deterministic function of the service id rather than Math.random, so a spec can
+   * assert the rendered figure instead of a regex — the same reason the log lines are built
+   * from the deployment id. A service that is not running reports nothing at all, which is
+   * the case that has to reach the UI as an em dash rather than as a zero.
+   */
+  metricsFor(service: Service): { cpu: number; memory: number } | null {
+    const deployment = service.deploymentId
+      ? this.deployments.get(service.deploymentId)
+      : undefined;
+    if (deployment?.status !== "SUCCESS") return null;
+
+    const n = Number(service.id.split("_")[1] ?? 0);
+    return { cpu: 0.25 * ((n % 4) + 1), memory: 0.5 * ((n % 3) + 1) };
+  }
+
+  /** The workspace's billing state, as `Customer` exposes it. */
+  customer(): { currentUsage: number; billingPeriod: { start: string; end: string } } {
+    return {
+      currentUsage: 18.4,
+      billingPeriod: {
+        start: "2026-08-01T00:00:00.000Z",
+        end: "2026-08-31T00:00:00.000Z",
+      },
+    };
   }
 }

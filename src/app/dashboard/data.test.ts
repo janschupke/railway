@@ -4,15 +4,18 @@ import type { RailwaySession } from "@/lib/auth/session";
 const getSession = vi.fn<() => Promise<RailwaySession | null>>();
 const listProjects = vi.fn();
 const getProjectContainers = vi.fn();
+const getProjectMetrics = vi.fn();
 
 vi.mock("@/lib/auth/server", () => ({ getSession: () => getSession() }));
 vi.mock("@/lib/railway/api", () => ({
   listProjects: (...args: unknown[]) => listProjects(...args),
   getProjectContainers: (...args: unknown[]) => getProjectContainers(...args),
+  getProjectMetrics: (...args: unknown[]) => getProjectMetrics(...args),
 }));
 
 const { loadDashboardShell, loadContainers } = await import("./data");
 const { RailwayApiError } = await import("@/lib/railway/errors");
+const { __resetEnv } = await import("@/env");
 
 const session: RailwaySession = {
   user: { id: "u1", name: "Ada", email: "ada@example.com" },
@@ -37,6 +40,7 @@ const projects = [
 beforeEach(() => {
   getSession.mockReset().mockResolvedValue(session);
   listProjects.mockReset().mockResolvedValue({ viewer: {}, projects, failures: [] });
+  getProjectMetrics.mockReset().mockResolvedValue({ metrics: {}, spend: null });
   getProjectContainers
     .mockReset()
     .mockResolvedValue({ project: projects[0], containers: [] });
@@ -231,7 +235,97 @@ describe("loadContainers", () => {
 
     const data = await loadContainers("p1", "e1");
 
-    expect(data).toEqual({ containers: [], error: null });
+    expect(data).toEqual({ containers: [], error: null, metrics: {}, spend: null });
     expect(getProjectContainers).not.toHaveBeenCalled();
+    expect(getProjectMetrics).not.toHaveBeenCalled();
+  });
+
+  describe("the usage read", () => {
+    const usage = {
+      metrics: {
+        s1: {
+          serviceId: "s1",
+          cpuCores: 0.25,
+          memoryGb: 1.5,
+          sampledAt: 1_760_000_000,
+        },
+      },
+      spend: {
+        currentUsage: 18.4,
+        periodStart: "2026-08-01T00:00:00Z",
+        periodEnd: "2026-08-31T00:00:00Z",
+        workspaceName: "Acme",
+      },
+    };
+
+    it("returns usage alongside the containers", async () => {
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "s1" }],
+      });
+      getProjectMetrics.mockResolvedValue(usage);
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(getProjectMetrics).toHaveBeenCalledWith("token", "p1", "e1");
+      expect(data.metrics.s1?.cpuCores).toBe(0.25);
+      expect(data.spend?.currentUsage).toBe(18.4);
+    });
+
+    it("still returns the containers when the usage read fails", async () => {
+      /*
+       * The whole argument for Query.metrics being optional: a readout this app degrades
+       * out of must not take the container list with it. Caught separately for exactly
+       * this reason rather than sharing the list's catch.
+       */
+      getProjectContainers.mockResolvedValue({
+        project: projects[0],
+        containers: [{ serviceId: "s1" }],
+      });
+      getProjectMetrics.mockRejectedValue(new Error("network"));
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(data.containers).toHaveLength(1);
+      expect(data.error).toBeNull();
+      expect(data.metrics).toEqual({});
+      expect(data.spend).toBeNull();
+    });
+
+    it("still returns the spend figure when the container read fails", async () => {
+      // The mirror. They are independent reads shown in different places, and collapsing
+      // them into one failure would lose the only real cost number on the page.
+      getProjectContainers.mockRejectedValue(
+        new RailwayApiError("boom", { kind: "server" }),
+      );
+      getProjectMetrics.mockResolvedValue(usage);
+
+      const data = await loadContainers("p1", "e1");
+
+      expect(data.containers).toEqual([]);
+      expect(data.error).toContain("server error");
+      expect(data.spend?.currentUsage).toBe(18.4);
+    });
+
+    it("does not ask for usage at all when metrics are switched off", async () => {
+      // METRICS_POLL_MS=0 has to cost zero requests, not merely fewer.
+      process.env.METRICS_POLL_MS = "0";
+      __resetEnv();
+      try {
+        getProjectContainers.mockResolvedValue({
+          project: projects[0],
+          containers: [{ serviceId: "s1" }],
+        });
+
+        const data = await loadContainers("p1", "e1");
+
+        expect(getProjectMetrics).not.toHaveBeenCalled();
+        expect(data.metrics).toEqual({});
+        expect(data.spend).toBeNull();
+      } finally {
+        delete process.env.METRICS_POLL_MS;
+        __resetEnv();
+      }
+    });
   });
 });

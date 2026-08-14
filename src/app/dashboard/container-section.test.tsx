@@ -31,12 +31,29 @@ const container = (over: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: null,
   updatedAt: null,
+  deployedAt: null,
   managed: true,
   ...over,
 });
 
-const renderSection = async (containers: Container[]) => {
-  loadContainers.mockResolvedValue({ containers, error: null });
+const spend = {
+  currentUsage: 18.4,
+  periodStart: "2026-08-01T00:00:00Z",
+  periodEnd: "2026-08-31T00:00:00Z",
+  workspaceName: "Acme",
+};
+
+const renderSection = async (
+  containers: Container[],
+  over: Partial<Awaited<ReturnType<typeof loadContainers>>> = {},
+) => {
+  loadContainers.mockResolvedValue({
+    containers,
+    error: null,
+    metrics: {},
+    spend: null,
+    ...over,
+  });
   return render(
     await ContainerSection({ projectId: "proj_1", environmentId: "env_1" }),
   );
@@ -100,5 +117,52 @@ describe("ContainerSection", () => {
 
     await renderSection([container()]);
     expect(screen.getByLabelText("Search containers")).toBeInTheDocument();
+  });
+
+  describe("the workspace spend note", () => {
+    it("names the figure, the period, and what it actually covers", async () => {
+      /*
+       * The scope clause is not padding. It is the answer to "why does this not match my
+       * container list", asked once in the copy instead of many times in an issue tracker:
+       * Railway has no per-project or per-container cost, so this number necessarily
+       * includes services this app did not create.
+       */
+      await renderSection([container()], { spend });
+
+      expect(
+        screen.getByText(/The Acme workspace has used \$18\.40/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/including ones this app did not create/),
+      ).toBeInTheDocument();
+    });
+
+    it("falls back to a generic name rather than dropping a real figure", async () => {
+      // The name is decoration; the number is the point.
+      await renderSection([container()], {
+        spend: { ...spend, workspaceName: null },
+      });
+
+      expect(
+        screen.getByText(/This project's workspace has used \$18\.40/),
+      ).toBeInTheDocument();
+    });
+
+    it("points at Railway when there is no figure to show", async () => {
+      /*
+       * A personal project has no workspace, and a token without workspace:viewer cannot
+       * read one. Those render identically on purpose: from the reader's side they are the
+       * same situation, and neither is something they can act on in this app — so no
+       * banner and no re-consent prompt, just where the number lives.
+       */
+      await renderSection([container()], { spend: null });
+
+      expect(
+        screen.getByText(/Railway reports spend per workspace/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "Open billing on Railway" }),
+      ).toBeInTheDocument();
+    });
   });
 });

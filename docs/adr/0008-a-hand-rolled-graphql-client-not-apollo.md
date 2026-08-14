@@ -13,9 +13,9 @@ that is gated at 209 kB.
 
 **A normalized cache would be actively wrong.** The dashboard shows infrastructure that
 changes underneath the user; every request is `cache: "no-store"` on purpose. There are
-two SSE endpoints now and neither carries application state — the second one carries a
-single bit (ADR-10), so there would be nothing for a cache to normalize even if one
-were wanted.
+two SSE endpoints now and neither carries application state — the second one sends empty
+frames, `changed` and `stale` (ADR-10), so there would be nothing for a cache to normalize
+even if one were wanted.
 
 **The subscription path is not Apollo-shaped.** App Router route handlers cannot accept
 WebSocket upgrades, so logs arrive over `graphql-ws` upstream and leave over SSE

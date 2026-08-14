@@ -133,6 +133,34 @@ describe("env", () => {
     expect(() => env()).toThrow(/WATCH_POLL_MS/);
   });
 
+  it("defaults the metrics staleness window to two minutes", () => {
+    setEnv({ ...REQUIRED, METRICS_POLL_MS: undefined });
+    expect(env().METRICS_POLL_MS).toBe(120_000);
+  });
+
+  it("lets the environment set the metrics staleness window", () => {
+    // The override case, for the same reason WATCH_POLL_MS has one: a default assertion
+    // cannot tell a forwarded field from an ignored one.
+    setEnv({ ...REQUIRED, METRICS_POLL_MS: "45000" });
+    expect(env().METRICS_POLL_MS).toBe(45_000);
+  });
+
+  it("accepts zero, which turns the readouts off entirely", () => {
+    /*
+     * Zero is the one value below the floor that is allowed, and it is load-bearing: it is
+     * how an account whose quota is committed to log streams opts out of the extra
+     * requests. Expressed here rather than as a second METRICS_ENABLED flag so there is no
+     * state where one variable says on and the other says never.
+     */
+    setEnv({ ...REQUIRED, METRICS_POLL_MS: "0" });
+    expect(env().METRICS_POLL_MS).toBe(0);
+  });
+
+  it("floors any non-zero metrics window, for the same reason the watch one is floored", () => {
+    setEnv({ ...REQUIRED, METRICS_POLL_MS: "999" });
+    expect(() => env()).toThrow(/METRICS_POLL_MS/);
+  });
+
   it("names every missing variable at once rather than one per boot", () => {
     setEnv({
       RAILWAY_CLIENT_ID: undefined,
@@ -241,6 +269,7 @@ describe("optional fields", () => {
   const OVERRIDES: Record<string, { set: string; expect: string | number }> = {
     MANAGED_PREFIX: { set: "test-", expect: "test-" },
     WATCH_POLL_MS: { set: "2500", expect: 2500 },
+    METRICS_POLL_MS: { set: "2000", expect: 2_000 },
     RAILWAY_ISSUER: { set: "http://localhost:4010", expect: "http://localhost:4010" },
     RAILWAY_API_URL: {
       set: "http://localhost:4010/graphql/v2",

@@ -154,6 +154,29 @@ SSE route multiplexes deployment status and log output into the open tab.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **Cost is a workspace figure, not this app's.** The dashboard shows what the workspace a
+  project belongs to has spent this billing period, and says so in the same sentence, because
+  that is the only monetary number Railway exposes: `Customer.currentUsage` and
+  `CustomerSubscription.nextInvoiceCurrentTotal`, both workspace-wide. `estimatedUsage`
+  sounds like the answer and is not — it returns GB and vCPU, not money, and there is no
+  dollar measurement anywhere in `MetricMeasurement`. So this app cannot tell you what the
+  containers it created cost, only what the workspace they live in has spent, and the usage
+  total beside the list is in vCPU and GB for exactly that reason. Three cases have no figure
+  at all: a personal project, which belongs to no workspace; a token without
+  `workspace:viewer`, which cannot read one; and `Customer` being withdrawn, which
+  `verify:schema` cannot see because it is three types below a root field and which therefore
+  arrives at runtime as one `debug` record. All three render a link to Railway's own billing
+  page rather than a number this app would have to caveat further.
+- **Uptime is derived, and it counts the build.** There is no started-at anywhere in the
+  schema, so it is measured from `latestDeployment.createdAt` — when the deployment was
+  _queued_. For a Docker image source, which is all this app creates (ADR-6), that overstates
+  by the few seconds of pull and boot. For anything slower it would overstate by more.
+- **The readouts are a snapshot, not a graph.** One point per service per measurement, sized
+  to the request budget rather than to what `Query.metrics` will return: a wider window and a
+  faster `sampleRateSeconds` would give a sparkline at no extra _request_ cost but a much
+  larger response, and the readout is deliberately the cheap half. `Query.metrics` is in
+  `OPTIONAL_FIELDS`, so losing it costs the readouts and the usage total and nothing else —
+  the row falls back to the same em dash it shows for a container with no samples yet.
 - **Projects and environments can be created here but never deleted here.** `projectCreate`
   and `environmentCreate` are in `REQUIRED_FIELDS`; `projectDelete` and `environmentDelete`
   are absent from `operations.ts` entirely, so no request shape reaches them. This is not a
@@ -253,6 +276,12 @@ SSE route multiplexes deployment status and log output into the open tab.
   subject and the ids), and the field set is deliberately the shape a table would take, so
   the remaining work is a parse rather than a re-instrumentation. What a database adds is
   retention beyond the log window and a query the user can run themselves.
+- **A sparkline per row, and a per-container cost estimate.** The first is a wider
+  `startDate` and a faster sample rate on a query the app already sends — a response-size
+  decision rather than a request-budget one. The second is arithmetic over `Query.usage` and
+  Railway's published unit prices, which would make it _this app's_ estimate of a number
+  Railway does not publish per project, and it would have to be labelled as such everywhere it
+  appeared. Both are wanted; neither should arrive quietly.
 - **Ship the logs somewhere.** ADR-9 cut the seam and left it unused: add the OTel
   packages, add `register()` to `src/instrumentation.ts`, point Grafana Alloy at Railway's
   log drain. Nothing in `src/**` outside that one file should need to change — that is the

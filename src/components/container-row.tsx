@@ -11,11 +11,14 @@ import {
   isTerminal,
   isTransitioning,
   type Container,
+  type ContainerMetrics,
   type ContainerState,
   type LogPhase,
 } from "@/lib/railway/types";
 import { railwayServiceUrl } from "@/lib/constants";
-import { cn, relativeTime } from "@/lib/utils";
+import { relativeTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { ContainerMetricsReadout } from "./container-metrics";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
@@ -59,10 +62,17 @@ export function ContainerRow({
   container,
   projectId,
   environmentId,
+  metrics,
 }: {
   container: Container;
   projectId: string;
   environmentId: string;
+  /**
+   * Passed in rather than read from the container, because it is deliberately not on it —
+   * see ContainerMetrics on what a fluctuating value in the watch fingerprint would cost.
+   * Undefined means Railway reported nothing for this service, which the readout renders.
+   */
+  metrics: ContainerMetrics | undefined;
 }) {
   const t = useTranslations("containers");
   const tCommon = useTranslations("common");
@@ -447,6 +457,17 @@ export function ContainerRow({
                     }
                   />
                 )}
+                {/*
+                  Above the pane, not beside it. The pane is lazily loaded behind a
+                  skeleton, so a column next to it would reflow when the chunk lands; this
+                  also means the panel has something in it during that first frame.
+                */}
+                <ContainerMetricsReadout
+                  metrics={metrics}
+                  state={state}
+                  deployedAt={container.deployedAt}
+                  name={container.displayName}
+                />
                 {container.deploymentId ? (
                   <LogPane
                     lines={stream.logs}

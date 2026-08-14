@@ -13,6 +13,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: "2026-08-01T00:00:00Z",
   updatedAt: "2026-08-01T00:00:00Z",
+  deployedAt: "2026-08-01T00:00:00Z",
   managed: true,
   ...over,
 });
@@ -39,6 +40,14 @@ describe("the watch fingerprint", () => {
      */
     const bumped = base.map((c) => ({ ...c, updatedAt: "2026-09-09T00:00:00Z" }));
     expect(fingerprint(bumped)).toBe(fingerprint(base));
+  });
+
+  it("ignores deployedAt", () => {
+    // Redundant rather than deliberately dropped: deployedAt moves at exactly the moment
+    // deploymentId does, and that IS hashed — so the change is already noticed, and this
+    // field would only add one more fluctuating input to reason about.
+    const redeployed = base.map((c) => ({ ...c, deployedAt: "2026-09-09T00:00:00Z" }));
+    expect(fingerprint(redeployed)).toBe(fingerprint(base));
   });
 
   it.each([

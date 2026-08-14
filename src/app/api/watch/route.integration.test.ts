@@ -23,6 +23,7 @@ vi.mock("@/lib/railway/api", () => ({
 }));
 
 const { GET: watch } = await import("./[projectId]/route");
+const { __resetEnv } = await import("@/env");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 
 const container = (over: Partial<Container> = {}): Container => ({
@@ -36,6 +37,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   deploymentId: "dep_1",
   createdAt: null,
   updatedAt: null,
+  deployedAt: null,
   managed: true,
   ...over,
 });
@@ -220,5 +222,150 @@ describe("GET /api/watch/[projectId]", () => {
     expect(refused.status).toBe(429);
 
     for (const response of open) await response.body!.cancel();
+  });
+
+  /*
+   * The staleness nudge.
+   *
+   * Metrics are read on the render rather than polled, so on a project where nothing
+   * changes the readouts would sit at whatever they were when the page loaded. `stale` is
+   * the second reason to send an empty frame — and most of the cases below are a class of
+   * request this must NOT spend.
+   */
+  describe("the staleness nudge", () => {
+    /** Ticks needed to cross a staleness window, given the watch interval. */
+    const ticksToStale = Math.ceil(env().METRICS_POLL_MS / POLL_MS) + 1;
+
+    /*
+     * Collects frames until told to stop, rather than until a count is reached.
+     *
+     * readFrames above waits for N frames and would hang forever here: half these cases
+     * assert that a frame is NOT sent, and "nothing arrived" is indistinguishable from
+     * "still waiting" to a reader counting up to a target.
+     */
+    const collectFrames = (response: Response) => {
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      const frames: string[] = [];
+
+      const drained = (async () => {
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          for (const chunk of buffer.split("\n\n")) {
+            const match = /^event: (\w+)/m.exec(chunk);
+            if (match) frames.push(match[1]!);
+          }
+          buffer = "";
+        }
+      })();
+
+      return {
+        frames,
+        stop: async () => {
+          await reader.cancel();
+          await drained;
+        },
+      };
+    };
+
+    const withMetricsPoll = async (value: string, body: () => Promise<void>) => {
+      const previous = process.env.METRICS_POLL_MS;
+      process.env.METRICS_POLL_MS = value;
+      __resetEnv();
+      try {
+        await body();
+      } finally {
+        if (previous === undefined) delete process.env.METRICS_POLL_MS;
+        else process.env.METRICS_POLL_MS = previous;
+        __resetEnv();
+      }
+    };
+
+    it("nudges a tab whose readouts have gone stale on an unchanged project", async () => {
+      getProjectContainers.mockResolvedValue({ containers: [container()] });
+
+      const response = await watch(
+        request("/api/watch/p1?environment=e1"),
+        params("p1"),
+      );
+      const { frames, stop } = collectFrames(response);
+      await vi.advanceTimersByTimeAsync(POLL_MS * ticksToStale);
+      await stop();
+
+      // Never `changed` — the container set did not move, and saying it did would be this
+      // endpoint carrying a claim that is not true.
+      expect(frames).toEqual(["ready", "stale"]);
+    });
+
+    it("stays silent while nothing is running, however long the tab is open", async () => {
+      /*
+       * The reason this clock is on the server rather than in the hook. A stopped
+       * environment's readouts are all em dashes and cannot go stale, so a nudge would
+       * spend four Railway requests to re-render the same nothing. A setInterval in the
+       * browser does not know that; this side does.
+       */
+      getProjectContainers.mockResolvedValue({
+        containers: [container({ state: "failed" })],
+      });
+
+      const response = await watch(
+        request("/api/watch/p1?environment=e1"),
+        params("p1"),
+      );
+      const { frames, stop } = collectFrames(response);
+      await vi.advanceTimersByTimeAsync(POLL_MS * ticksToStale * 2);
+      await stop();
+
+      expect(frames).toEqual(["ready"]);
+    });
+
+    it("sends nothing at all when metrics are switched off", async () => {
+      // METRICS_POLL_MS=0 is how an account whose quota is committed to log streams opts
+      // out. It has to cost exactly zero, not merely less.
+      await withMetricsPoll("0", async () => {
+        getProjectContainers.mockResolvedValue({ containers: [container()] });
+
+        const response = await watch(
+          request("/api/watch/p1?environment=e1"),
+          params("p1"),
+        );
+        const { frames, stop } = collectFrames(response);
+        await vi.advanceTimersByTimeAsync(POLL_MS * ticksToStale * 2);
+        await stop();
+
+        expect(frames).toEqual(["ready"]);
+      });
+    });
+
+    it("sends one frame, not two, when a change lands on the tick staleness is due", async () => {
+      /*
+       * A `changed` causes the refresh a `stale` would have asked for, so emitting both
+       * would be two events for one render — and through the tab-shared throttle the
+       * second would be silently dropped, which looks identical to it having worked.
+       *
+       * The change is timed to land on the very tick the staleness window expires, which
+       * is the only tick where both branches are live at once.
+       */
+      let polls = 0;
+      getProjectContainers.mockImplementation(async () => ({
+        containers: [
+          container(polls++ >= ticksToStale - 1 ? { image: "redis:8" } : {}),
+        ],
+      }));
+
+      const response = await watch(
+        request("/api/watch/p1?environment=e1"),
+        params("p1"),
+      );
+      const { frames, stop } = collectFrames(response);
+      await vi.advanceTimersByTimeAsync(POLL_MS * ticksToStale);
+      await stop();
+
+      expect(frames).toEqual(["ready", "changed"]);
+      expect(frames).not.toContain("stale");
+    });
   });
 });

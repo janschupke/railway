@@ -136,8 +136,58 @@ export type Container = {
   deploymentId: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /**
+   * When the current deployment was created, which is what uptime is measured from.
+   *
+   * Distinct from `createdAt`, which is the *service* — a service redeployed this morning
+   * has been around for a month. Railway exposes no started-at anywhere, so this counts the
+   * build and the deploy as uptime: seconds of overstatement for an image source, which is
+   * all this app creates (ADR-6). Stated in README Limitations rather than rounded away.
+   */
+  deployedAt: string | null;
   /** Whether this app created the service, and may therefore destroy it. */
   managed: boolean;
+};
+
+/**
+ * What one container is currently using, as of the newest sample Railway returned.
+ *
+ * Deliberately NOT a field on `Container`, and the reason is load-bearing rather than
+ * stylistic: `fingerprint()` hashes a `Container[]` to decide whether to tell every open tab
+ * to refresh. A CPU float in that hash differs on every poll, so the watcher would announce
+ * a change every fifteen seconds forever, at two Railway round trips a time. The `updatedAt`
+ * exclusion in watch-fingerprint.ts is the same trade, and it shows how easy that exclusion
+ * is to forget — keeping metrics in a separate structure makes it structural instead of
+ * remembered, because fingerprint cannot see a value it is never handed.
+ *
+ * `sortContainers`, `filterContainers` and `filterKey` are the same argument one layer up:
+ * none of them should observe a value that changes every two minutes, and `filterKey`
+ * resets the list's page count when it does.
+ */
+export type ContainerMetrics = {
+  serviceId: string;
+  /** vCPU. Null when Railway returned no sample, which is not the same as zero. */
+  cpuCores: number | null;
+  /** Gigabytes — Railway's own unit (MEMORY_USAGE_GB), never round-tripped through bytes. */
+  memoryGb: number | null;
+  /** Unix seconds of the newest sample these values came from. */
+  sampledAt: number | null;
+};
+
+/**
+ * Current-period spend, for the workspace a project belongs to.
+ *
+ * The scope is in the type name on purpose. This figure covers every service in the
+ * workspace, including ones this app did not create, and there is no per-project or
+ * per-service dollar amount anywhere in Railway's schema — `estimatedUsage` returns GB and
+ * vCPU, and the only monetary fields are on `Customer` and `CustomerSubscription`, both of
+ * which hang off a workspace. A component that renders this has to say so.
+ */
+export type WorkspaceSpend = {
+  currentUsage: number;
+  periodStart: string;
+  periodEnd: string;
+  workspaceName: string | null;
 };
 
 export type LogLine = {

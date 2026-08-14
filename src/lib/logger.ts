@@ -215,6 +215,7 @@ export type LogEvent =
   | "container.destroy_skipped"
   | "container.destroyed"
   | "dashboard"
+  | "dashboard.metrics_failed"
   | "dashboard.render"
   | "dashboard.selection_dropped"
   /*
@@ -240,6 +241,7 @@ export type LogEvent =
   | "railway.logBackfill"
   | "railway.logStream"
   | "railway.logStream.truncated"
+  | "railway.metrics.refused"
   | "railway.projects"
   | "railway.projects.source_failed"
   | "railway.request"

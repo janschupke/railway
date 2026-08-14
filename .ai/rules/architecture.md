@@ -140,12 +140,17 @@ browser. Do not introduce persistence to solve a caching problem.
 speaks `graphql-ws` upstream; `mappers.ts` turns Railway's shapes into
 `src/lib/railway/types.ts`.
 
-Two scripts exist so you do not have to reason about Railway's schema from memory:
+Scripts exist so you do not have to reason about Railway's schema from memory:
 
 - `pnpm probe:projects` — prints what each project source actually returns for a real
   session. Run it **before** editing the project queries.
+- `pnpm probe:metrics <projectId> <environmentId>` — prints what `metrics`,
+  `estimatedUsage` and the `project.workspace.customer` chain answer for a real OAuth
+  session. Introspection says what the schema declares; only this says what the token is
+  permitted to read, which is a different question and the one the readouts depend on.
 - `pnpm verify:schema` — introspects the live API against `REQUIRED_FIELDS`,
-  `OPTIONAL_FIELDS`, `PROBED_INPUT_TYPES` and `REQUIRED_INPUT_TYPES` in `operations.ts`, and
+  `OPTIONAL_FIELDS`, `PROBED_INPUT_TYPES`, `REQUIRED_INPUT_TYPES` and
+  `REQUIRED_ENUM_MEMBERS` in `operations.ts`, and
   diffs the pinned OIDC metadata in `src/lib/auth/oidc-metadata.ts`. Run it after touching
   either. Full introspection needs `RAILWAY_TOKEN`; CI holds none, so CI only checks OIDC
   discovery — a schema change can pass CI and fail locally.
@@ -187,8 +192,8 @@ imports, work out what happens when the app bundle has its own copy.**
 
 ## Every tuned number lives in `src/lib/constants.ts`
 
-Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `SESSION`, `LIMITS`,
-`UI`, `LIST`, `LINKS`),
+Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `METRICS`, `SESSION`,
+`LIMITS`, `UI`, `LIST`, `LINKS`),
 each with a comment saying why the value is what it is. These were scattered as inline
 literals across the client, the stream route, the session layer and three components, and
 the log backfill limit had already drifted from its default.
@@ -196,15 +201,17 @@ the log backfill limit had already drifted from its default.
 A new timeout, retry count, buffer size or ceiling goes there, in its group, with a
 rationale. Do not inline it "just this once".
 
-The one number that is not there is the watcher's poll interval — it is `WATCH_POLL_MS` in
-`src/env.ts`, because the right value depends on the rate limit of the plan behind the
-token. `src/lib/constants.ts` says so at the `WATCH` group.
+The two numbers that are not there are the watcher's poll interval and the usage-readout
+staleness window — `WATCH_POLL_MS` and `METRICS_POLL_MS` in `src/env.ts`, because the right
+value for each depends on the rate limit of the plan behind the token. `src/lib/constants.ts`
+says so at the `WATCH` and `METRICS` groups.
 
 ## Configuration goes through `src/env.ts`
 
 zod schema, memoised, `__resetEnv()` for tests. Required: `RAILWAY_CLIENT_ID`,
 `RAILWAY_CLIENT_SECRET`, `SESSION_SECRET` (≥32 chars), `APP_URL`. Optional with defaults:
-`MANAGED_PREFIX`, `WATCH_POLL_MS`, and the three `RAILWAY_*` endpoint overrides that exist
+`MANAGED_PREFIX`, `WATCH_POLL_MS`, `METRICS_POLL_MS`, and the three `RAILWAY_*` endpoint
+overrides that exist
 so the e2e suite can point the whole app at `e2e/fixtures/fake-railway`.
 
 `APP_URL` must be https unless it is loopback, because **every cookie decision reads it** —

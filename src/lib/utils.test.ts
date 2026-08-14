@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cn, relativeTime, sleep } from "./utils";
+import { cn, sleep } from "./utils";
 
 describe("cn", () => {
   it("joins conditional classes", () => {
@@ -27,53 +27,6 @@ describe("cn", () => {
     // A caller overriding the size must win, exactly as with Tailwind's own steps.
     expect(cn("text-body", "text-caption")).toBe("text-caption");
     expect(cn("text-sm", "text-display")).toBe("text-display");
-  });
-});
-
-describe("relativeTime", () => {
-  afterEach(() => vi.useRealTimers());
-
-  const at = (iso: string, now: string, locale = "en") => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(now));
-    return relativeTime(iso, locale);
-  };
-
-  it("returns null for a missing timestamp, so the caller owns the placeholder", () => {
-    // An em dash baked in here would be one more string no catalog could reach.
-    expect(relativeTime(null, "en")).toBeNull();
-    expect(relativeTime(undefined, "en")).toBeNull();
-  });
-
-  it("returns null rather than NaN for an unparseable value", () => {
-    expect(relativeTime("not a date", "en")).toBeNull();
-  });
-
-  it("scales the unit with the distance", () => {
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T10:00:30Z")).toBe("30 seconds ago");
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T10:05:00Z")).toBe("5 minutes ago");
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T13:00:00Z")).toBe("3 hours ago");
-    expect(at("2026-08-10T10:00:00Z", "2026-08-12T10:00:00Z")).toBe("2 days ago");
-  });
-
-  it("pluralises, which the hand-rolled version could not", () => {
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T10:00:01Z")).toBe("1 second ago");
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T10:01:00Z")).toBe("1 minute ago");
-  });
-
-  it("follows the locale's own wording and word order", () => {
-    /*
-     * The point of Intl over string templates: "ago" is a suffix in English and a
-     * prefix in German, and neither is something a translator should have to fake.
-     */
-    expect(at("2026-08-12T10:00:00Z", "2026-08-12T13:00:00Z", "de")).toBe(
-      "vor 3 Stunden",
-    );
-  });
-
-  it("clamps a future timestamp to zero instead of counting backwards", () => {
-    // Server and client clocks disagree; "in 4 seconds" on a created-at reads as a bug.
-    expect(at("2026-08-12T10:00:05Z", "2026-08-12T10:00:00Z")).toBe("now");
   });
 });
 

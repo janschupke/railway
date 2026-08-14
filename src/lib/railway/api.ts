@@ -1,6 +1,6 @@
 import "server-only";
 
-import { STREAM } from "@/lib/constants";
+import { METRICS, STREAM } from "@/lib/constants";
 import { log } from "@/lib/logger";
 import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
@@ -13,6 +13,7 @@ import {
   PROJECTS_PERSONAL_QUERY,
   PROJECTS_WORKSPACE_QUERY,
   PROJECT_CREATE_MUTATION,
+  PROJECT_METRICS_QUERY,
   PROJECT_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
@@ -26,15 +27,26 @@ import {
 } from "./failure-reason";
 import {
   nodes,
+  toContainerMetrics,
   toContainers,
   toProject,
   toProjects,
+  toWorkspaceSpend,
   type Edges,
+  type MetricsResultNode,
   type ProjectNode,
   type ServiceNode,
   type ViewerNode,
+  type WorkspaceNode,
 } from "./mappers";
-import type { Container, LogLine, RailwayEnvironment, RailwayProject } from "./types";
+import type {
+  Container,
+  ContainerMetrics,
+  LogLine,
+  RailwayEnvironment,
+  RailwayProject,
+  WorkspaceSpend,
+} from "./types";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
@@ -189,6 +201,69 @@ export async function getProjectContainers(
   return {
     project: toProject(data.project),
     containers: toContainers(nodes(data.project.services), environmentId),
+  };
+}
+
+/**
+ * What the containers in one environment are using, and what the workspace has spent.
+ *
+ * `gqlPartial` rather than `gql`, and unlike everywhere else in this file that is the whole
+ * design rather than a detail. Both halves of this document are things a given token may not
+ * be permitted to read — `metrics` needs the project scope, `customer` needs the workspace
+ * one — and Railway refuses a field with HTTP 200, an `errors[]` entry and the field nulled.
+ * `gql` throws on that and would discard the half that did arrive.
+ *
+ * So this never throws for a refusal: it returns `{}` and `null`, and the dashboard renders
+ * exactly what it rendered before this feature existed. Transport, rate-limit and 5xx
+ * failures still throw, because `execute` throws before this returns, and the loader's catch
+ * is where that is spelled out.
+ *
+ * One request per environment, not one per row — see PROJECT_METRICS_QUERY on why the
+ * grouping matters to ADR-10's budget.
+ */
+export async function getProjectMetrics(
+  accessToken: string,
+  projectId: string,
+  environmentId: string,
+  signal?: AbortSignal,
+): Promise<{
+  metrics: Record<string, ContainerMetrics>;
+  spend: WorkspaceSpend | null;
+}> {
+  const { data, errors } = await gqlPartial<{
+    metrics: MetricsResultNode[] | null;
+    project: { id: string; workspace: WorkspaceNode } | null;
+  }>(
+    PROJECT_METRICS_QUERY,
+    {
+      projectId,
+      environmentId,
+      measurements: ["CPU_USAGE", "MEMORY_USAGE_GB"],
+      startDate: new Date(Date.now() - METRICS.WINDOW_MS).toISOString(),
+      sampleRateSeconds: METRICS.SAMPLE_RATE_SECONDS,
+      averagingWindowSeconds: METRICS.AVERAGING_WINDOW_SECONDS,
+    },
+    { accessToken, operationName: "ProjectMetrics", signal },
+  );
+
+  for (const error of errors) {
+    /*
+     * Debug, not warn, and the level is the decision here rather than an oversight.
+     *
+     * This read happens on every dashboard render. A token that will never hold
+     * `workspace:viewer` would write a warn per render, forever, for a readout the UI
+     * already has a designed answer for — which is precisely how a log store teaches people
+     * to ignore warns. Same reasoning getDeploymentFailure states one function down.
+     */
+    log.debug("railway.metrics.refused", {
+      project_id: projectId,
+      error,
+    });
+  }
+
+  return {
+    metrics: toContainerMetrics(data?.metrics ?? []),
+    spend: toWorkspaceSpend(data?.project?.workspace ?? null),
   };
 }
 

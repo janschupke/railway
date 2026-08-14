@@ -29,8 +29,19 @@ export const dynamic = "force-dynamic";
  * closes this connection on `visibilitychange` and reopens it on the way back.
  *
  * The payload is a single bit. This endpoint never carries application state; the client
- * answers `changed` with router.refresh() and the page re-renders through the normal RSC
- * path, which is the only place that knows how to render it. See ADR-10.
+ * answers with router.refresh() and the page re-renders through the normal RSC path, which
+ * is the only place that knows how to render it. See ADR-10.
+ *
+ * There are now two reasons to send that bit, and neither of them carries anything.
+ * `changed` means the service set moved. `stale` means the usage readouts have aged past
+ * METRICS_POLL_MS — they are read on the render rather than polled, so on a project where
+ * nothing changes they would otherwise sit at whatever they were when the page loaded.
+ *
+ * The staleness clock lives here rather than in the browser precisely because this side
+ * knows something the browser does not: whether anything is *running* to be stale about. An
+ * environment of stopped containers produces no nudge and therefore no requests, where a
+ * setInterval in the hook would fire regardless and spend the same quota to re-render numbers
+ * that cannot have moved.
  */
 export async function GET(
   request: NextRequest,
@@ -86,8 +97,15 @@ async function handle(
     async (emit, signal) => {
       let previous: string | null = null;
       const base = env().WATCH_POLL_MS;
+      const staleAfter = env().METRICS_POLL_MS;
       let interval = base;
       let consecutiveFailures = 0;
+      /*
+       * When this tab last had a reason to re-render, which is what "stale" is measured
+       * from — not when a metrics request last went out. Any refresh re-reads metrics
+       * through the RSC path, so a `changed` is as good as a `stale` and resets this too.
+       */
+      let lastEmit = Date.now();
 
       while (!signal.aborted) {
         try {
@@ -101,8 +119,30 @@ async function handle(
 
           // The first poll establishes the baseline. Announcing a change against nothing
           // would refresh every tab the moment it connected, for no reason.
-          if (previous === null) emit.send("ready", { services: containers.length });
-          else if (next !== previous) emit.send("changed", {});
+          if (previous === null) {
+            emit.send("ready", { services: containers.length });
+            lastEmit = Date.now();
+          } else if (next !== previous) {
+            emit.send("changed", {});
+            lastEmit = Date.now();
+          } else if (
+            /*
+             * Nothing changed, so the only thing that can have gone out of date is the
+             * usage readout. Three conditions, and each one is a whole class of wasted
+             * request: disabled outright, still fresh, or an environment where nothing is
+             * running and the numbers are all em dashes anyway.
+             *
+             * Deliberately in the `else` — a tick that already sent `changed` has caused
+             * the refresh this would have asked for, and sending both would be two events
+             * for one render.
+             */
+            staleAfter > 0 &&
+            Date.now() - lastEmit >= staleAfter &&
+            containers.some((container) => container.state === "running")
+          ) {
+            emit.send("stale", {});
+            lastEmit = Date.now();
+          }
 
           previous = next;
           interval = base;

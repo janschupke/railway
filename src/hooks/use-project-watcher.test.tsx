@@ -92,6 +92,17 @@ describe("useProjectWatcher", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes when the server says the readouts have gone stale", () => {
+    /*
+     * The second reason to re-render, and it answers exactly like the first. Metrics are
+     * read on the render rather than polled, so without this a project where nothing
+     * changes would show whatever its CPU and memory were when the page loaded.
+     */
+    render(<Probe />);
+    act(() => FakeEventSource.latest().emit("stale"));
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("debounces against the per-row settle refresh", () => {
     /*
      * A deployment finishing fires both this and container-row's own refresh inside the
