@@ -17,8 +17,14 @@ import { describe, expect, it } from "vitest";
  * three files that name them drifting apart. Each pair is two literals with nothing
  * between them: package.json's `engines.node` and the `FROM` line, package.json's
  * `packageManager` and the `npm install --global pnpm@` line, ci.yml's four
- * `node-version` keys and the major everything else deploys on. Nothing at runtime would
- * notice a disagreement, and a deploy would notice it late.
+ * `node-version` keys and the major everything else deploys on, and the Dockerfile's two
+ * `FROM` lines against each other. Nothing at runtime would notice a disagreement, and a
+ * deploy would notice it late.
+ *
+ * The last assertion is a different shape and belongs here for the same reason: ci.yml's
+ * job list against the aggregator's `needs`. A job that gates nothing is a check that is
+ * not a check, and this repository ran without one building the deployment image for long
+ * enough to prove nothing else was going to say so.
  */
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   engines?: { node?: string };
@@ -39,6 +45,17 @@ const declaredMajor = () => {
   return Number(/\d+/.exec(declared!)?.[0]);
 };
 
+/**
+ * The base image a stage names, as `[reference, major]` — e.g.
+ * `["node:22.23.2-alpine@sha256:c610…", "22"]`. Null if the stage does not exist or does
+ * not pin both a full version and a digest.
+ */
+const baseImage = (stage: string) =>
+  new RegExp(
+    String.raw`^FROM (node:(\d+)\.\d+\.\d+-\w+@sha256:[0-9a-f]{64}) AS ${stage}$`,
+    "m",
+  ).exec(dockerfile);
+
 describe("the toolchain", () => {
   it("pins Node to a major rather than a floor", () => {
     /*
@@ -50,13 +67,35 @@ describe("the toolchain", () => {
     expect(declaredMajor()).toBeGreaterThanOrEqual(22);
   });
 
-  it("builds the image on the Node the package declares", () => {
-    const from = /^FROM node:(\d+)\.\d+\.\d+-\w+ AS base$/m.exec(dockerfile);
+  it("builds the image on the Node the package declares, by digest", () => {
+    /*
+     * The digest is required, not optional. A tag is a pointer its owner can move, and the
+     * base image was the last mutable reference left in the deployment path once the
+     * actions in ci.yml were pinned — so a tag-only FROM is a version that can change
+     * without a commit, which is the thing the whole file is against.
+     */
+    const base = baseImage("base");
     expect(
-      from,
-      "Dockerfile must pin a full node version in its base stage",
+      base,
+      "Dockerfile must pin a full node version and a sha256 digest in its base stage",
     ).not.toBeNull();
-    expect(Number(from![1])).toBe(declaredMajor());
+    expect(Number(base![2])).toBe(declaredMajor());
+  });
+
+  it("runs on the same base image it builds on", () => {
+    /*
+     * The runtime stage starts from the registry rather than from `base`, so that pnpm is
+     * absent from it. That is deliberate and it means the two references are written out
+     * twice — two literals, which is exactly the kind of pair this file exists to hold
+     * together. A runtime on a different Node than the build is a difference nothing at
+     * build time would report and every deploy would carry.
+     */
+    const runner = baseImage("runner");
+    expect(
+      runner,
+      "Dockerfile must pin a full node version and a sha256 digest in its runtime stage",
+    ).not.toBeNull();
+    expect(runner![1]).toBe(baseImage("base")![1]);
   });
 
   it("installs the pnpm the package pins, from npm rather than corepack", () => {
@@ -91,6 +130,31 @@ describe("the toolchain", () => {
     for (const version of versions) expect(version).toBe(declaredMajor());
   });
 
+  it("gates every job it defines", () => {
+    /*
+     * `required` is the one check name branch protection requires, and it is only as wide
+     * as its `needs` list. A job added to this workflow and left out of that list runs,
+     * reports, and gates nothing — the merge goes green on the strength of the jobs that
+     * were remembered. Nothing else notices: the run is not red, the job is not skipped,
+     * and the aggregator's own two assertions only speak about the jobs it was given.
+     *
+     * This repository shipped for months with no job building the deployment image at all,
+     * which is the same failure one layer out. So the list is derived rather than trusted.
+     */
+    const jobs = [
+      ...ci.slice(ci.indexOf("\njobs:\n")).matchAll(/^ {2}(\w[\w-]*):$/gm),
+    ].map((match) => match[1]!);
+    const declared = /^ {4}needs: \[([^\]]+)\]$/m.exec(ci);
+
+    expect(declared, "ci.yml must have an aggregator with a needs list").not.toBeNull();
+    expect(jobs).toContain("required");
+
+    const gated = declared![1]!.split(",").map((name) => name.trim());
+    expect(gated.toSorted()).toEqual(
+      jobs.filter((job) => job !== "required").toSorted(),
+    );
+  });
+
   it("lets the Dockerfile decide how the app starts", () => {
     /*
      * The runtime stage deliberately has no package manager in it, so a `startCommand`
@@ -109,7 +173,13 @@ describe("the toolchain", () => {
      * nothing outside can override them and no layer records them.
      */
     expect(dockerfile).toMatch(/RAILWAY_CLIENT_SECRET=build-placeholder/);
-    expect(dockerfile).not.toMatch(/^ARG (RAILWAY|SESSION)/m);
+    /*
+     * Scoped to the credentials rather than to the `RAILWAY` prefix. The runtime stage
+     * takes `ARG RAILWAY_GIT_COMMIT_SHA` for the OCI revision label, which is a commit id
+     * — public, already on every log line, and the opposite of a thing that must not be
+     * overridable from outside.
+     */
+    expect(dockerfile).not.toMatch(/^ARG (RAILWAY_CLIENT|SESSION)/m);
     expect(dockerfile).not.toMatch(/^ENV (RAILWAY_CLIENT|SESSION_SECRET)/m);
   });
 });

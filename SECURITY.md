@@ -178,8 +178,13 @@ Recorded because a review that reports only problems misrepresents the system.
 - **The OIDC flow is correct.** State is verified and fails closed, PKCE is bound to the
   browser through httpOnly cookies, there is no open redirect, and the transient cookies
   are deleted on every exit path including success.
-- **No secret has ever been committed** (verified against full history), no
-  `NEXT_PUBLIC_` anywhere, and no server module reaches a client bundle.
+- **No secret has ever been committed**, no `NEXT_PUBLIC_` anywhere, and no server module
+  reaches a client bundle. The first of those was verified by hand against full history and
+  is now gated: the `secrets` job in `.github/workflows/ci.yml` runs gitleaks over
+  `--log-opts=--all` on every push, pull request and weekly cron. 72 commits, no findings,
+  when the gate was added. Scanning the whole history rather than the pushed range is what
+  catches a force-push that rewrites a secret into a branch nobody reads, and it is what
+  keeps this line a statement about the repository rather than about one afternoon.
 
 ## Accepted risks
 
@@ -263,6 +268,14 @@ app. If that changes, this moves to shared state along with everything else.
 reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm lighthouse`.
 `pnpm audit --prod` is clean, and that is what CI gates on. Reviewed 2026-08-12.
 
+**Unfixed CVEs in the deployment image are not gated.** Trivy runs with
+`--ignore-unfixed`, so an advisory against the Alpine base with no patched version
+available does not fail the build. The reasoning is the one `--prod` makes about
+`pnpm audit`: a gate that goes red for something no commit can address is a gate people
+route around, and routing around it is what loses the findings that do have fixes.
+Reviewed 2026-08-14 — with the base image at `node:22.23.2-alpine`, the fixable
+HIGH/CRITICAL count is zero, including the app's own production tree.
+
 ## Operational notes
 
 - **Deploying the `__Host-` cookie change invalidates every existing production session
@@ -292,6 +305,18 @@ reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm light
   attacker-controlled string straight off the URL, and putting it in a field an operator
   greps is the injection surface the validator exists to close. `id_length` carries the
   diagnostic content instead.
+- **The deployment image is built, booted and scanned in CI**, by the `image` job, before
+  it can reach Railway — every other gate could pass with a `Dockerfile` that fails at
+  deploy. The base image is pinned by sha256 digest on both `FROM` lines, so the runtime
+  cannot change without a commit, and Dependabot's `docker` ecosystem bumps it. The runtime
+  stage removes npm, corepack and yarn: the base image ships all three, the app invokes
+  none, and npm's bundled dependency tree is where every image-scan finding otherwise comes
+  from. That removal writes whiteouts rather than reclaiming space — the bytes stay in the
+  base layer — so it is a surface change, not a size one.
+- **The image carries OCI labels**, including `org.opencontainers.image.revision` from
+  `RAILWAY_GIT_COMMIT_SHA`, the same value the logger emits as `version`. A running process
+  reporting its own commit and an artefact stating which commit produced it are different
+  claims; the second is the one that survives the process.
 - **`LOG_LEVEL` is read straight from the environment**, not through `src/env.ts`, and an
   unrecognised value clamps rather than throwing. `/api/health` exists in order to log
   `env()` failing, so a logger that depended on `env()` succeeding could not report the

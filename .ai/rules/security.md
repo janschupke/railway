@@ -1,6 +1,6 @@
 ---
 meta:
-  updated: 2026-08-13
+  updated: 2026-08-14
 ---
 
 # Security
@@ -36,9 +36,15 @@ it does add is a refusal: it will not _use_ that access on anything it did not c
 ## Never read, echo, or commit `.env`
 
 `.env` exists on disk and is gitignored (`.env*` ignored, `!.env.example` re-included). Only
-`.env.example` is tracked. No secret has ever been committed and history has been checked —
-keep it that way. When you need to know what a variable is for, read `src/env.ts` or
-`.env.example`, not `.env`.
+`.env.example` is tracked. No secret has ever been committed, and the `secrets` job in
+`ci.yml` is what keeps that true rather than merely checked once: gitleaks over
+`--log-opts=--all`, every run, on the whole history rather than the pushed commits. CodeQL
+does not do this and never did. When you need to know what a variable is for, read
+`src/env.ts` or `.env.example`, not `.env`.
+
+The gate arrived while the repository was clean, which is the only moment a secret scanner
+is prevention. If it ever fires, the commit is not the fix — the credential is already
+public and has to be rotated first.
 
 ## Authorization is re-checked everywhere, not delegated to the proxy
 
@@ -146,6 +152,28 @@ reachability every run, which an ignore-list of advisory ids would not.
 Prefer not adding a runtime dependency at all. The GraphQL client is hand-rolled for reasons
 argued in ADR-8.
 
+## The image is scanned, and the two scans do not overlap
+
+Trivy runs over the built image in the `image` job, gating on HIGH and CRITICAL **with a
+fix available**. `--ignore-unfixed` is the same argument `--prod` makes above: a gate that
+reports what no commit can address is a gate people learn to skip past, and they skip past
+the actionable findings with it.
+
+The division of labour is worth holding on to. `pnpm audit --prod` reads the lockfile and
+knows which dependencies are production. Trivy reads the filesystem the image actually
+ships and finds the operating-system layer, which no lockfile describes. Neither subsumes
+the other, and the two disagreeing about the same package is information, not noise.
+
+Two consequences for the `Dockerfile`:
+
+- **The base image is pinned by digest**, on both `FROM` lines, and Dependabot's `docker`
+  ecosystem bumps it. Pinning without bumping converts a supply-chain risk into a staleness
+  one, and staleness is what this gate measures.
+- **The runtime stage removes npm, corepack and yarn.** Every finding the scan reported
+  before that line sat inside npm's own bundled tree — `tar`, `sigstore`, `brace-expansion`
+  — none of it upgradable from here, none of it ever invoked. Do not put a package manager
+  back into that stage.
+
 ## When a change is also a `SECURITY.md` change
 
 Update the document when you add or alter:
@@ -153,6 +181,7 @@ Update the document when you add or alter:
 - an OAuth scope, a cookie attribute, or a cookie name
 - a security header, or a CSP directive
 - a new outbound host
+- what the deployment image contains, or which base image it starts from
 - a new **input surface** — a field the browser can set that reaches an upstream mutation —
   or a widening of what an existing one accepts
 - anything on an accepted-risk list — if you close one, move it out of that section

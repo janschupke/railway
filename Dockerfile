@@ -26,7 +26,14 @@
 # the deployed Node is now the FROM line, which is a version this file states rather than
 # one a builder infers.
 
-FROM node:22.14.0-alpine AS base
+# Pinned by digest as well as by tag. A tag is a pointer its owner can move, so
+# `node:22.23.2-alpine` alone means "whatever that repository publishes under that name
+# next" — the same mutable-reference shape the actions in ci.yml were pinned out of. The
+# digest is what the CI image scan actually measured; the tag is kept so the line still
+# reads as a version. src/toolchain.test.ts holds both FROM lines to the same reference,
+# because a build stage and a runtime stage on different base images is a difference
+# nothing else here would notice. Dependabot's `docker` ecosystem bumps it.
+FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
 # Pinned to the same version as `packageManager`, and asserted equal to it by
 # src/toolchain.test.ts — two literals that must agree, in a repo where nothing else
 # would notice if they stopped.
@@ -82,7 +89,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 
-FROM node:22.14.0-alpine AS runner
+FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -90,8 +97,55 @@ ENV NODE_ENV=production
 # has no one to read it.
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Railway injects RAILWAY_GIT_COMMIT_SHA and src/lib/logger.ts reads it at runtime, emitting
+# the first seven characters as `version` on every log line. Declaring it here puts the same
+# commit on the image itself, which is the only place a deployed artefact can say what
+# produced it — a log line tells you what a running process thinks it is, a label tells you
+# what the thing on disk actually is.
+#
+# It defaults to empty, so `docker build .` on a laptop works unchanged and a builder that
+# does not pass the variable produces an empty label rather than a failure. This is not a
+# credential and the ban in src/toolchain.test.ts is scoped to the ones that are.
+ARG RAILWAY_GIT_COMMIT_SHA=""
+LABEL org.opencontainers.image.title="Railway Freight Loader" \
+      org.opencontainers.image.description="Create and destroy Docker-image services in your own Railway account, with live build and deploy logs." \
+      org.opencontainers.image.source="https://github.com/janschupke/railway" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.revision="${RAILWAY_GIT_COMMIT_SHA}"
+
 # `next start` is a Node process, so it needs no shell, no package manager and no build
 # toolchain. pnpm is deliberately not installed in this stage — see CMD.
+#
+# npm, corepack and yarn are here for a different reason: the base image ships all three,
+# this file does not ask for any of them, and the app invokes none of them. They are the
+# same unwanted thing, so they go too.
+#
+# That is not housekeeping. Every finding the CI image scan reports against this image
+# without this line sits inside npm's own bundled dependency tree — tar, brace-expansion,
+# sigstore, picomatch — which nothing in this repository can upgrade and which the node
+# images carry until their next rebuild. Eight HIGH and CRITICAL findings, in a package that
+# never runs. Removing it is what lets that scan gate on zero rather than on a permanently
+# amber baseline nobody reads. yarn 1.22 is end-of-life and will eventually earn the same
+# treatment with no upgrade available at all.
+#
+# corepack goes for the reason at the top of this file. It is the whole cause of the failure
+# that replaced NIXPACKS, and leaving it one PATH lookup away from a deployment while the
+# header claims it was removed from the path entirely is the kind of gap that gets found
+# during an incident.
+#
+# This is not a size measure, and it is the exact trap the .next/cache comment above
+# describes, arriving from the other direction: these files are in the base image's layer,
+# so removing them here writes whiteouts and leaves the bytes underneath. Measured, the RUN
+# adds 28.7 kB and removes nothing. What changes is what the filesystem presents and what a
+# scanner walking it finds, which is the entire point — the layer cannot be trimmed without
+# building the base image, and nothing here is going to do that.
+#
+# The yarn directory is version-stamped, so the glob is the part that survives a base image
+# bump; `docker run --rm <image> sh -c 'ls /usr/local/bin'` is how to check after one.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+           /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+           /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/next.config.ts ./next.config.ts

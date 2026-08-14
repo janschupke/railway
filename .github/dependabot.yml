@@ -24,3 +24,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # The Dockerfile's base image, now pinned by digest for the same reason the actions are.
+  # It is the reference with the shortest useful life of the three: the image scan in
+  # ci.yml gates on HIGH and CRITICAL with a fix available, and an Alpine base accumulates
+  # those faster than anything else here. Without this entry the first CVE published
+  # against it turns a green gate red with no pull request offering the fix.
+  #
+  # It does not reach the three scanner digests inside ci.yml — those sit in `run:` steps,
+  # which no ecosystem parses, and are bumped by hand against the version comment beside
+  # each one.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

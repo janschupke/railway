@@ -26,7 +26,7 @@ the relevant rule before touching auth, the design tokens, the log stream, or a 
 - [Design system](.ai/rules/design-system.md) — two token layers (`--rc-*`), the seven-step type scale defined in four files, and the four appearance bans on feature components
 - [Internationalisation](.ai/rules/i18n.md) — every string in `messages/en.json`, type-checked keys, `MessageKey` for code that cannot translate itself
 - [Testing](.ai/rules/testing.md) — four tiers, colocated, a ratcheted coverage gate, asserted log records, and the fake Railway with its fault injection
-- [Security](.ai/rules/security.md) — the token never leaves the server, no upstream text in the browser, one writer per header, `pnpm audit --prod` gates CI
+- [Security](.ai/rules/security.md) — the token never leaves the server, no upstream text in the browser, one writer per header, `pnpm audit --prod` and the image and secret scans gate CI
 - [Errors and logging](.ai/rules/errors-and-logging.md) — `ActionResult`, `reportError` and the incident id, stable event names, and what is never logged
 - [Accessibility](.ai/rules/accessibility.md) — strict `jsx-a11y`, axe in both themes, the token contrast test, and LHCI at `minScore: 1`
 - [Performance](.ai/rules/performance.md) — per-route bundle budgets, why raising one needs a written reason, and the Lighthouse resource ceilings
@@ -53,4 +53,6 @@ Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 - **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.
+- **A change to the `Dockerfile` is gated by `docker build`, a boot against `/api/health`, hadolint and Trivy** — the `image` job. Run them locally; the commands are in [workflow.md](.ai/rules/workflow.md). Do not put a package manager back into the runtime stage.
+- **A new CI job must be added to `required`'s `needs`**, or it gates nothing. `src/toolchain.test.ts` fails when the two disagree.
 - **Never create a branch**; commit subjects are sentence-case prose, and bodies explain the defect and the rejected alternatives.

@@ -53,6 +53,12 @@ command and `/api/health` healthcheck. Set `RAILWAY_CLIENT_ID`, `RAILWAY_CLIENT_
 and `SESSION_SECRET` as service variables — `APP_URL` is derived from Railway's injected
 `RAILWAY_PUBLIC_DOMAIN`.
 
+The `Dockerfile` pins its base image by sha256 digest as well as by tag, on both `FROM`
+lines, and the runtime stage strips npm, corepack and yarn — none of which the app calls
+and all of which the base image ships. The deployed image carries OCI labels, including
+`org.opencontainers.image.revision`, taken from `RAILWAY_GIT_COMMIT_SHA`: the same commit
+the logger stamps on every line, on the artefact rather than only in its output.
+
 The app deploys itself the same way it deploys containers.
 
 ### Checks
@@ -65,9 +71,25 @@ pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 pnpm verify:schema  # pinned OIDC metadata against Railway's discovery document
 ```
 
-CI runs these on every push and pull request to `master`, as four parallel jobs behind a
-single `All checks` gate. `.github/pull_request_template.md` names the same five commands,
-so a pull request states which of them ran locally rather than leaving the split to prose.
+Two more gates have no local script, because what they check is not the source tree:
+
+```bash
+docker build -t rw .   # then boot it and curl /api/health; hadolint and Trivy over it
+                       # — the exact commands are in .ai/rules/workflow.md
+gitleaks git --log-opts=--all   # the whole history, every run, redacted
+```
+
+CI runs all of these on every push and pull request to `master`, plus a Monday cron, as six
+parallel jobs behind a single `All checks` gate. `.github/pull_request_template.md` names
+the same commands, so a pull request states which of them ran locally rather than leaving
+the split to prose.
+
+The image job is the newest and the one worth explaining. Everything above it measures the
+source; none of it produces the artefact that actually deploys, so a broken `Dockerfile`
+passed every gate and failed at Railway — where the failure reads as "Healthcheck failure"
+and names nothing. That job builds the image cold, boots it, waits for `/api/health`, and
+scans the result. Cold deliberately: a cached build here could go green while the build
+Railway runs does not.
 
 Enabling branch protection is a GitHub repo setting, not a file — Settings → Branches → Add
 branch protection rule, pattern `master`, _Require status checks to pass before merging_

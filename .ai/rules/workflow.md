@@ -1,6 +1,6 @@
 ---
 meta:
-  updated: 2026-08-13
+  updated: 2026-08-14
 ---
 
 # Workflow
@@ -32,26 +32,49 @@ dead. That is why `src/test/log-capture.ts` imports nothing from `src/lib`.
 
 ## CI
 
-`.github/workflows/ci.yml`, on push and PR to `master`, four jobs plus an aggregator:
+`.github/workflows/ci.yml`, on push and PR to `master` plus a Monday cron, six jobs plus an
+aggregator:
 
 | Job        | What it runs                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------- |
 | `quality`  | `pnpm audit --prod --audit-level=high` (gating) + full-tree audit (advisory), prettier, eslint, tsc, knip, coverage |
 | `build`    | `pnpm build`, then `pnpm size`                                                                                      |
 | `browser`  | Playwright — both the `chromium` and `mobile` projects — then `pnpm serve:e2e` backgrounded and LHCI, in one job    |
+| `image`    | hadolint, `docker build`, boot the image against `/api/health`, then Trivy on what was built                        |
+| `secrets`  | gitleaks over the whole history                                                                                     |
 | `schema`   | `pnpm verify:schema` — OIDC discovery drift only, since CI holds no `RAILWAY_TOKEN`                                 |
 | `required` | aggregator named **"All checks"**, the single name branch protection requires                                       |
 
+**A new job has to be added to `required`'s `needs`.** From the aggregator, a job that was
+never listed is indistinguishable from one that does not exist, so branch protection goes
+green with nothing behind it. `src/toolchain.test.ts` derives the list from the jobs the
+file defines and fails when the two disagree.
+
+The three scanners run as **digest-pinned container images inside `run:` steps** rather than
+as actions. `gitleaks-action` is proprietary and wants a write scope to comment on pull
+requests, which this workflow does not grant; one mechanism for three tools beats two; and
+every one of those commands runs verbatim on a laptop. The cost is that Dependabot does not
+reach a digest inside a `run:` step, so those three are bumped by hand against the version
+comment beside each. Its `docker` ecosystem does cover the Dockerfile's base image.
+
 CI injects placeholder credentials at the workflow level. **The build and the e2e fixture
 must not need real credentials** — if the env schema starts demanding them, that is a
-legitimate CI failure, not something to work around.
+legitimate CI failure, not something to work around. The `image` job forwards those same
+four into the container it boots with valueless `--env NAME`, so they are still written
+once.
 
 ## Node, TypeScript, tooling
 
 - **Node 22**, named in three places that must agree: `engines.node: "22.x"` in
-  package.json, the `FROM node:22.x.y-alpine` line in the Dockerfile, and `node-version`
-  in all four CI jobs. Pinned to a major rather than a floor — `>=22` lets a builder
-  resolve to whatever it has newest, a different runtime arriving without a commit.
+  package.json, the two `FROM node:22.x.y-alpine@sha256:…` lines in the Dockerfile, and
+  `node-version` in the four CI jobs that install Node. Pinned to a major rather than a
+  floor — `>=22` lets a builder resolve to whatever it has newest, a different runtime
+  arriving without a commit.
+- **The base image carries a digest as well as a tag**, and both `FROM` lines carry the
+  same one. A tag is a pointer its owner can move, which is what pinning the actions was
+  about; the base image was the last mutable reference in the deployment path. Dependabot's
+  `docker` ecosystem bumps it — a pinned digest with nothing bumping it is a version that
+  quietly stops receiving fixes, and the CI image scan gates on fixable CVEs.
 - **pnpm 11.9.0**, pinned via `packageManager` _and_ installed by exact version in the
   Dockerfile. pnpm is not incidental — `pnpm-workspace.yaml`'s `allowBuilds` is a
   postinstall allowlist npm cannot express, and `pnpm audit --prod` is the shape the CI
@@ -61,9 +84,11 @@ legitimate CI failure, not something to work around.
   use, not to this repository. See the deployment section for the failure that taught us
   this. The Dockerfile installs pnpm from npm for the same reason.
 - `src/toolchain.test.ts` holds all of the above to each other: the `FROM` major against
-  `engines.node`, the installed pnpm against `packageManager`, every CI `node-version`
-  against the deployed major, and the Dockerfile against ever running `corepack enable`.
-  Each pair is two literals with nothing between them.
+  `engines.node`, the runtime stage's base image against the build stage's, the installed
+  pnpm against `packageManager`, every CI `node-version` against the deployed major, and
+  the Dockerfile against ever running `corepack enable`. Each pair is two literals with
+  nothing between them. It also holds `ci.yml`'s job list against `required`'s `needs`,
+  which is not a pair of literals but fails in the same silent way.
 - Files under `scripts/` run on Node's type-stripping loader
   (`node --experimental-strip-types`), which is why `allowImportingTsExtensions` is on and
   why those imports carry explicit `.ts` specifiers. Safe because the project never emits.
@@ -96,6 +121,23 @@ Railway, **`DOCKERFILE` builder** — see `railway.json` and the `Dockerfile`. H
 `/api/health` with a 60 s timeout, restart `ON_FAILURE` ×3. There is **no
 `startCommand`**: the runtime stage has no package manager in it, so `pnpm start` would
 build cleanly and then fail to boot. `CMD` runs `next start` directly.
+
+**CI builds that image, boots it and scans it** before it can reach Railway — the `image`
+job. That is the gate a change to this file has to clear, and it is deliberately more than
+a build: a missing `COPY` or a `CMD` reaching for something the runtime stage does not have
+compiles perfectly and fails at deploy as "Healthcheck failure", which names nothing. The
+job runs the container with the workflow's placeholders and waits for `/api/health` to
+answer 200. It prints the container's logs either way, because those records are the
+diagnostic.
+
+The runtime stage **removes npm**, which the base image ships and nothing here calls. Same
+rule as pnpm's absence, and it is what makes an unqualified `HIGH,CRITICAL` image scan
+gate on zero: every finding otherwise reported sits inside npm's own bundled dependencies,
+which no commit in this repository can fix.
+
+The image carries OCI labels, including `org.opencontainers.image.revision` from
+`RAILWAY_GIT_COMMIT_SHA` — the same value `src/lib/logger.ts` emits as `version`. It
+defaults to empty, so a local `docker build` is unaffected.
 
 The service needs three variables: `RAILWAY_CLIENT_ID`, `RAILWAY_CLIENT_SECRET`, and a
 `SESSION_SECRET` of at least 32 characters.
@@ -135,7 +177,9 @@ The Dockerfile is not chosen for control alone. It can be built and run on a lap
 deployment change is testable before it is a deployment: `docker build -t rw . && docker
 run --rm -p 3000:3000 -e SESSION_SECRET=… -e RAILWAY_CLIENT_ID=… -e
 RAILWAY_CLIENT_SECRET=… -e RAILWAY_PUBLIC_DOMAIN=… rw`. Two guesses at builder
-configuration went out untested before this one did not.
+configuration went out untested before this one did not. That property is why the CI
+scanners are `docker run` commands rather than actions — every gate on this file can be
+reproduced locally, byte for byte.
 
 Single replica by design — the SSE stream slot counter is in-memory and per replica, and SSE
 pins a client to one replica anyway.
@@ -156,6 +200,24 @@ registered as user-level skills, not in this repo. They apply here unchanged; th
 ```sh
 pnpm check
 ```
+
+If you touched the `Dockerfile`, the four gates `pnpm check` does not run — the same
+commands `ci.yml` runs, one at a time:
+
+```sh
+docker run --rm -i ghcr.io/hadolint/hadolint@sha256:a1d49ae1… \
+  hadolint --failure-threshold info --ignore DL3059 --ignore DL3066 - < Dockerfile
+docker build -t rw . && docker run --rm -d --name rw -p 3000:3000 \
+  -e RAILWAY_CLIENT_ID=x -e RAILWAY_CLIENT_SECRET=y \
+  -e SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  -e APP_URL=http://localhost:3000 rw
+docker save rw -o /tmp/rw.tar && docker run --rm -v /tmp:/w -w /w \
+  ghcr.io/aquasecurity/trivy@sha256:7cced7ca… image --input rw.tar \
+  --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+```
+
+Curl `/api/health` for 200, then open the page — a missing `COPY` of `messages/` passes the
+health check and 500s on the first render.
 
 and, if the tree was already dirty when you started, confirm you changed only what you
 meant to:

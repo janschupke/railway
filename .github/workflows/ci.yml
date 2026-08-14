@@ -5,12 +5,16 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  # Weekly, for the dependency audit.
+  # Weekly, for the scanners.
   #
   # `pnpm audit --prod` is a headline security gate, and on push/pull_request alone it can
   # only ever fire when someone happens to push. A high advisory published against a
   # dependency tree nobody has touched is exactly the case it exists for, and exactly the
   # case those triggers miss.
+  #
+  # The image scan in `image` is the same argument about the base image: Trivy fetches a
+  # fresh vulnerability database on every run, so a CVE published against a Dockerfile
+  # nobody has edited surfaces here rather than at the next deploy.
   schedule:
     - cron: "0 5 * * 1"
 
@@ -204,6 +208,134 @@ jobs:
           path: .lighthouseci/
           retention-days: 7
 
+  image:
+    name: Deployment image
+    runs-on: ubuntu-latest
+    # A cold `next build` inside Docker, plus a boot and a scan. Measured at roughly eight
+    # minutes; the ceiling is generous because the alternative to a slow build here is a
+    # failed build at Railway.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The three scanners run as digest-pinned images rather than as actions, for one
+      # reason each and one shared one. gitleaks-action is proprietary and defaults to
+      # commenting on pull requests, which needs a write scope this workflow says belongs
+      # elsewhere; having the other two arrive by a different mechanism would leave three
+      # tools with three shapes. The shared reason is that every command below runs
+      # verbatim on a laptop, which is the same property the Dockerfile is chosen for.
+      #
+      # The cost is stated rather than hidden: Dependabot does not reach a digest inside a
+      # `run:` step, so these three are bumped by hand. The trailing version comment is
+      # what makes their age readable. It costs less than it looks — Trivy fetches its
+      # vulnerability database at run time, so the gate stays current even when the image
+      # pinned here does not.
+      #
+      # DL3059 (consecutive `RUN`s) is deliberate in that file: `pnpm size` reads
+      # .next/diagnostics and must run before `rm -rf .next/cache`, so the three cannot be
+      # one instruction. DL3066 wants a numeric UID, and `node` is the name Alpine's image
+      # ships — a number would be a guess at what that name resolves to.
+      - name: hadolint
+        run: |
+          # ghcr.io/hadolint/hadolint:v2.15.1-alpine
+          docker run --rm --interactive \
+            ghcr.io/hadolint/hadolint@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552 \
+            hadolint --no-color --failure-threshold info \
+            --ignore DL3059 --ignore DL3066 - < Dockerfile
+
+      # No cache, deliberately. A warm build here can pass while the cold build Railway
+      # runs fails, and cold is the thing this job exists to prove. It is also what makes
+      # `--frozen-lockfile` and the inline build credentials mean anything: both are
+      # assertions about a build starting from nothing.
+      - name: Build
+        run: docker build --tag railway-freight-loader:ci .
+
+      # The build proves the image compiles. Only this proves it boots — a COPY that was
+      # never added, a CMD that reaches for a package manager the runtime stage does not
+      # have. Both build clean and fail at Railway as "Healthcheck failure", which names
+      # nothing.
+      #
+      # `--env NAME` with no value forwards the runner's, so the four placeholders at the
+      # top of this file reach the container without being restated here.
+      #
+      # `docker logs` runs before the failure branch and unconditionally: the boot records
+      # are the diagnostic, and `boot.env_invalid` is exactly what a misconfigured image
+      # writes. The loop sets `ready` rather than falling through, for the reason the
+      # browser job's equivalent records — an exhausted loop that exits 0 leaves this step
+      # green and surfaces later as something that reads like a different defect.
+      - name: Boot it
+        run: |
+          docker run --detach --name smoke --publish 3000:3000 \
+            --env RAILWAY_CLIENT_ID --env RAILWAY_CLIENT_SECRET \
+            --env SESSION_SECRET --env APP_URL \
+            railway-freight-loader:ci
+          ready=0
+          for _ in $(seq 1 30); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health)" = 200 ]; then
+              ready=1; break
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          docker rm --force smoke
+          if [ "$ready" != 1 ]; then
+            echo "The image did not answer /api/health within 60s."
+            exit 1
+          fi
+
+      # Scanned from a tarball rather than through a mounted Docker socket. The socket is
+      # root on the runner, and handing that to a third-party container to inspect an image
+      # it can read from a file is not a trade worth making for the convenience.
+      #
+      # `--ignore-unfixed` for the same reason `pnpm audit` is scoped to `--prod`: a gate
+      # that reports a CVE with no available fix is a gate that is red for reasons no
+      # commit can address, and a permanently red gate is one everybody learns to skip.
+      # `pnpm audit --prod` covers the JavaScript tree; this covers the operating system
+      # layer and anything else the image carries that the lockfile does not describe.
+      - name: Trivy
+        run: |
+          docker save railway-freight-loader:ci --output image.tar
+          # ghcr.io/aquasecurity/trivy:0.73.0
+          docker run --rm --volume "$PWD:/work" --workdir /work \
+            ghcr.io/aquasecurity/trivy@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
+            image --input image.tar --no-progress --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 because the scan below reads history, not the checkout.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      # CodeQL does not do this, and nothing else here did. The whole history, every run:
+      # SECURITY.md claims no secret has ever been committed and that claim was verified by
+      # hand, once. `--log-opts=--all` is what turns it into something that stays true —
+      # and it covers a force-push that rewrites a commit into a branch nobody reads.
+      #
+      # This gate arrives while the repository is clean, which is the only time a secret
+      # scanner is prevention rather than an incident report. It found nothing across 72
+      # commits when it was added.
+      #
+      # `--redact` because a finding is printed into a public log. The rule and the file are
+      # what an operator needs; the matched bytes are what an attacker needs.
+      #
+      # GIT_CONFIG_* because the container runs as root against a workspace owned by the
+      # runner user, and git refuses to read a repository it thinks belongs to somebody
+      # else. Passed as environment so nothing is written into the checkout being scanned.
+      - name: gitleaks
+        run: |
+          # ghcr.io/gitleaks/gitleaks:v8.30.1
+          docker run --rm --volume "$PWD:/repo" --workdir /repo \
+            --env GIT_CONFIG_COUNT=1 \
+            --env GIT_CONFIG_KEY_0=safe.directory \
+            --env GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --log-opts=--all --redact --no-banner .
+
   schema:
     name: Railway schema drift
     runs-on: ubuntu-latest
@@ -225,7 +357,7 @@ jobs:
   required:
     name: All checks
     runs-on: ubuntu-latest
-    needs: [quality, build, browser, schema]
+    needs: [quality, build, browser, image, secrets, schema]
     if: always()
     timeout-minutes: 5
     steps:
@@ -235,6 +367,10 @@ jobs:
       # `if:` condition — or dropped from `needs` in a bad merge — left branch protection
       # green with nothing behind it. Requiring 'success' to be present catches the empty
       # case; rejecting 'skipped' catches the partly-empty one.
+      #
+      # Neither catches a job that was never added to `needs` at all, because from here it
+      # is indistinguishable from a job that does not exist. src/toolchain.test.ts derives
+      # the list below from the jobs this file defines and fails when the two disagree.
       - name: Fail unless every check succeeded
         run: |
           if [ "${{ contains(needs.*.result, 'success') }}" != "true" ]; then
