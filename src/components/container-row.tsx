@@ -332,6 +332,7 @@ export function ContainerRow({
           <ContainerActions
             serviceId={container.serviceId}
             displayName={container.displayName}
+            image={container.image}
             deploymentId={container.deploymentId}
             state={state}
             projectId={projectId}

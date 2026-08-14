@@ -25,13 +25,21 @@ export type KeyValueRow = {
    */
   locked?: boolean;
   /**
-   * A blank value is filled in server-side.
+   * What an empty value cell means, when it means something other than "empty".
    *
    * Drives the placeholder and nothing else. This component never holds, renders or
-   * receives the resulting value — that is the whole point of representing a generated
-   * default as an empty cell rather than as content.
+   * receives the value behind either case — that is the whole point of representing both as
+   * an empty cell rather than as content.
+   *
+   * A discriminant rather than two booleans, because the two are mutually exclusive and a
+   * row that claimed both would have no answer:
+   *
+   *   - `generated` — spin-up, on a catalog row the server will mint a credential for.
+   *   - `unchanged` — edit, on a variable the service already has. The stored value is not
+   *     sent to the browser at all, so blank is what every untouched row looks like, and
+   *     the server reads "leave it alone" from the same blank. See the edit action.
    */
-  generatedWhenBlank?: boolean;
+  blankMeans?: "generated" | "unchanged";
 };
 
 /** Which cell of which row an error belongs to. */
@@ -57,6 +65,8 @@ type KeyValueEditorProps = {
   valuePlaceholder?: string;
   /** Shown in a blank value cell the server will fill in. */
   generatedPlaceholder: string;
+  /** Shown in a blank value cell whose stored value the server will leave alone. */
+  unchangedPlaceholder?: string;
 
   addLabel: string;
   /** Resolved by the caller, so the accessible name says what it removes. */
@@ -106,6 +116,7 @@ export function KeyValueEditor({
   namePlaceholder,
   valuePlaceholder,
   generatedPlaceholder,
+  unchangedPlaceholder,
   addLabel,
   removeLabel,
   cellLabel,
@@ -276,7 +287,14 @@ export function KeyValueEditor({
                   value={row.value}
                   onChange={(event) => update(row.id, { value: event.target.value })}
                   placeholder={
-                    row.generatedWhenBlank ? generatedPlaceholder : valuePlaceholder
+                    row.blankMeans === "generated"
+                      ? generatedPlaceholder
+                      : row.blankMeans === "unchanged"
+                        ? // Falls back rather than throwing: a caller that seeds existing
+                          // rows without this string gets the ordinary placeholder, which is
+                          // wrong copy rather than a blank control.
+                          (unchangedPlaceholder ?? valuePlaceholder)
+                        : valuePlaceholder
                   }
                   autoComplete="off"
                   spellCheck={false}

@@ -270,6 +270,17 @@ export class Store {
   services = new Map<string, Service>();
   deployments = new Map<string, Deployment>();
 
+  /**
+   * Variables the environment sets for every service in it.
+   *
+   * Not a detail of the fixture: Railway's `variables` field answers what a service
+   * *resolves*, shared entries included, and the edit form must not offer to delete one of
+   * those — it could not honour the request, since `variableDelete` scoped to a service only
+   * ever removes a service-scoped variable. The app subtracts this set from the other, and a
+   * fixture without it would leave that subtraction untested and passing.
+   */
+  sharedVariables: Record<string, string> = { SHARED_TOKEN: "shared-value" };
+
   faults: Faults = { ...DEFAULT_FAULTS };
 
   #seq = 0;
@@ -468,6 +479,7 @@ export class Store {
     this.deployments.clear();
     this.projects = seedProjects();
     this.faults = { ...DEFAULT_FAULTS };
+    this.sharedVariables = { SHARED_TOKEN: "shared-value" };
     this.addService({
       name: "postgres",
       projectId: "proj_demo",

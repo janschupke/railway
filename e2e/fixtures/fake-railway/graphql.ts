@@ -252,6 +252,67 @@ export function execute(
       return { data: { serviceCreate: { id: service.id, name: service.name } } };
     }
 
+    case "ServiceUpdate": {
+      const id = variables.id as string;
+      const input = variables.input as { name: string };
+      const service = store.services.get(id);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      service.name = input.name;
+      return { data: { serviceUpdate: { id: service.id, name: service.name } } };
+    }
+
+    case "ServiceInstanceUpdate": {
+      const serviceId = variables.serviceId as string;
+      const input = variables.input as { source?: { image?: string } };
+      const service = store.services.get(serviceId);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      /*
+       * Only what was sent. The app sends `source` alone, and a fake that overwrote the
+       * rest would hide the very thing SERVICE_INSTANCE_UPDATE_MUTATION is careful about —
+       * that every other member of the input is left alone.
+       */
+      if (input.source?.image) service.image = input.source.image;
+      /*
+       * Deliberately does NOT start a deployment, even though the real Railway may.
+       * The app issues its own deploy on the next line and keys the row on the id that
+       * returns; a fixture that also deployed here would make the double-deploy invisible
+       * rather than reproducing it.
+       */
+      return { data: { serviceInstanceUpdate: true } };
+    }
+
+    case "ServiceVariables": {
+      if (store.faults.variablesFail) {
+        return { errors: [{ message: "Not Authorized" }] };
+      }
+      const serviceId = variables.serviceId as string;
+      const service = store.services.get(serviceId);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      /*
+       * Two aliased reads of the same field, which is what the app sends. `service` answers
+       * what the service resolves — its own variables merged over the environment's shared
+       * ones, which is Railway's documented behaviour and the reason the app subtracts.
+       * `shared` answers the environment's set alone.
+       */
+      return {
+        data: {
+          service: { ...store.sharedVariables, ...service.variables },
+          shared: { ...store.sharedVariables },
+        },
+      };
+    }
+
+    case "VariableDelete": {
+      if (store.faults.variablesFail) {
+        return { errors: [{ message: "Not Authorized" }] };
+      }
+      const input = variables.input as { serviceId: string; name: string };
+      const service = store.services.get(input.serviceId);
+      if (!service) return { errors: [{ message: "Service not found" }] };
+      delete service.variables[input.name];
+      return { data: { variableDelete: true } };
+    }
+
     case "VariableCollectionUpsert": {
       if (store.faults.variablesFail) {
         // Railway's real refusal shape: HTTP 200 with a field-level error.

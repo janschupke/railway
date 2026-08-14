@@ -9,6 +9,7 @@ import {
 import { availableActions, type ContainerAction } from "@/lib/container-actions";
 import type { ContainerState } from "@/lib/railway/types";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
+import { EditContainerDialog } from "./edit-container-dialog";
 import { LifecycleActionDialog } from "./lifecycle-action-dialog";
 
 /**
@@ -42,6 +43,7 @@ const ACTIONS: Record<
 export function ContainerActions({
   serviceId,
   displayName,
+  image,
   deploymentId,
   state,
   projectId,
@@ -49,6 +51,8 @@ export function ContainerActions({
 }: {
   serviceId: string;
   displayName: string;
+  /** Seeds the edit form. Null for a service Railway describes with a repo — see ADR-6. */
+  image: string | null;
   deploymentId: string | null;
   state: ContainerState;
   projectId: string;
@@ -59,6 +63,21 @@ export function ContainerActions({
   return (
     // Wraps as one unit rather than letting the row break between two of these controls.
     <div className="flex flex-wrap items-center justify-end gap-2">
+      {/*
+        Not in `availableActions`, and not for want of a fourth entry. That list answers
+        "would this mutation do anything in this state", which is a question about a running
+        deployment — editing is a change to the container's *description*, and every state
+        has one. The single exception is the state where the description is on its way out.
+      */}
+      <EditContainerDialog
+        serviceId={serviceId}
+        displayName={displayName}
+        image={image}
+        projectId={projectId}
+        environmentId={environmentId}
+        disabled={state === "removing"}
+      />
+
       {actions.map((action) => (
         <LifecycleActionDialog
           key={action}

@@ -42,8 +42,10 @@ Three lanes, and a change belongs in exactly one of them.
   `src/app/api/streams/[deploymentId]/route.ts` multiplexes deployment status and logs into
   a single SSE response, and `src/app/api/watch/[projectId]/route.ts` is the project
   watcher. SSE downstream, WebSocket upstream (ADR-3): the browser never opens a socket to
-  Railway, because that would require the token in the browser. One does not:
-  `src/app/api/image-check/route.ts` answers a JSON enum member.
+  Railway, because that would require the token in the browser. Two do not:
+  `src/app/api/image-check/route.ts` answers a JSON enum member, and
+  `src/app/api/service-variables/route.ts` answers the names of one service's variables so
+  the edit dialog can draw its rows.
 
 **A route handler is the right lane when the browser needs an answer mid-interaction, or
 when the work needs the inbound `AbortSignal`.** The image check is both. A Server Action
@@ -119,7 +121,7 @@ forge the prefix by renaming a service in Railway's own dashboard; that is an ac
 trade, because the blast radius is bounded by the OAuth scopes they granted and the prefix
 is visible in Railway's UI rather than hidden metadata.
 
-That is four verbs now — destroy, stop, restart, redeploy — and they share **one** guard:
+That is five verbs now — destroy, stop, restart, redeploy, edit — and they share **one** guard:
 `withManagedContainer` in `src/app/dashboard/actions.ts` parses the three ids, re-reads the
 container list from Railway, and refuses before the verb's own callback runs. A second copy
 of that check is the thing to refuse in review, because the weaker copy is the one that
@@ -130,6 +132,17 @@ exactly once, and every mutation call sits below it.
 **The deployment id is derived, never posted.** A lifecycle action reads it off the
 container it just re-derived ownership from, so a forged deployment id is refused by the
 same mechanism a forged service id is.
+
+**A rename cannot escape the prefix, and needs no rule saying so.** The edit verb puts what
+was submitted through `toManagedName` — the same function spin-up uses — which always
+prefixes. So there is nothing to validate and nothing to refuse: a name that has lost
+`MANAGED_PREFIX` is not a request shape. Note the direction it runs in: the form posts the
+_display_ name, which is `stripPrefix`'d, so passing it `rawName` would prefix twice.
+
+**The prior variable set is derived too, for the same reason.** The edit form posts the rows
+it wants to end up with and says nothing about what was there before; the action reads that
+from Railway. A client that could name the prior set could name one that included a variable
+it wanted deleted.
 
 **Changing `MANAGED_PREFIX` after containers exist orphans them.** They stay in Railway and
 become read-only in this app. Say so if you ever propose changing it.

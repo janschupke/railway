@@ -14,6 +14,7 @@ vi.mock("@/app/dashboard/actions", () => ({
   stopContainer: noop,
   restartContainer: noop,
   redeployContainer: noop,
+  editContainer: noop,
 }));
 
 const { ContainerActions } = await import("./container-actions");
@@ -25,6 +26,7 @@ function renderActions(state: ContainerState, deploymentId: string | null = "dep
       <ContainerActions
         serviceId="svc_1"
         displayName="cache"
+        image="redis:7-alpine"
         deploymentId={deploymentId}
         state={state}
         projectId="p1"
@@ -41,31 +43,50 @@ const controls = () =>
 describe("ContainerActions", () => {
   it("offers stop and restart beside destroy while running", () => {
     renderActions("running");
-    expect(controls()).toEqual(["Stop", "Restart", "Destroy"]);
+    expect(controls()).toEqual(["Edit", "Stop", "Restart", "Destroy"]);
   });
 
   it("offers only stop while the deployment is still building", () => {
     // Nothing is running yet, so there is nothing to restart.
     renderActions("building");
-    expect(controls()).toEqual(["Stop", "Destroy"]);
+    expect(controls()).toEqual(["Edit", "Stop", "Destroy"]);
   });
 
   it("offers redeploy once the container has stopped", () => {
     renderActions("removed");
-    expect(controls()).toEqual(["Redeploy", "Destroy"]);
+    expect(controls()).toEqual(["Edit", "Redeploy", "Destroy"]);
   });
 
   it("offers redeploy to a service whose deploy was refused", () => {
     // The orphan with no deployment at all: before this feature its row held Destroy and
     // nothing else, which made a billable mistake a delete-and-retype.
     renderActions("unknown", null);
-    expect(controls()).toEqual(["Redeploy", "Destroy"]);
+    expect(controls()).toEqual(["Edit", "Redeploy", "Destroy"]);
   });
 
-  it("offers nothing but a disabled destroy while the container is being removed", () => {
+  it("offers edit in every state a lifecycle verb is absent from", () => {
+    /*
+     * Editing is not in `availableActions` and this is why: that list answers "would this
+     * mutation do anything to the running deployment", and every state has a description to
+     * change — including the one with no deployment at all, where an unrunnable image is
+     * exactly what a person needs to fix.
+     */
+    renderActions("unknown", null);
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled();
+  });
+
+  it("disables both remaining controls while the container is being removed", () => {
+    /*
+     * Edit is dimmed here rather than absent, which is the one place it departs from the
+     * lifecycle verbs' rule. The reason they are gated is that a control must not promise
+     * something another state would deliver; `removing` is not another state, it is the
+     * description going away, and the same argument that keeps Destroy on screen disabled
+     * keeps this one.
+     */
     renderActions("removing");
-    expect(controls()).toEqual(["Destroy"]);
+    expect(controls()).toEqual(["Edit", "Destroy"]);
     expect(screen.getByRole("button", { name: /destroy/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled();
   });
 
   it("never renders a disabled lifecycle control", () => {

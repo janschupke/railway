@@ -47,12 +47,20 @@ import type {
   ServiceDeleteMutationVariables,
   ServiceInstanceDeployV2Mutation,
   ServiceInstanceDeployV2MutationVariables,
+  ServiceInstanceUpdateMutation,
+  ServiceInstanceUpdateMutationVariables,
+  ServiceUpdateMutation,
+  ServiceUpdateMutationVariables,
+  ServiceVariablesQuery,
+  ServiceVariablesQueryVariables,
   StreamBuildLogsSubscription,
   StreamBuildLogsSubscriptionVariables,
   StreamDeploymentLogsSubscription,
   StreamDeploymentLogsSubscriptionVariables,
   VariableCollectionUpsertMutation,
   VariableCollectionUpsertMutationVariables,
+  VariableDeleteMutation,
+  VariableDeleteMutationVariables,
 } from "./graphql.generated";
 import type { TypedDocument } from "./typed-document";
 
@@ -342,6 +350,70 @@ export const SERVICE_CREATE_MUTATION: TypedDocument<
 `;
 
 /**
+ * Rename a service.
+ *
+ * The one thing about editing a container that is not on the *instance*. Railway splits a
+ * service in two — `Service` carries the name, `ServiceInstance` carries everything about
+ * how it runs — and only the second has an update input worth the name. So a feature
+ * described as "edit the service" is two mutations, and this is the half the ticket for it
+ * did not know about: `ServiceInstanceUpdateInput` has no `name` member and never had one.
+ *
+ * The name is this app's ownership marker (ADR-5), so what is sent here has already been
+ * through `toManagedName` — see the edit action. There is no rename path that skips it.
+ *
+ * `ServiceUpdateInput` also carries `icon`, which is left out: it is a decision nobody has
+ * been asked to make, and the argument is the one PROJECT_CREATE_MUTATION makes at length.
+ */
+export const SERVICE_UPDATE_MUTATION: TypedDocument<
+  ServiceUpdateMutation,
+  ServiceUpdateMutationVariables
+> = /* GraphQL */ `
+  mutation ServiceUpdate($id: String!, $input: ServiceUpdateInput!) {
+    serviceUpdate(id: $id, input: $input) {
+      id
+      name
+    }
+  }
+`;
+
+/**
+ * Change what image a service runs, without destroying it.
+ *
+ * The whole point of the edit feature: moving `postgres:16-alpine` to `postgres:17` used to
+ * mean `serviceDelete` and a fresh `serviceCreate`, which for a database means losing it.
+ *
+ * `source` is the only member sent. `ServiceInstanceUpdateInput` offers twenty-odd others —
+ * region, replicas, healthcheck, start command, restart policy — and each is a feature with
+ * its own ticket rather than something to pass through untouched. Sending only `source`
+ * means Railway leaves every one of them alone.
+ *
+ * `environmentId` is nullable on the schema and is always sent regardless. Railway's own
+ * comment on the argument says an omitted environment updates the service in *every*
+ * environment that is not a fork — which is a blast radius nobody asked for, from a form
+ * that names one environment.
+ *
+ * There is no `skipDeploys` member here, unlike VariableCollectionUpsertInput. If Railway
+ * redeploys on a source change, that deployment is one this app never learns the id of — so
+ * the edit issues its own deploy afterwards and keys the row on that. See updateContainer.
+ */
+export const SERVICE_INSTANCE_UPDATE_MUTATION: TypedDocument<
+  ServiceInstanceUpdateMutation,
+  ServiceInstanceUpdateMutationVariables
+> = /* GraphQL */ `
+  mutation ServiceInstanceUpdate(
+    $serviceId: String!
+    $environmentId: String!
+    $input: ServiceInstanceUpdateInput!
+  ) {
+    serviceInstanceUpdate(
+      serviceId: $serviceId
+      environmentId: $environmentId
+      input: $input
+    )
+  }
+`;
+
+/**
  * `serviceInstanceDeployV2` returns the new deployment id, which is what the log
  * subscription keys on. The older `serviceInstanceDeploy` returns a Boolean and would
  * force a follow-up query to find the deployment.
@@ -538,6 +610,77 @@ export const VARIABLE_COLLECTION_UPSERT_MUTATION: TypedDocument<
 `;
 
 /**
+ * What a service's own environment currently holds — two reads, one round trip.
+ *
+ * Railway's `variables` field answers *everything a service resolves*, which includes the
+ * shared variables the environment sets for all of them. The edit form must not offer those:
+ * they are not the service's to change, and a row someone deletes there would be a delete
+ * this app cannot honour — `variableDelete` carrying a `serviceId` only ever removes a
+ * service-scoped variable.
+ *
+ * So the same field is asked twice in one document, once with the service and once without,
+ * and the caller subtracts. Aliases rather than two requests because Railway's rate limit is
+ * the binding constraint on this app, and this read happens every time someone opens the
+ * editor.
+ *
+ * The subtraction is by name **and value**, not by name — a service is allowed to override a
+ * shared name with its own value, and dropping it by name would hide a variable the service
+ * genuinely owns. See readServiceVariableNames.
+ *
+ * `unrendered: true` asks for the raw text, so a `${{...}}` reference comes back as itself
+ * rather than resolved. This app only ever reports the *names* to a browser, so resolving
+ * them would be work done purely to throw the answer away.
+ *
+ * Both fields are the `EnvironmentVariables` scalar, which codegen.ts already maps to
+ * `Record<string, string>` for the upsert input — so the read is typed by the same line that
+ * types the write, and neither had to describe the map twice.
+ */
+export const SERVICE_VARIABLES_QUERY: TypedDocument<
+  ServiceVariablesQuery,
+  ServiceVariablesQueryVariables
+> = /* GraphQL */ `
+  query ServiceVariables(
+    $projectId: String!
+    $environmentId: String!
+    $serviceId: String!
+  ) {
+    service: variables(
+      projectId: $projectId
+      environmentId: $environmentId
+      serviceId: $serviceId
+      unrendered: true
+    )
+    shared: variables(
+      projectId: $projectId
+      environmentId: $environmentId
+      unrendered: true
+    )
+  }
+`;
+
+/**
+ * Remove one variable from one service.
+ *
+ * This is what an edit uses instead of `variableCollectionUpsert` with `replace: true`, and
+ * the difference is what can go wrong when the app is mistaken. `replace: true` deletes
+ * everything the app did not send — so a variable the read above failed to report, for any
+ * reason, is gone. Per-key deletion can only remove a name the person looking at the editor
+ * actually removed from it.
+ *
+ * `serviceId` is not optional in practice even though the schema allows omitting it: without
+ * one this deletes the environment's *shared* variable of that name, for every service in
+ * the project.
+ */
+export const VARIABLE_DELETE_MUTATION: TypedDocument<
+  VariableDeleteMutation,
+  VariableDeleteMutationVariables
+> = /* GraphQL */ `
+  mutation VariableDelete($input: VariableDeleteInput!) {
+    variableDelete(input: $input)
+  }
+`;
+
+/**
  * Documents whose withdrawal degrades a readout rather than breaking the app.
  *
  * Everything else here is a dependency, and `verify:schema` derives that from the documents
@@ -612,11 +755,12 @@ export const OPTIONAL_FIELDS: Array<{
     field: "deploymentRollback",
     note: "a container can be restarted and redeployed, but never rolled back",
   },
-  {
-    root: "Mutation",
-    field: "serviceInstanceUpdate",
-    note: "a service cannot be edited in place",
-  },
+  /*
+   * `serviceInstanceUpdate` used to sit here too, with the note "a service cannot be edited
+   * in place". It is a document now — see SERVICE_INSTANCE_UPDATE_MUTATION — so its
+   * withdrawal fails the schema job rather than being reported as a capability the app might
+   * one day want.
+   */
   /*
    * The per-key fallback. `variableCollectionUpsert` is what the app actually sends, and a
    * document that sends it is what makes it a dependency; this entry is here so that if the

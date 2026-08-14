@@ -46,7 +46,7 @@ function seedRows(image: string): VariableRow[] {
     name: variable.name,
     value: variable.value,
     locked: true,
-    generatedWhenBlank: variable.generated,
+    ...(variable.generated ? { blankMeans: "generated" as const } : {}),
     origin: PRESET_ORIGIN,
     touched: false,
   }));

@@ -324,13 +324,49 @@ export async function spinUp(
   await button(page, /spin up container/i).click();
 }
 
-/** Appends one environment row and fills both of its cells. */
-export async function addVariable(page: Page, name: string, value: string) {
-  await button(page, /add variable/i).click();
+/**
+ * Appends one environment row and fills both of its cells.
+ *
+ * `scope` exists because there can now be two editors on the page at once: the spin-up
+ * form's, and the one inside an open edit dialog. Row positions restart at 1 per editor, so
+ * a page-wide count returns the total across both and names a cell that exists in neither —
+ * which is a strict-mode-clean lookup for a label nothing carries, and therefore a timeout
+ * rather than an error that says what happened. Defaulted so every existing caller, all of
+ * which run with no dialog open, stays as it is.
+ */
+export async function addVariable(
+  page: Page,
+  name: string,
+  value: string,
+  scope: Locator | Page = page,
+) {
+  await onlyVisible(scope.getByRole("button", { name: /add variable/i })).click();
   // The new row is the last one, and its cells are labelled by that position.
-  const position = await page.getByLabel(/^Variable name \d+$/).count();
-  await page.getByLabel(`Variable name ${position}`).fill(name);
-  await page.getByLabel(`Variable value ${position}`).fill(value);
+  const position = await scope.getByLabel(/^Variable name \d+$/).count();
+  await scope.getByLabel(`Variable name ${position}`).fill(name);
+  await scope.getByLabel(`Variable value ${position}`).fill(value);
+}
+
+/**
+ * Opens a row's edit dialog and waits for its variables to land.
+ *
+ * Two waits, not one. The dialog shell paints immediately; the environment editor appears
+ * only once `/api/service-variables` answers, so a spec that acted on the shell would race
+ * a fetch and fill a form that is about to re-render. Waiting for the legend is the signal
+ * that both halves are mounted.
+ *
+ * `pointer-events: auto` is the layer gate the destroy and lifecycle helpers use for the
+ * same reason — Radix hands a dialog its layer one render after it appears, and a click or
+ * an Escape that lands before that is swallowed.
+ */
+export async function openEditDialog(page: Page, name: string) {
+  await onlyVisible(row(page, name).getByRole("button", { name: /^Edit$/ })).click();
+
+  const dialog = onlyVisible(page.getByRole("dialog"));
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Environment variables")).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  return dialog;
 }
 
 /**

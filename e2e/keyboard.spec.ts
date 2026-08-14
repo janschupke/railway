@@ -120,6 +120,42 @@ test.describe("keyboard operation", () => {
     await expect(trigger).toBeFocused();
   });
 
+  test("traps focus in the edit dialog once its variables have landed", async ({
+    page,
+  }) => {
+    /*
+     * The third dialog, and the one with a reason of its own to be tested rather than
+     * assumed from the two above: its body grows a whole fieldset when
+     * `/api/service-variables` answers, so the trap has to hold across a subtree that
+     * appears after open. Radix computes the tabbable set at mount, and a spec that tabbed
+     * before the fetch landed would prove the trap for a form that is not the one on screen.
+     */
+    await signIn(page);
+    await spinUp(page, "db", "PostgreSQL");
+    await expect(row(page, "db").getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    const trigger = onlyVisible(
+      row(page, "db").getByRole("button", { name: /^edit$/i }),
+    );
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await expect(dialog).toBeVisible();
+    // The editor is what arrives late; tabbing before it lands proves nothing.
+    await expect(dialog.getByText("Environment variables")).toBeVisible();
+
+    for (let i = 0; i < 14; i++) {
+      await page.keyboard.press("Tab");
+      const inside = await dialog.evaluate((el) => el.contains(document.activeElement));
+      expect(inside, `focus escaped the dialog on tab ${i + 1}`).toBe(true);
+    }
+
+    await dismissWithEscape(page, dialog);
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
   test("creates a project entirely from the keyboard", async ({ page }) => {
     await signIn(page);
 

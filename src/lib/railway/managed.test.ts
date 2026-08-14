@@ -51,3 +51,37 @@ describe("ownership", () => {
     expect(stripPrefix("postgres")).toBe("postgres");
   });
 });
+
+describe("renaming", () => {
+  /*
+   * The rename safety property, which is a property of `toManagedName` rather than of any
+   * rule written next to it.
+   *
+   * Since T-489 the name is something a user edits, and the name is the ownership marker —
+   * so a rename that dropped the prefix would leave a container this app created and can no
+   * longer destroy. There is no validation rule refusing such a name, and there should not
+   * be one: `toManagedName` always prefixes, so the unmanaged name is not a value the edit
+   * path can produce. This is what says so.
+   */
+  it.each([
+    "cache",
+    "../../escape",
+    "spun-",
+    "!!!",
+    "x".repeat(200),
+    "  ",
+    "UPPER CASE",
+  ])("produces a managed name for %j", (input) => {
+    expect(isManagedName(toManagedName(input))).toBe(true);
+  });
+
+  it("re-prefixes the display name, which is what the edit form posts back", () => {
+    /*
+     * The direction this runs in, pinned because getting it backwards is silent. The row
+     * shows `stripPrefix(rawName)` and the form posts that, so `toManagedName` is what puts
+     * the prefix back — and handing it `rawName` instead would prefix a second time.
+     */
+    expect(toManagedName(stripPrefix("spun-cache"))).toBe("spun-cache");
+    expect(toManagedName("spun-cache")).toBe("spun-spun-cache");
+  });
+});

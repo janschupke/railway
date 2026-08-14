@@ -36,7 +36,18 @@ const DECLARATION = path.join("lib", "railway", "api.ts");
  * start a service it has just registered, which is inside the declaring module and needs no
  * ownership check — nothing prefixed `spun-` exists to own until it returns.
  */
-const MUTATIONS = ["destroyContainer", "stopDeployment", "restartDeployment"];
+const MUTATIONS = [
+  "destroyContainer",
+  "stopDeployment",
+  "restartDeployment",
+  /*
+   * The edit verb, and the one that changes a container's *description* rather than its
+   * running state. It sends up to four mutations of its own — rename, image, variable
+   * deletes, variable upsert — and every one of them is inside this single symbol, so the
+   * rule holds at the same granularity as the other three.
+   */
+  "updateContainer",
+];
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

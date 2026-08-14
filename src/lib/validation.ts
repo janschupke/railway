@@ -132,26 +132,85 @@ const variableValue = z
  * `.default([])` is what keeps every caller that sends no variable fields parsing, which is
  * both the pre-T-487 request shape and what a form posted without JavaScript still sends.
  */
+/**
+ * The fields both container forms carry, declared once.
+ *
+ * Spin-up and edit ask for the same four things — a name, an image, and the two parallel
+ * variable arrays — under the same rules. Two copies would be two chances for the ceilings,
+ * the charsets or the cross-row rules below to drift apart, and the copy that drifted would
+ * be the one nobody was reading.
+ */
+const containerFields = {
+  name: z
+    .string()
+    .trim()
+    .min(1, "validation.nameRequired")
+    .max(LIMITS.CONTAINER_NAME_MAX, "validation.nameTooLong"),
+  image: z
+    .string()
+    .trim()
+    .min(1, "validation.imageRequired")
+    .max(LIMITS.IMAGE_REF_MAX, "validation.imageTooLong")
+    .regex(IMAGE_PATTERN, "validation.imageInvalid"),
+  variableKey: z
+    .array(variableName)
+    .max(LIMITS.VARIABLES_MAX, "validation.variablesTooMany")
+    .default([]),
+  variableValue: z.array(variableValue).default([]),
+};
+
+/**
+ * The cross-row rules, as a `superRefine` body both schemas install.
+ *
+ * Per-cell rules stay on the element schemas above, where zod builds the path — and
+ * therefore the row index — itself. Only the rules that need to see the whole list are here.
+ */
+const refineVariableRows = (
+  data: { variableKey: string[]; variableValue: string[] },
+  ctx: z.RefinementCtx,
+): void => {
+  if (data.variableKey.length !== data.variableValue.length) {
+    // Nothing a browser can produce: the row markup emits both cells or neither. Bail
+    // rather than validate one row's key against the next row's value.
+    ctx.addIssue({
+      code: "custom",
+      path: ["variableKey"],
+      message: "validation.variablesMalformed",
+    });
+    return;
+  }
+
+  const seen = new Set<string>();
+  for (const [index, key] of data.variableKey.entries()) {
+    // Attributed to the second occurrence: the first one is the row the user meant.
+    // Exact and case-sensitive — `Foo` and `FOO` are different variables on Linux.
+    if (seen.has(key)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["variableKey", index],
+        message: "validation.variableNameDuplicate",
+      });
+    }
+    seen.add(key);
+  }
+
+  const total =
+    data.variableKey.reduce((sum, key) => sum + key.length, 0) +
+    data.variableValue.reduce((sum, value) => sum + value.length, 0);
+  if (total > LIMITS.VARIABLES_TOTAL_MAX) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["variableKey"],
+      message: "validation.variablesTooLarge",
+    });
+  }
+};
+
 export const spinUpSchema = z
   .object({
     projectId: railwayId("validation.projectRequired"),
     environmentId: railwayId("validation.environmentRequired"),
-    name: z
-      .string()
-      .trim()
-      .min(1, "validation.nameRequired")
-      .max(LIMITS.CONTAINER_NAME_MAX, "validation.nameTooLong"),
-    image: z
-      .string()
-      .trim()
-      .min(1, "validation.imageRequired")
-      .max(LIMITS.IMAGE_REF_MAX, "validation.imageTooLong")
-      .regex(IMAGE_PATTERN, "validation.imageInvalid"),
-    variableKey: z
-      .array(variableName)
-      .max(LIMITS.VARIABLES_MAX, "validation.variablesTooMany")
-      .default([]),
-    variableValue: z.array(variableValue).default([]),
+    ...containerFields,
     /*
      * Last on purpose. Zod reports shape issues in declaration order and the action reads
      * `issues[0]`, so anything a person can actually fix — the name, the image, a variable
@@ -163,47 +222,30 @@ export const spinUpSchema = z
       .min(1, "validation.submissionInvalid")
       .regex(IDEMPOTENCY_KEY_PATTERN, "validation.submissionInvalid"),
   })
-  .superRefine((data, ctx) => {
-    /*
-     * Cross-row rules only. Per-cell rules live on the element schemas above, where zod
-     * builds the path — and therefore the row index — itself.
-     */
-    if (data.variableKey.length !== data.variableValue.length) {
-      // Nothing a browser can produce: the row markup emits both cells or neither. Bail
-      // rather than validate one row's key against the next row's value.
-      ctx.addIssue({
-        code: "custom",
-        path: ["variableKey"],
-        message: "validation.variablesMalformed",
-      });
-      return;
-    }
+  .superRefine(refineVariableRows);
 
-    const seen = new Set<string>();
-    for (const [index, key] of data.variableKey.entries()) {
-      // Attributed to the second occurrence: the first one is the row the user meant.
-      // Exact and case-sensitive — `Foo` and `FOO` are different variables on Linux.
-      if (seen.has(key)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["variableKey", index],
-          message: "validation.variableNameDuplicate",
-        });
-      }
-      seen.add(key);
-    }
-
-    const total =
-      data.variableKey.reduce((sum, key) => sum + key.length, 0) +
-      data.variableValue.reduce((sum, value) => sum + value.length, 0);
-    if (total > LIMITS.VARIABLES_TOTAL_MAX) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["variableKey"],
-        message: "validation.variablesTooLarge",
-      });
-    }
-  });
+/**
+ * Editing a container that already exists.
+ *
+ * The same four fields spin-up carries, plus the service being edited, and deliberately
+ * without an idempotency key: a repeated edit converges rather than duplicating — the second
+ * submission of the same form renames a service to the name it already has — so the
+ * duplicate-submit hazard `spinUpSchema` guards is not one this request shape has.
+ *
+ * What is *not* here is any statement about which variables already exist. The form posts
+ * the rows it wants to end up with; the action re-derives the prior set from Railway and
+ * works out the difference. A client-supplied "these were already set" list would be a
+ * client-supplied instruction to delete, which is the same class of thing as a
+ * client-supplied ownership claim — see withManagedContainer.
+ */
+export const containerEditSchema = z
+  .object({
+    projectId: railwayId("validation.projectRequired"),
+    environmentId: railwayId("validation.environmentRequired"),
+    serviceId: railwayId("validation.serviceRequired"),
+    ...containerFields,
+  })
+  .superRefine(refineVariableRows);
 
 /*
  * The two create schemas.

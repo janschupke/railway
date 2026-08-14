@@ -10,6 +10,7 @@ import {
   injectFaults,
   onlyVisible,
   openDestroyDialog,
+  openEditDialog,
   row,
   searchBox,
   seedServices,
@@ -316,6 +317,25 @@ test.describe("accessibility", () => {
       await expect(alerts(page).first()).toBeVisible();
 
       await expectNoA11yViolations(page, `variables-editor/${theme}`);
+    });
+
+    test(`the edit dialog has no violations (${theme})`, async ({ page }) => {
+      /*
+       * A second editor on the same page, inside a modal — which is where the labelling has
+       * most to get wrong. Row cells are named by position and positions restart per editor,
+       * so the two fieldsets carry the same accessible names at the same time; axe is what
+       * says whether the dialog boundary keeps that unambiguous.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+      await spinUp(page, "db", "PostgreSQL");
+      await expect(row(page, "db").getByText("Running")).toBeVisible({
+        timeout: 20_000,
+      });
+
+      await openEditDialog(page, "db");
+
+      await expectNoA11yViolations(page, `edit-dialog/${theme}`);
     });
   }
 });

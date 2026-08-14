@@ -215,6 +215,18 @@ export type LogEvent =
   | "container.destroy_skipped"
   | "container.destroyed"
   /*
+   * Editing, which takes the same three shapes as the verbs below plus one of its own:
+   * `edit_rejected` is the duplicate-name refusal, and it is a different event from
+   * `edit_refused` on purpose — one is the ownership boundary and the other is a name
+   * already in use, which are a security record and a usability record respectively.
+   * `container.updated` is the `.done` line, and the only record anywhere of what a
+   * container used to be: Railway keeps no history of a service's previous name or image.
+   */
+  | "container.edit_refused"
+  | "container.edit_rejected"
+  | "container.edit_skipped"
+  | "container.updated"
+  /*
    * The rest of the lifecycle, in the same three shapes destroy has: refused by the
    * ownership boundary, skipped because the service had already gone, or done. Every
    * `.done` line here records a change to billable infrastructure, which is the reason
@@ -275,6 +287,14 @@ export type LogEvent =
   | "stream.closed"
   | "stream.opened"
   | "stream.rejected"
+  /*
+   * The edit form reading which variables a service already has. `variable_count` and never
+   * a name: the moment a person can type one, the set stops being closed and stops being
+   * something to hand an operator's log store. Values reach neither this record nor the
+   * response — see the route handler.
+   */
+  | "variables.read"
+  | "variables.read_rejected"
   | "watch.closed"
   | "watch.opened"
   | "watch.poll_failed"

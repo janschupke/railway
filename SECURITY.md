@@ -32,7 +32,7 @@ bounded.
 | Input                 | Bound                                                                                                                              | Where                                                    |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/registry/reference.ts`, `src/lib/validation.ts` |
-| Container name        | 40 characters, and prefixed before it is sent                                                                                      | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
+| Container name        | 40 characters, and prefixed before it is sent — on a rename as well as on create                                                   | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
 | Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                                  |
 | Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
 | Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
@@ -51,6 +51,26 @@ required, `IMAGE_PATTERN` and 255 characters apply as they do on submit, the hos
 resolve to one of three allowlisted registries, the user holds at most two probes at once,
 and a shared answer cache with a per-registry cool-off bounds the rate. See the outbound
 hosts section below for why the allowlist is the control that matters.
+
+**An eighth is the first that reads a secret rather than writing one**: the three ids on
+`/api/service-variables`, which the edit dialog sends to find out which variables a service
+already has. All three are held to `RAILWAY_ID_PATTERN` before the session is read, and none
+of them is logged at any level.
+
+The property that matters here is on the way _out_, not the way in. Railway answers that
+query with a name-to-value map, values included; `readServiceVariableNames` reduces it to
+names inside `src/lib/railway/api.ts`, so no caller — route handler, Server Action or
+component — is holding a value it could return. **A stored variable value reaches no browser
+on any path**, which is what lets the edit form show an existing variable as a name with an
+empty cell, and what keeps the e2e assertion that a minted credential never appears in page
+content true after this feature as it was before it.
+
+Two lesser consequences of the same read, both deliberate. Shared environment variables are
+filtered out, because a service cannot delete one and offering the row would promise
+otherwise. And ownership is _not_ re-derived on this route, unlike every mutation: the
+`MANAGED_PREFIX` check exists to stop this app changing infrastructure it did not create, it
+is not an access-control layer, and it could not be one — the request carries the visitor's
+own Railway token, which already reads those variables in Railway's own dashboard.
 
 ### Outbound hosts
 

@@ -3,6 +3,8 @@ type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 /** Internal type. DO NOT USE DIRECTLY. */
 export type Incremental<T> =
   T | { [P in keyof T]?: P extends " $fragmentName" | "__typename" ? T[P] : never };
+export type Builder = "HEROKU" | "NIXPACKS" | "PAKETO" | "RAILPACK";
+
 export type DeploymentEventStep =
   | "BUILD_IMAGE"
   | "CONFIGURE_NETWORK"
@@ -84,6 +86,8 @@ export type RegistryCredentialsInput = {
   username: string;
 };
 
+export type RestartPolicyType = "ALWAYS" | "NEVER" | "ON_FAILURE";
+
 export type ServiceCreateInput = {
   branch?: string | null | undefined;
   /** Environment ID. If the specified environment is a fork, the service will only be created in it. Otherwise it will created in all environments that are not forks of other environments */
@@ -100,9 +104,40 @@ export type ServiceCreateInput = {
   variables?: Record<string, string> | null | undefined;
 };
 
+export type ServiceInstanceUpdateInput = {
+  buildCommand?: string | null | undefined;
+  builder?: Builder | null | undefined;
+  cronSchedule?: string | null | undefined;
+  dockerfilePath?: string | null | undefined;
+  drainingSeconds?: number | null | undefined;
+  healthcheckPath?: string | null | undefined;
+  healthcheckTimeout?: number | null | undefined;
+  ipv6EgressEnabled?: boolean | null | undefined;
+  multiRegionConfig?: unknown;
+  nixpacksPlan?: unknown;
+  numReplicas?: number | null | undefined;
+  overlapSeconds?: number | null | undefined;
+  preDeployCommand?: Array<string> | null | undefined;
+  railwayConfigFile?: string | null | undefined;
+  region?: string | null | undefined;
+  registryCredentials?: RegistryCredentialsInput | null | undefined;
+  restartPolicyMaxRetries?: number | null | undefined;
+  restartPolicyType?: RestartPolicyType | null | undefined;
+  rootDirectory?: string | null | undefined;
+  sleepApplication?: boolean | null | undefined;
+  source?: ServiceSourceInput | null | undefined;
+  startCommand?: string | null | undefined;
+  watchPatterns?: Array<string> | null | undefined;
+};
+
 export type ServiceSourceInput = {
   image?: string | null | undefined;
   repo?: string | null | undefined;
+};
+
+export type ServiceUpdateInput = {
+  icon?: string | null | undefined;
+  name?: string | null | undefined;
 };
 
 export type VariableCollectionUpsertInput = {
@@ -114,6 +149,13 @@ export type VariableCollectionUpsertInput = {
   /** Skip deploys for affected services */
   skipDeploys?: boolean | null | undefined;
   variables: Record<string, string>;
+};
+
+export type VariableDeleteInput = {
+  environmentId: string;
+  name: string;
+  projectId: string;
+  serviceId?: string | null | undefined;
 };
 
 export type ProjectFieldsFragment = {
@@ -249,6 +291,21 @@ export type ServiceCreateMutationVariables = Exact<{
 
 export type ServiceCreateMutation = { serviceCreate: { id: string; name: string } };
 
+export type ServiceUpdateMutationVariables = Exact<{
+  id: string;
+  input: ServiceUpdateInput;
+}>;
+
+export type ServiceUpdateMutation = { serviceUpdate: { id: string; name: string } };
+
+export type ServiceInstanceUpdateMutationVariables = Exact<{
+  serviceId: string;
+  environmentId: string;
+  input: ServiceInstanceUpdateInput;
+}>;
+
+export type ServiceInstanceUpdateMutation = { serviceInstanceUpdate: boolean };
+
 export type ServiceInstanceDeployV2MutationVariables = Exact<{
   serviceId: string;
   environmentId: string;
@@ -355,3 +412,20 @@ export type VariableCollectionUpsertMutationVariables = Exact<{
 }>;
 
 export type VariableCollectionUpsertMutation = { variableCollectionUpsert: boolean };
+
+export type ServiceVariablesQueryVariables = Exact<{
+  projectId: string;
+  environmentId: string;
+  serviceId: string;
+}>;
+
+export type ServiceVariablesQuery = {
+  service: Record<string, string>;
+  shared: Record<string, string>;
+};
+
+export type VariableDeleteMutationVariables = Exact<{
+  input: VariableDeleteInput;
+}>;
+
+export type VariableDeleteMutation = { variableDelete: boolean };

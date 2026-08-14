@@ -40,6 +40,25 @@ recording, because each was a choice rather than a consequence:
   reversible action is how people learn to type container names — which is the habit the
   destroy dialog depends on them not having.
 
+## Amended by T-489: the marker is now something a user can edit
+
+Editing joins the four, through the same `withManagedContainer` guard and with nothing new
+to say about it. What is new is that one of the five verbs **changes the marker itself** —
+renaming is part of editing, and the name is the whole of the ownership claim.
+
+That could have been a validation rule: accept a name, refuse one that has lost the prefix.
+It is not. The submitted name goes through `toManagedName`, which always prefixes, so a name
+without `MANAGED_PREFIX` is not a request shape at all — there is no refusal path because
+there is nothing that reaches one. A rule would have been a second place for this decision to
+live and a first place for it to be got wrong.
+
+It does sharpen the limit this ADR already states. A user could always forge the prefix in
+Railway's dashboard; now they can also rename a container they own to any prefixed name they
+like, from inside this app. Neither widens the blast radius — both are bounded by the OAuth
+scopes they granted, and every mutation carries their own token — but "the set of names this
+app claims" is now something it helps write rather than only reads, and `managed.test.ts`
+pins that as deliberate.
+
 ---
 
 [All decisions](README.md) · [Railway Freight Loader](../../README.md)

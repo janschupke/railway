@@ -10,6 +10,7 @@ import {
   injectFaults,
   onlyVisible,
   openDestroyDialog,
+  openEditDialog,
   railwayLink,
   row,
   runRowAction,
@@ -899,5 +900,198 @@ test.describe("usage and spend", () => {
     await expect(
       page.getByRole("link", { name: "Open billing on Railway" }),
     ).toBeVisible();
+  });
+});
+
+test.describe("editing a container", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("changes the image and streams the deployment that starts", async ({ page }) => {
+    /*
+     * The ticket in one test. Moving an image used to mean destroying the container and
+     * making a new one, which for a database means losing it.
+     *
+     * The second half is the part with a mechanism behind it: changing the image redeploys,
+     * and the row has to re-key its log stream onto a deployment id it does not yet know.
+     * Nothing does that explicitly — `useDeploymentStream` keys on the id alone, and the
+     * refreshed server render is what delivers the new one.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+
+    const dialog = await openEditDialog(page, "cache");
+    await dialog.getByLabel("Image reference").fill("redis:8-alpine");
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+
+    await expect(toast(page, "Updating cache")).toBeVisible();
+    await expect(dialog).toBeHidden();
+
+    // The row shows the new source, and settles again on the deployment the edit started.
+    await expect(cache).toContainText("redis:8-alpine");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+    await expect(cache.getByRole("log")).toContainText("[fake-railway]", {
+      timeout: 20_000,
+    });
+
+    const services = await fixtureServices(page);
+    expect(services.find((s) => s.name === "spun-cache")?.image).toBe("redis:8-alpine");
+  });
+
+  test("keeps the ownership prefix when a container is renamed", async ({ page }) => {
+    /*
+     * The name is the ownership marker (ADR-5), so a rename that dropped the prefix would
+     * make the app unable to destroy what it created. Asserted against the fixture's own
+     * record rather than the screen, because the screen shows the name with the prefix
+     * stripped — which is exactly the value that gets posted back.
+     */
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const dialog = await openEditDialog(page, "cache");
+    await dialog.getByLabel("Name").fill("renamed");
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+
+    await expect(toast(page, "Updating renamed")).toBeVisible();
+    await expect(row(page, "renamed")).toBeVisible();
+
+    const services = await fixtureServices(page);
+    expect(services.map((s) => s.name)).toContain("spun-renamed");
+
+    // Still ours, so the destroy control is still offered.
+    await expect(
+      row(page, "renamed").getByRole("button", { name: "Destroy" }),
+    ).toBeVisible();
+  });
+
+  test("adds and removes a variable without ever showing a stored value", async ({
+    page,
+  }) => {
+    /*
+     * The write-only rule, end to end. A postgres spin-up mints a password this app never
+     * shows; reopening the editor must list the name and leave the cell empty, and saving an
+     * untouched form must not change what is set.
+     */
+    await spinUp(page, "db", "PostgreSQL");
+    await expect(row(page, "db").getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    const before = await fixtureServices(page);
+    const minted = before.find((s) => s.name === "spun-db")?.variables
+      .POSTGRES_PASSWORD;
+    expect(minted).toBeTruthy();
+
+    const dialog = await openEditDialog(page, "db");
+
+    // Listed by name, with an empty cell that says what empty means.
+    const existing = dialog.getByLabel("Variable name 1");
+    await expect(existing).toHaveValue("POSTGRES_PASSWORD");
+    await expect(dialog.getByLabel("Variable value 1")).toHaveValue("");
+    // The credential canary, at the one moment it is most likely to have leaked.
+    expect(await page.content()).not.toContain(minted);
+
+    await addVariable(page, "EXTRA", "value", dialog);
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+    await expect(toast(page, "Updating db")).toBeVisible();
+
+    const added = await fixtureServices(page);
+    const variables = added.find((s) => s.name === "spun-db")?.variables ?? {};
+    expect(variables.EXTRA).toBe("value");
+    // Untouched, not rewritten and not re-minted — the blank cell meant "leave it alone".
+    expect(variables.POSTGRES_PASSWORD).toBe(minted);
+
+    const reopened = await openEditDialog(page, "db");
+    await reopened.getByRole("button", { name: "Remove EXTRA" }).click();
+    await reopened.getByRole("button", { name: "Save changes" }).click();
+    /*
+     * Polled against the fixture rather than awaited on a second toast. Both saves produce
+     * the same sentence, and the first is still on screen when the second arrives — so a
+     * toast assertion here is a strict-mode violation that says nothing about the removal.
+     */
+    await expect(reopened).toBeHidden();
+    await expect
+      .poll(async () => {
+        const services = await fixtureServices(page);
+        return services.find((s) => s.name === "spun-db")?.variables ?? {};
+      })
+      .toEqual({ POSTGRES_PASSWORD: minted });
+  });
+
+  test("never offers to remove a variable the environment shares", async ({ page }) => {
+    /*
+     * A shared variable is not the service's to delete, and `variableDelete` scoped to a
+     * service could not remove it anyway — so it must not appear in the editor at all. The
+     * fixture seeds one for exactly this assertion.
+     */
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const dialog = await openEditDialog(page, "cache");
+
+    await expect(dialog.getByText("SHARED_TOKEN")).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: /Remove SHARED_TOKEN/ }),
+    ).toHaveCount(0);
+  });
+
+  test("lets the name and image be edited when the variables cannot be read", async ({
+    page,
+  }) => {
+    // A refused read degrades the dialog rather than closing it: the other two fields came
+    // off the row and need nothing from Railway.
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    await injectFaults(page, { variablesFail: true });
+    await onlyVisible(
+      row(page, "cache").getByRole("button", { name: /^Edit$/ }),
+    ).click();
+
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await expect(
+      dialog.getByText(/could not read this container's variables/i),
+    ).toBeVisible();
+    await expect(dialog.getByLabel("Name")).toHaveValue("cache");
+  });
+
+  test("offers no edit control on a service this app did not create", async ({
+    page,
+  }) => {
+    // The ownership boundary, as the UI expresses it. The action refuses one too — see
+    // actions.integration.test.ts — but a control that is never rendered is the first line.
+    await expect(
+      onlyVisible(row(page, "postgres").getByRole("button", { name: /^edit$/i })),
+    ).toHaveCount(0);
+    // The slot still offers Railway's own page, which is the row's one action.
+    await expect(
+      onlyVisible(row(page, "postgres").getByRole("link", { name: "Open in Railway" })),
+    ).toBeVisible();
+  });
+
+  test("dismisses with Escape without saving", async ({ page }) => {
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const dialog = await openEditDialog(page, "cache");
+    await dialog.getByLabel("Name").fill("abandoned");
+    await dismissWithEscape(page, dialog);
+
+    await expect(row(page, "cache")).toBeVisible();
+    const services = await fixtureServices(page);
+    expect(services.map((s) => s.name)).not.toContain("spun-abandoned");
   });
 });

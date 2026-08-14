@@ -155,6 +155,26 @@ SSE route multiplexes deployment status and log output into the open tab.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **Editing a container is a name, an image and its variables — nothing else.**
+  `ServiceInstanceUpdateInput` carries twenty-odd other members: region, replicas, healthcheck,
+  start command, restart policy. Sending only `source` is what leaves every one of them alone,
+  and each is a feature with its own ticket rather than a field to pass through.
+
+  Two things about that mutation are worth writing down, because both cost time to find.
+  **The name is not on it.** Railway splits a service in two — `Service` holds the name,
+  `ServiceInstance` holds how it runs — so a rename is `serviceUpdate`, a second mutation
+  entirely, and any plan that assumes `serviceInstanceUpdate` can rename is wrong before it
+  starts. And **there is no `skipDeploys` member**, which `VariableCollectionUpsertInput` has:
+  if Railway redeploys on a source change there is no way to ask it not to. So the edit issues
+  its own `serviceInstanceDeployV2` afterwards and keys the row on the id that returns —
+  the later deployment is the one being watched either way, at the cost of possibly causing
+  two.
+
+- **A partial edit is possible, and the list is what tells you.** The rename and the image
+  change are separate calls; the first can land and the second be refused. Neither is rolled
+  back — this app has no transaction to roll back into — so the refreshed row shows what
+  actually applied rather than what was asked for. The alternative was reporting the whole
+  edit as failed while half of it had happened, which is worse in the only way that matters.
 - **Cost is a workspace figure, not this app's.** The dashboard shows what the workspace a
   project belongs to has spent this billing period, and says so in the same sentence, because
   that is the only monetary number Railway exposes: `Customer.currentUsage` and
@@ -204,8 +224,15 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 - **Environment variables are single-line, and capped.** Twenty-five rows, 2 048 characters
   a value, 16 000 characters in total, and no line breaks — so a certificate, a private key
   or a JSON document is set on Railway's own Variables page rather than here. Names in the
-  `RAILWAY_*` namespace are refused, because Railway sets those itself. Editing the
-  variables of a service that already exists is a separate feature and is not built.
+  `RAILWAY_*` namespace are refused, because Railway sets those itself.
+- **An existing container's variables are edited by name, never by value.** The edit form
+  lists what a service has and leaves every value cell empty: a stored value — minted or
+  typed — is filtered out server-side and reaches no browser, so blank is what an untouched
+  row looks like and the server reads it as "leave this one alone". Retyping a cell replaces
+  that variable; removing the row deletes it, one key at a time rather than by replacing the
+  collection. Shared variables the environment sets for every service are not listed, because
+  they are not this service's to change. The consequence worth stating: there is no way to
+  read a value back here, and Railway's own Variables page is still where you go for that.
 - **Image existence is checked, advisory only, and only on three registries.** A
   well-formed reference used to be accepted whatever it named, so `nonexistent/image:tag`
   became a failed deployment with nothing on screen connecting it to the typo. The form now
@@ -802,9 +829,9 @@ survive, because neither is derivable from a document:
   reported and does not fail the run. That is a product decision, not a fact about the schema.
 - `OPTIONAL_FIELDS` — capabilities Railway does not document and this app does not use, with
   what the app cannot do without each. As of 2026-08-14 `deploymentRemove`,
-  `deploymentRollback`, `serviceInstanceUpdate` and `variableUpsert` all exist and none is
-  sent; see Limitations for why. No document mentions them, so no derivation can find them.
-  `deploymentStop` used to be listed here and is a document now, which is the whole
+  `deploymentRollback` and `variableUpsert` all exist and none is sent; see Limitations for
+  why. No document mentions them, so no derivation can find them. `deploymentStop` and
+  `serviceInstanceUpdate` were both listed here and are documents now, which is the whole
   distinction this list draws: a capability the app wants is reported, a capability it
   depends on fails the run.
 

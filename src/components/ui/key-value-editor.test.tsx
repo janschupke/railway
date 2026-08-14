@@ -35,6 +35,7 @@ function Harness({
         nameLabel="Variable name"
         valueLabel="Variable value"
         generatedPlaceholder="Generated for you"
+        unchangedPlaceholder="Unchanged"
         addLabel="Add variable"
         removeLabel={({ name, position }) =>
           name ? `Remove ${name}` : `Remove variable ${position}`
@@ -257,7 +258,7 @@ describe("KeyValueEditor", () => {
               id: "a",
               name: "POSTGRES_PASSWORD",
               locked: true,
-              generatedWhenBlank: true,
+              blankMeans: "generated",
             }),
           ]}
         />,
@@ -265,6 +266,23 @@ describe("KeyValueEditor", () => {
 
       expect(cells(1).value).toHaveValue("");
       expect(cells(1).value).toHaveAttribute("placeholder", "Generated for you");
+    });
+
+    it("shows the unchanged placeholder for a variable that already exists", () => {
+      /*
+       * The edit path's version of the rule above, and the same property: the stored value
+       * never reaches the browser, so an existing row is an empty cell with a placeholder
+       * explaining what empty means. A row that rendered the real value here would put a
+       * minted database password in the page.
+       */
+      render(
+        <Harness
+          initial={[row({ id: "a", name: "DATABASE_URL", blankMeans: "unchanged" })]}
+        />,
+      );
+
+      expect(cells(1).value).toHaveValue("");
+      expect(cells(1).value).toHaveAttribute("placeholder", "Unchanged");
     });
   });
 
