@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
+import { REGISTRY } from "@/lib/constants";
 import type { ActionResult } from "@/lib/action-result";
 
 const spinUp = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
@@ -31,13 +32,36 @@ const submitButton = () => screen.getByRole("button", { name: /spin up container
 /** The image control is one editable combobox now, so this is a real <input>. */
 const image = () => screen.getByLabelText("Image reference");
 
+/**
+ * The image check's transport.
+ *
+ * Stubbed for the whole file rather than per test: the form asks /api/image-check about
+ * any non-preset reference, and jsdom has no server to answer — an unstubbed `fetch` here
+ * is an unhandled rejection in whichever test happens to type a reference, which is the
+ * kind of failure that gets attributed to the wrong change a week later.
+ */
+const fetchMock = vi.fn<typeof fetch>();
+const imageCheckAnswers = (status: string) =>
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ status }), {
+      headers: { "content-type": "application/json" },
+    }),
+  );
+
+const warning = () => screen.queryByRole("status");
+
 describe("SpinUpForm", () => {
   beforeEach(() => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
     // Shared across the file; without this a call count is a running total.
     routerMock.refresh.mockClear();
+    fetchMock.mockReset();
+    imageCheckAnswers("available");
+    vi.stubGlobal("fetch", fetchMock);
   });
+
+  afterEach(() => vi.unstubAllGlobals());
 
   it("defaults to a preset that stays running once started", () => {
     // A preset that boots and exits reads as a bug in this app, not in the image.
@@ -509,6 +533,100 @@ describe("SpinUpForm", () => {
       await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
       expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
       expect(screen.queryByLabelText("Variable name 2")).not.toBeInTheDocument();
+    });
+  });
+  describe("the image existence check", () => {
+    /*
+     * Advisory throughout, and every case here is about that. Nothing a warning does stops
+     * the form working — a registry having a bad day must never be the reason a spin-up
+     * did not happen.
+     *
+     * Real timers, deliberately. The hook debounces, and driving that with fake ones means
+     * user-event and the timer both wanting to own the same clock; waiting for the request
+     * the debounce eventually makes is the same assertion with nothing to synchronise.
+     */
+    const type = async (user: UserEvent, reference: string) => {
+      await user.clear(image());
+      await user.type(image(), reference);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 3000 });
+    };
+
+    it("warns that the registry has no such image, without refusing it", async () => {
+      imageCheckAnswers("unavailable");
+      const user = userEvent.setup();
+      renderForm();
+
+      await type(user, "nonexistent/image:tag");
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "No public image matches this reference. Check the spelling — private registries are not supported.",
+      );
+      // The three things that would make this a blocking validation, and are not.
+      expect(image()).not.toHaveAttribute("aria-invalid");
+      expect(submitButton()).toBeEnabled();
+    });
+
+    it("spins the container up anyway", async () => {
+      imageCheckAnswers("unavailable");
+      const user = userEvent.setup();
+      renderForm();
+
+      await type(user, "nonexistent/image:tag");
+      await screen.findByRole("status");
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await user.click(submitButton());
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+      expect(spinUp.mock.calls[0]![1].get("image")).toBe("nonexistent/image:tag");
+    });
+
+    it("takes the warning back when the answer changes", async () => {
+      imageCheckAnswers("unavailable");
+      const user = userEvent.setup();
+      renderForm();
+
+      await type(user, "nonexistent/image:tag");
+      await screen.findByRole("status");
+
+      imageCheckAnswers("available");
+      fetchMock.mockClear();
+      await type(user, "ghcr.io/owner/app");
+
+      await waitFor(() => expect(warning()).not.toBeInTheDocument());
+    });
+
+    it("asks nothing about the preset it starts on", async () => {
+      /*
+       * The largest saving in the feature. useDebouncedValue does not delay its first
+       * render, so the value the form mounts with is checked immediately — and the only
+       * reason a dashboard visit costs no request at all is that the value is a preset.
+       */
+      renderForm();
+      await new Promise((resolve) => setTimeout(resolve, REGISTRY.DEBOUNCE_MS * 2));
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("shows a real validation error instead of the warning", async () => {
+      // Both are about the same value, and only one of them says the form will refuse it.
+      imageCheckAnswers("unavailable");
+      spinUp.mockResolvedValue({
+        ok: false,
+        field: "image",
+        error: "That does not look like a valid image reference",
+      });
+      const user = userEvent.setup();
+      renderForm();
+
+      await type(user, "nonexistent/image:tag");
+      await screen.findByRole("status");
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await user.click(submitButton());
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "That does not look like a valid image reference",
+      );
+      expect(warning()).not.toBeInTheDocument();
+      expect(image()).toHaveAttribute("aria-invalid", "true");
     });
   });
 });

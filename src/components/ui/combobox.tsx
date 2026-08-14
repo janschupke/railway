@@ -13,6 +13,8 @@ type ComboboxProps = {
   label: string;
   hint?: string;
   error?: string;
+  /** Non-blocking. Outranks the hint, never sets `aria-invalid` — see Field. */
+  warning?: string;
   /** The form field name. This is a real <input>, so the FormData contract is native. */
   name: string;
   value: string;
@@ -44,6 +46,7 @@ export function Combobox({
   label,
   hint,
   error,
+  warning,
   name,
   value,
   onValueChange,
@@ -158,7 +161,12 @@ export function Combobox({
   const listboxId = `${name}-listbox`;
 
   return (
-    <Field label={label} {...(hint ? { hint } : {})} {...(error ? { error } : {})}>
+    <Field
+      label={label}
+      {...(hint ? { hint } : {})}
+      {...(warning ? { warning } : {})}
+      {...(error ? { error } : {})}
+    >
       {({ id, "aria-describedby": describedBy, invalid }) => (
         <Primitive.Root open={open} onOpenChange={setOpen}>
           <Primitive.Anchor asChild>

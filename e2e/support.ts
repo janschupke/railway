@@ -38,6 +38,7 @@ export async function injectFaults(
     rejectPersonal: boolean;
     projectsEmpty: boolean;
     slowMs: number;
+    registryStatus: number;
   }>,
 ) {
   await page.request.post(`${FIXTURE_URL}/__test/faults`, { data: faults });

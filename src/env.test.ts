@@ -48,6 +48,16 @@ describe("env", () => {
     expect(env().RAILWAY_WS_URL).toBe("ws://localhost:4010/graphql/v2");
   });
 
+  it("leaves the registry probe pointed at the real registries by default", () => {
+    // No default to fall back to: unset means the constant table in lib/registry.
+    expect(env().REGISTRY_PROBE_URL).toBeUndefined();
+  });
+
+  it("refuses a registry probe URL that is neither https nor loopback", () => {
+    setEnv({ ...REQUIRED, REGISTRY_PROBE_URL: "http://registry.example.com" });
+    expect(() => env()).toThrow(/REGISTRY_PROBE_URL must use https/);
+  });
+
   it("refuses a cleartext WebSocket endpoint that is not loopback", () => {
     /*
      * The subscription sends the Railway access token on the upgrade request, so a
@@ -278,6 +288,10 @@ describe("optional fields", () => {
     RAILWAY_WS_URL: {
       set: "ws://localhost:4010/graphql/v2",
       expect: "ws://localhost:4010/graphql/v2",
+    },
+    REGISTRY_PROBE_URL: {
+      set: "http://localhost:4010",
+      expect: "http://localhost:4010",
     },
   };
 

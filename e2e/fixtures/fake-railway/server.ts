@@ -112,6 +112,43 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, execute(name, body.variables ?? {}, store));
   }
 
+  /*
+   * ---- stand-in container registry ----
+   *
+   * The OCI distribution surface the image check uses, and nothing else: an anonymous
+   * token endpoint and a manifest HEAD. The app points every allowlisted registry here
+   * through REGISTRY_PROBE_URL, so the parser, the allowlist, the token step and the
+   * outcome mapping all run unmodified — the only thing standing in is who answers.
+   *
+   * It exists because without it `pnpm test:e2e` would reach the real Docker Hub and
+   * ghcr.io from a laptop and from CI. Two specs already type real references.
+   */
+  if (url.pathname === "/token") {
+    const scope = url.searchParams.get("scope") ?? "";
+    // ghcr.io refuses a nonexistent package at the token endpoint rather than at the
+    // manifest — 403 DENIED — so the fixture can produce that shape too.
+    if (scope.includes("denied/")) {
+      return json(res, 403, { errors: [{ code: "DENIED" }] });
+    }
+    return json(res, 200, { token: "fixture-anonymous" });
+  }
+
+  if (url.pathname.startsWith("/v2/") && url.pathname.includes("/manifests/")) {
+    if (store.faults.registryStatus > 0) {
+      res.writeHead(store.faults.registryStatus);
+      return res.end();
+    }
+    const [repository = "", reference = ""] = url.pathname
+      .slice("/v2/".length)
+      .split("/manifests/");
+    // A repository nobody can read, then a tag nobody pushed, then: it exists. The last
+    // rule is the important one — see `registryStatus` in store.ts.
+    if (repository.startsWith("nonexistent/")) res.writeHead(401);
+    else if (reference.startsWith("nope")) res.writeHead(404);
+    else res.writeHead(200, { "docker-content-digest": `sha256:${"e".repeat(64)}` });
+    return res.end();
+  }
+
   // ---- test control plane ----
   if (url.pathname === "/__test/reset" && req.method === "POST") {
     store.reset();

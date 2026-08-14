@@ -241,6 +241,15 @@ export type LogEvent =
   | "environment.created"
   | "project.created"
   | "health.env_invalid"
+  /*
+   * The registry existence check. Both carry a `registry` and an `outcome` drawn from
+   * closed sets and never the reference itself — it is an unbounded attacker-chosen string
+   * arriving on a URL, and this endpoint fires on every settled keystroke, which makes it
+   * the worst available candidate for a field an operator greps. Same call as the rejected
+   * deploymentId on the stream route; `ref_length` carries the diagnostic content.
+   */
+  | "image.check_rejected"
+  | "image.checked"
   | "proxy.env_invalid"
   | "railway.deploy_failed"
   | "railway.deploymentPoll"

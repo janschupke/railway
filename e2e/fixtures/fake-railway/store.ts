@@ -202,9 +202,19 @@ export type Faults = {
    * race, so a spec that means to check the spinner slows the API down first.
    */
   slowMs: number;
+  /**
+   * What the registry manifest endpoint answers, when it is not deciding for itself.
+   *
+   * 0 means the rules in server.ts apply: a repository named `nonexistent/*` is 401, a tag
+   * starting `nope` is 404, and **everything else is 200**. That default is load-bearing —
+   * several specs type a reference the form then checks, and a fixture that answered 404
+   * by default would make a warning appear under fields those specs are not about.
+   */
+  registryStatus: number;
 };
 
 const DEFAULT_FAULTS: Faults = {
+  registryStatus: 0,
   rateLimit: 0,
   unauthorized: 0,
   refreshFails: false,

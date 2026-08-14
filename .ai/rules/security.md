@@ -190,6 +190,28 @@ Two consequences for the `Dockerfile`:
   of `next` and `next-intl`. Less code in the image is less code a scanner can find a CVE
   in, and this removed most of it.
 
+## Outbound hosts are constants, and there are five
+
+Railway, plus `auth.docker.io`, `registry-1.docker.io`, `ghcr.io` and `quay.io` for the
+image existence check. **`src/lib/registry/registries.ts` is the only place a new one may be
+added**, and adding one is a `SECURITY.md` change by the list below.
+
+Three rules hold that boundary, and all three are load-bearing:
+
+- **No host, port or scheme is derived from user input.** A reference naming anything else
+  parses fine and is then refused — `registryFor` returns null rather than resolving it.
+  That is what closes the SSRF the README spent a paragraph explaining could not be closed.
+- **No host is derived from a registry _response_ either.** The OCI spec says to find the
+  token endpoint by reading `realm` off a `WWW-Authenticate` challenge. It is not read.
+  Three registries, three constants, verified once.
+- **`redirect: "manual"`, and a 3xx is an unknown answer rather than a URL to follow.**
+  Otherwise the last word on where a request goes belongs to whatever answered the previous
+  one.
+
+A `dns.lookup` pre-flight is **not** the guard here and was rejected as TOCTOU theatre —
+`fetch` resolves independently, so the address checked is never the address connected to.
+TLS is what stops a hijacked name being answered by someone else. See `SECURITY.md`.
+
 ## When a change is also a `SECURITY.md` change
 
 Update the document when you add or alter:

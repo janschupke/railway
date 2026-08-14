@@ -29,13 +29,13 @@ upstream call.
 Five things cross from a browser into a Railway mutation. None is trusted; each is
 bounded.
 
-| Input                 | Bound                                                                                                                              | Where                                                 |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/validation.ts`                               |
-| Container name        | 40 characters, and prefixed before it is sent                                                                                      | `src/lib/validation.ts`, `src/lib/railway/managed.ts` |
-| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                               |
-| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
-| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                               |
+| Input                 | Bound                                                                                                                              | Where                                                    |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/registry/reference.ts`, `src/lib/validation.ts` |
+| Container name        | 40 characters, and prefixed before it is sent                                                                                      | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
+| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                                  |
+| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
+| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
 
 A sixth input crosses from the browser and reaches no mutation at all: the spin-up form's
 idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation.ts`. Both ends of
@@ -43,6 +43,57 @@ that are deliberate. The floor is unguessability — a guessed key is answered w
 else's result instead of the container they asked for — and the ceiling is memory, since
 the value becomes half of a key in a map that lives as long as the process. The charset is
 the one every Railway identifier here uses, which keeps it greppable in a log line.
+
+**A seventh reaches no Railway mutation either, and is the first that reaches anything
+outside this app at all**: `?ref=` on `/api/image-check`, the reference the spin-up form
+asks a registry about. It is bounded five ways before a byte leaves — a session is
+required, `IMAGE_PATTERN` and 255 characters apply as they do on submit, the host must
+resolve to one of three allowlisted registries, the user holds at most two probes at once,
+and a shared answer cache with a per-registry cool-off bounds the rate. See the outbound
+hosts section below for why the allowlist is the control that matters.
+
+### Outbound hosts
+
+Until the image existence check, every outbound request went to Railway. There are now
+four more, and all four are compile-time constants in `src/lib/registry/registries.ts`:
+
+| Host                   | What is sent                                            |
+| ---------------------- | ------------------------------------------------------- |
+| `auth.docker.io`       | An anonymous pull-token request, scoped to a repository |
+| `registry-1.docker.io` | A manifest `HEAD`                                       |
+| `ghcr.io`              | Both, on the same host                                  |
+| `quay.io`              | Both, on the same host                                  |
+
+The claim this rests on is absolute rather than conditional: **no host, port or scheme in
+that subsystem is derived from user input, or from a registry response.** User input only
+ever becomes a path segment and a query value against one of those four constants.
+
+Both halves of that matter, and the second is easy to lose. `IMAGE_PATTERN` admits a bare
+host as the first component, and Docker's own rules make a first component containing a dot
+a registry — so `169.254.169.254/foo/bar` is a _well-formed reference naming a registry_,
+which is exactly why checking existence was refused for so long. `parseImageReference`
+reports that faithfully and `registryFor` then returns null for it: the app declines to map
+it to a URL rather than resolving the address and inspecting what comes back. And the OCI
+spec's own way of finding a token endpoint — read `realm` off a `WWW-Authenticate`
+challenge — is not used at all, because a realm is a URL chosen by whatever answered. There
+are three registries; their realms were verified once and written down.
+
+Four further properties keep the shape narrow:
+
+- **`redirect: "manual"`, and any 3xx is `unknown`.** This is the one place a registry could
+  still choose a URL for this app, so it does not get to. A manifest `HEAD` has no
+  legitimate reason to redirect; a `location` is never read, and the bearer token is never
+  re-sent off-origin.
+- **No credential is ever sent.** The pull tokens are anonymous, minted per request, scoped
+  to one repository, and never returned to a browser. No Railway token, cookie or session
+  value goes anywhere near this path.
+- **No response body reaches the browser.** The manifest request is `HEAD`, so there is no
+  body to read; the only body read anywhere is a token JSON, and what the route returns is
+  one of four enum members. Nothing a registry wrote can render.
+- **`HEAD`, never `GET`.** Measured against `library/redis:7-alpine`: two `HEAD`s left
+  `ratelimit-remaining` at `100;w=3600`, a `GET` took it to 99. Docker Hub's anonymous pull
+  budget is per source IP and every user of a deployed instance shares one, so a `GET` here
+  would spend someone else's quota per keystroke.
 
 **Environment variables are user-supplied, and were not always.** Until T-487 the client
 sent neither a preset id nor a variable: the environment was derived server-side from the
@@ -281,6 +332,48 @@ appears. The residual cost is an abandoned refresh token per sign-out against Ra
 cap of 100 live tokens per authorization (`src/lib/auth/refresh.ts`), which only the user
 can reclaim.
 
+**The image existence check is advisory, and every failure is silent.** A registry that
+rate-limits, times out or is down produces `unknown`, which renders nothing — so an outage
+can never be the reason a spin-up did not happen. The cost is that the check is not
+authoritative in the other direction either: a warning's absence is not a promise the image
+exists, and a manifest that is there now can be gone at deploy time.
+
+**"No such repository" and "private repository" are one answer, deliberately.** All three
+registries refuse an anonymous read of a repository that does not exist with 401 or 403,
+not 404 — Docker Hub issues a token with an empty `access` claim and then refuses with
+`insufficient_scope`, ghcr.io refuses at the token endpoint with `DENIED`. There is no
+registry-API way to tell the two apart without authenticating as someone who can see the
+private one, which this app never does. The warning covers both, which is honest: this app
+collects no registry credentials, so a private image fails to deploy exactly as an absent
+one does. `hub.docker.com/v2/repositories/…` would distinguish them on Docker Hub and was
+rejected — a fourth outbound host on a proprietary non-OCI API with no compatibility
+promise, answering a question whose two answers are treated identically here.
+
+**DNS and CA trust for the four registry hosts.** If DNS for `registry-1.docker.io`,
+`auth.docker.io`, `ghcr.io` or `quay.io` were hijacked _and_ the attacker held a
+CA-trusted certificate for that name, this app would make an anonymous, bodyless `HEAD`
+request to it and read a status code. It carries no credential, follows no redirect and
+reads no body, so the disclosure is that this server exists and somebody typed an image
+reference.
+
+A `dns.lookup` pre-flight refusing private and link-local addresses was considered and
+**rejected as theatre**. `fetch` resolves independently of any such check, so the address
+validated is never the address connected to — it is TOCTOU by construction, and caching the
+result to make it affordable widens the window rather than narrowing it. Closing it
+properly means a custom `undici.Agent` filtering the real peer address, which is a runtime
+dependency this repo avoids on principle, to defend a threat that requires hostile DNS for
+GitHub's own registry. **TLS is the control that actually applies here**: a rebound A
+record cannot present a valid certificate for the name, and cloud metadata services serve
+plain HTTP with no CA-issued certificate at all. The allowlist is what stops user input
+choosing a host; TLS is what stops the host being someone else. Neither is a lookup.
+
+**The answer cache is shared across every user of an instance.** That is deliberate and
+leaks nothing: each entry is an anonymous answer about a public repository, with no
+per-user variation to observe. Partitioning it per session would multiply this server's
+egress by the number of people typing the same reference and buy no privacy. What it does
+mean is that one user can learn, from timing, that another recently asked about the same
+public image — which is a fact about Docker Hub, not about them.
+
 **The stream cap and the idempotency map are in-memory and per replica.** Honest rather
 than lazy: SSE pins a client to one replica, which is why the README already describes this
 as a single-replica app. If that changes, both move to shared state along with everything
@@ -332,6 +425,17 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
   Railway does not keep once a service is deleted. A create is recorded whether or not the
   deploy that follows it succeeds: an orphaned service is the case the record is most
   needed for, and `outcome` on `container.created` says which one it was.
+- **The image reference is not logged either**, for the same reason and more sharply:
+  `/api/image-check` fires on every settled keystroke of every signed-in visitor, so the
+  reference is both unbounded and high-volume. `image.checked` carries the registry id, the
+  outcome, whether it was cached and a duration — four closed sets and a number.
+  `image.check_rejected` carries a reason and `ref_length`.
+
+- **Docker Hub echoes this server's egress IP** in `docker-ratelimit-source` on every
+  response, which is how the per-source-IP nature of its limits was confirmed rather than
+  assumed. It is our own address, so it is not a disclosure — but it is the reason the
+  answer cache and the per-registry cool-off exist at all.
+
 - **The rejected `deploymentId` is deliberately not logged.** It is an unbounded,
   attacker-controlled string straight off the URL, and putting it in a field an operator
   greps is the injection surface the validator exists to close. `id_length` carries the

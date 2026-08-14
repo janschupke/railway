@@ -3,7 +3,16 @@ import "server-only";
 import { STREAM } from "@/lib/constants";
 
 /**
- * Caps how many log streams one user can hold open at once.
+ * Caps how many of something one user may have at once.
+ *
+ * Three budgets share this map, under keys their callers namespace: log streams, project
+ * watchers, and in-flight image checks. The reasoning below is the log stream's, which is
+ * the expensive one; the other two take the mechanism rather than the argument.
+ *
+ * What it bounds is **simultaneity, not rate**. A caller released at the end of every
+ * request can make as many serial requests as upstream will answer — the image check's
+ * shared answer cache and per-registry cool-off are what bound that one, and a reader who
+ * mistakes this for a rate limit will look for a guarantee it does not make.
  *
  * Each stream costs a held HTTP response, an upstream WebSocket to Railway, and a
  * status poll every few seconds for up to the duration ceiling — so an unbounded

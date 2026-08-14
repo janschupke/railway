@@ -361,6 +361,66 @@ test.describe("container lifecycle", () => {
     );
   });
 
+  test("warns that an image is not available, and spins it up anyway", async ({
+    page,
+  }) => {
+    /*
+     * The whole point of the feature, and of its restraint. The reference is well-formed,
+     * so nothing refuses it — the registry simply has no such repository, which on Docker
+     * Hub is the same answer as "private" and is why one sentence covers both.
+     *
+     * Everything asserted after the warning is the non-blocking half: no aria-invalid, no
+     * disabled submit, and a container at the end of it. A check that stopped a spin-up
+     * would be worse than the failed deployment it is warning about.
+     */
+    await field(page, "Image reference").fill("nonexistent/image:tag");
+    // The portalled list covers the submit button while it is open.
+    await page.keyboard.press("Escape");
+
+    const warning = onlyVisible(page.getByRole("status"));
+    await expect(warning).toContainText(/no public image matches this reference/i);
+    await expect(field(page, "Image reference")).not.toHaveAttribute("aria-invalid");
+
+    await field(page, "Name").fill("typo");
+    await button(page, /spin up container/i).click();
+
+    await expect(row(page, "typo")).toBeVisible();
+  });
+
+  test("says nothing when the registry cannot answer", async ({ page }) => {
+    /*
+     * The failure mode this feature was nearly not built to avoid: a registry having a bad
+     * day must not put anything on the form, least of all something that reads as a
+     * problem with what the user typed.
+     *
+     * Waiting for the response rather than waiting out the debounce, and the difference is
+     * the whole test. `toHaveCount(0)` passes the instant it is evaluated, so an absence
+     * asserted before the check has fired proves nothing at all — this version passed in
+     * 329ms with no `image.checked` record anywhere, which is a test asserting that a
+     * warning had not appeared yet. Waiting for the answer makes it an assertion that one
+     * arrived and said nothing.
+     */
+    await injectFaults(page, { registryStatus: 503 });
+
+    /*
+     * A different reference from the test above, and that is not incidental. The answer
+     * cache lives in the app process, not in the fixture, so `/__test/reset` does not
+     * touch it — probing `nonexistent/image:tag` again here would be served the previous
+     * spec's `unavailable` from cache and never reach the 503 at all. That is the cache
+     * working as designed (shared across users, ten-minute TTL); it just means a spec
+     * about a registry failure has to ask about something nothing else asked about.
+     */
+    const answered = page.waitForResponse((response) =>
+      response.url().includes("/api/image-check"),
+    );
+    await field(page, "Image reference").fill("nonexistent/unreachable:tag");
+    await page.keyboard.press("Escape");
+    await answered;
+
+    await expect(onlyVisible(page.getByRole("status"))).toHaveCount(0);
+    await expect(field(page, "Image reference")).not.toHaveAttribute("aria-invalid");
+  });
+
   test("gives a database the credentials it needs, without showing them", async ({
     page,
   }) => {

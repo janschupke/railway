@@ -82,6 +82,22 @@
     "visitor, most of whom never expand a row, to buy parity in a case only a narrow phone",
     "reaches — and on a panel behind a click, which LHCI's CLS gate never mounts.",
     "",
+    "/dashboard 222 -> 229: the image existence check. Measured 222.2 against a budget of",
+    "222, which is 0.2 kB over — and the overage is the whole story rather than the cost.",
+    "That 222 was seeded at actual + ~3% when the route measured 215, and the accessibility,",
+    "container-action and idempotency work has since spent all of it, so this route was one",
+    "rounding step from failing on a change that did not touch it. Re-seeded at actual + ~3%",
+    "as this file's own rule intends.",
+    "",
+    "What the feature actually costs the browser is use-image-check.ts and one Field prop,",
+    "and that was checked rather than assumed. IMAGE_PATTERN moved out of lib/validation.ts",
+    "into lib/registry/reference.ts specifically so the hook could hold the same regex",
+    "without importing zod — no chunk mentions zod, and neither parseImageReference nor the",
+    "Docker Hub alias table appears in any chunk either, so the parser and the allowlist are",
+    "tree-shaken and stay server-side. If zod or `index.docker.io` ever shows up in a",
+    "first-load chunk, something has imported lib/validation or the parser from a client",
+    "component, and that is a defect rather than a budget question.",
+    "",
     "Rejected: next/dynamic with ssr:false, which would keep / under the old number by",
     "splitting the yard into a second request. The canvas is absolutely positioned and",
     "contributes no layout, so it would cost nothing in stability — but it would make the",
@@ -90,7 +106,7 @@
   ],
   "routes": {
     "/": 179,
-    "/dashboard": 222,
+    "/dashboard": 229,
     "/_not-found": 171
   }
 }

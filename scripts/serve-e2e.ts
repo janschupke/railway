@@ -80,6 +80,8 @@ start("node", [".next/standalone/server.js"], {
   RAILWAY_ISSUER: FIXTURE_URL,
   RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
   RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,
+  // The stand-in registry, so the image check never reaches a real one.
+  REGISTRY_PROBE_URL: FIXTURE_URL,
 });
 
 await waitFor(`${FIXTURE_URL}/oauth/.well-known/openid-configuration`, "fake Railway");

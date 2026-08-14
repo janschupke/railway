@@ -182,6 +182,7 @@
   "spinUp": {
     "imageLabel": "Image reference",
     "imageHint": "Pick one, or type any public image reference. Private registries are not supported yet.",
+    "imageUnavailable": "No public image matches this reference. Check the spelling — private registries are not supported.",
     "imagePlaceholder": "redis:7-alpine",
     "nameLabel": "Name",
     "nameHint": "Prefixed automatically so this app can tell its own containers apart.",

@@ -166,6 +166,14 @@ const TEXT_ON_SURFACE: Array<[fg: string, bg: string]> = [
   ["--rc-text-muted", "--rc-surface"],
   ["--rc-text-subtle", "--rc-canvas"],
   ["--rc-text-subtle", "--rc-surface"],
+  /*
+   * The field warning, which is a signal colour used as plain text on a plain surface
+   * rather than on its own tinted fill. The SIGNALS cases below check each signal against
+   * `--rc-<signal>-bg`, which is the Banner's arrangement and not this one — a warning
+   * inside a Field is one line of caption text on the card, with no fill behind it.
+   */
+  ["--rc-warning", "--rc-canvas"],
+  ["--rc-warning", "--rc-surface"],
 ];
 
 const STATES = [

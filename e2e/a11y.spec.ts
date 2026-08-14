@@ -275,6 +275,27 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `form-errors/${theme}`);
     });
 
+    test(`the image warning has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Its own state rather than a variant of the one above, because it is the opposite
+       * arrangement: a message in the field's message slot with the control *not* marked
+       * invalid, on a signal colour used as plain text rather than on its own tinted fill.
+       * The contrast test covers the token pair; this covers what axe sees rendered.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+
+      const answered = page.waitForResponse((response) =>
+        response.url().includes("/api/image-check"),
+      );
+      await field(page, "Image reference").fill("nonexistent/image:tag");
+      await page.keyboard.press("Escape");
+      await answered;
+      await expect(page.getByRole("status").first()).toBeVisible();
+
+      await expectNoA11yViolations(page, `image-warning/${theme}`);
+    });
+
     test(`the environment editor has no violations (${theme})`, async ({ page }) => {
       /*
        * Populated and in error, because that is the state with the most to get wrong:

@@ -56,6 +56,67 @@ describe("Field", () => {
     expect(screen.getByLabelText("Name")).not.toHaveAttribute("aria-describedby");
   });
 
+  describe("a warning", () => {
+    it("describes the control in place of the hint", () => {
+      render(
+        <Field label="Image" hint="Pick one" warning="No public image matches">
+          {(props) => <Input {...props} />}
+        </Field>,
+      );
+
+      expect(screen.getByLabelText("Image")).toHaveAccessibleDescription(
+        "No public image matches",
+      );
+      expect(screen.queryByText("Pick one")).not.toBeInTheDocument();
+    });
+
+    /*
+     * The distinction the whole prop exists for: a warning says something is probably
+     * wrong, and the form will still accept it. Claiming aria-invalid would tell a screen
+     * reader the value is refused when submitting is in fact the right move.
+     */
+    it("does not mark the control invalid", () => {
+      render(
+        <Field label="Image" warning="No public image matches">
+          {(props) => <Input {...props} />}
+        </Field>,
+      );
+
+      expect(screen.getByLabelText("Image")).not.toHaveAttribute("aria-invalid");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("waits its turn rather than interrupting", () => {
+      // Polite, because this appears while someone is still typing into the field.
+      render(
+        <Field label="Image" warning="No public image matches">
+          {(props) => <Input {...props} />}
+        </Field>,
+      );
+
+      expect(screen.getByRole("status")).toHaveTextContent("No public image matches");
+    });
+
+    it("loses to an error about the same value", () => {
+      render(
+        <Field
+          label="Image"
+          hint="Pick one"
+          warning="No public image matches"
+          error="Not a valid reference"
+        >
+          {(props) => <Input {...props} />}
+        </Field>,
+      );
+
+      const input = screen.getByLabelText("Image");
+      expect(input).toHaveAccessibleDescription("Not a valid reference");
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(screen.queryByText("No public image matches")).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
   it("gives each instance its own ids", () => {
     // Duplicated ids would silently point every label at the first input.
     render(

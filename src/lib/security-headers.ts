@@ -47,8 +47,13 @@ export function contentSecurityPolicy(
    */
   const style = ["'self'", "'unsafe-inline'"];
 
-  // Same-origin EventSource is the only network call the browser makes; the Railway
-  // GraphQL and WebSocket connections are server-to-server and outside CSP entirely.
+  /*
+   * Every network call the browser makes is same-origin: the EventSource streams and the
+   * image-check fetch. Nothing here needs widening for the registry work — the registries
+   * are reached from the server, by a route handler, precisely so the browser never talks
+   * to a third-party host and this stays `'self'`. The Railway GraphQL and WebSocket
+   * connections are server-to-server and outside CSP entirely for the same reason.
+   */
   const connect = ["'self'"];
   if (dev) connect.push("ws:", "wss:");
 

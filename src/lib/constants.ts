@@ -335,6 +335,91 @@ export const LIMITS = {
   VARIABLES_TOTAL_MAX: 16_000,
 } as const;
 
+/**
+ * Asking a container registry whether an image reference exists.
+ *
+ * The whole subsystem is affordable because of one measured fact: **a manifest HEAD does
+ * not consume Docker Hub's anonymous pull budget, and a GET does.** Measured against
+ * `library/redis:7-alpine` — two HEADs left `ratelimit-remaining` at `100;w=3600`, a GET
+ * took it to 99, and a HEAD after that left it at 99. The README used to argue that a
+ * shared egress IP made this check unaffordable; that argument was about pulls, and this
+ * is not one.
+ *
+ * So these numbers are not protecting the user's quota. They protect the *server's* egress
+ * — the undocumented per-IP request rate underneath the published budget, and the token
+ * endpoints, which no rate-limit header describes at all. That is also why the answer
+ * cache is shared across users rather than per session: every entry is an anonymous answer
+ * about a public repository, with nothing per-user in it to leak.
+ */
+export const REGISTRY = {
+  /**
+   * The whole probe, token round trip included.
+   *
+   * Deliberately not NETWORK.REQUEST_TIMEOUT_MS's twenty seconds. Nobody is watching a
+   * spinner here — there is no spinner — and an answer that lands after the user has
+   * finished typing is one nobody reads. A registry that cannot answer in two seconds is
+   * `unknown`, which renders nothing.
+   */
+  PROBE_TIMEOUT_MS: 2_000,
+  /**
+   * Concurrent probes one user may have in flight, through acquireStreamSlot's namespaced
+   * key.
+   *
+   * Two, not STREAM.MAX_CONCURRENT_PER_USER's four: this holds no upstream socket and no
+   * poll, and with the debounce the honest working set is one. The second covers the
+   * keystroke that lands while the first is still resolving.
+   *
+   * Note what this does and does not bound. It bounds SIMULTANEITY. A scripted client can
+   * still issue requests serially as fast as upstream answers them; the cache and the
+   * cool-off below are what bound rate.
+   */
+  MAX_CONCURRENT_PER_USER: 2,
+  /**
+   * How long a real answer is cached.
+   *
+   * `available` and `unavailable` are facts about a public registry, so they are cacheable
+   * across every user of this instance. Ten minutes is long enough that someone iterating
+   * on one reference costs a single request, short enough that a tag pushed during a
+   * session is eventually seen.
+   */
+  ANSWER_TTL_MS: 10 * 60 * 1000,
+  /**
+   * How long `unknown` is cached, which is a different question.
+   *
+   * `unknown` is the outage answer, and caching an outage for ten minutes would keep the
+   * feature dark long after the registry recovered. Thirty seconds is enough to stop a
+   * retry storm and short enough to notice the recovery.
+   */
+  UNKNOWN_TTL_MS: 30_000,
+  /**
+   * Ceiling on the answer cache.
+   *
+   * The key is an attacker-chosen string of up to LIMITS.IMAGE_REF_MAX characters, so
+   * without a ceiling this map is an unbounded allocation reachable from a form field.
+   * Evicted oldest-inserted-first. Five hundred entries is a few hundred kilobytes; the
+   * number exists in order to be a number, not because it was tuned.
+   */
+  CACHE_MAX_ENTRIES: 500,
+  /**
+   * How long one registry is left alone after it answers 429.
+   *
+   * Every reference on that registry short-circuits to `unknown` with no request at all.
+   * Insurance rather than the primary defence, now that HEAD is known to be free of the
+   * pull budget — it exists because the token endpoints are covered by no published limit,
+   * and because the failure this ticket must not create is a rate-limited server making
+   * the problem worse.
+   */
+  COOLOFF_MS: 5 * 60 * 1000,
+  /**
+   * Settle time before the field is checked.
+   *
+   * Twice LIST.SEARCH_DEBOUNCE_MS, and for the opposite reason. That one settles a local
+   * filter and can afford to feel instant; this one leaves the machine, so firing early
+   * costs a request rather than a render.
+   */
+  DEBOUNCE_MS: 500,
+} as const;
+
 /** Presentation thresholds that are not styling. */
 export const UI = {
   /** Distance from the bottom within which the log pane stays auto-scrolled. */

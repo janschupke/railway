@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useImageCheck } from "@/hooks/use-image-check";
 import { spinUp } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
 import { LIMITS } from "@/lib/constants";
@@ -286,6 +287,20 @@ export function SpinUpForm({
     setDuplicate(null);
   };
 
+  /*
+   * Advisory, and only ever advisory.
+   *
+   * `unavailable` is the one status that puts anything on screen. A registry outage, a
+   * rate limit, a reference on a registry this app will not dereference and a check that
+   * has not answered yet are all silent — a spin-up that did not happen because a registry
+   * was having a bad day is a worse outcome than the failed deployment this warns about.
+   *
+   * It does not gate the submit button, it does not set `aria-invalid`, and Field ranks a
+   * real validation error above it — so a reference the server will refuse says so instead
+   * of saying this.
+   */
+  const imageUnavailable = useImageCheck(image) === "unavailable";
+
   const fieldError = (field: "name" | "image") => {
     // The local check first: it is the more recent statement about this field, and it is
     // the only one when nothing was submitted.
@@ -330,6 +345,7 @@ export function SpinUpForm({
             <Combobox
               label={t("imageLabel")}
               hint={t("imageHint")}
+              {...(imageUnavailable ? { warning: t("imageUnavailable") } : {})}
               error={fieldError("image")}
               name="image"
               value={image}

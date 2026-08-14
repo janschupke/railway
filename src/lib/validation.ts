@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { LIMITS } from "@/lib/constants";
-
-/**
- * Docker image reference: `[registry/]name[:tag][@digest]`.
- * Deliberately permissive on registry hosts, strict on shell-unsafe characters.
+/*
+ * The image rule moved to lib/registry/reference.ts and is imported back, rather than being
+ * duplicated or re-exported from here. It is still the single definition of a valid
+ * reference and this schema is still the only thing that refuses one — but the browser now
+ * needs the same regex to decide whether an image is worth checking, and this module cannot
+ * be the source of it: importing anything from here drags zod into /dashboard's first load.
  */
-const IMAGE_PATTERN =
-  /^[a-z0-9]+([._\-/][a-z0-9]+)*(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$/i;
+import { IMAGE_PATTERN } from "@/lib/registry/reference";
 
 /**
  * Deployment id, as it arrives from the URL of the stream route.

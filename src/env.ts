@@ -153,6 +153,30 @@ export const schema = z.object({
       "RAILWAY_WS_URL must use wss unless it points at localhost",
     )
     .default(RAILWAY_DEFAULTS.WS_URL),
+
+  /**
+   * Where the registry existence check sends its requests, for the same reason the three
+   * above exist: the end-to-end suite must not reach a real registry. When set, every
+   * entry in the allowlist points here — see `registryFor` in lib/registry/registries.ts.
+   *
+   * Two things make this a smaller surface than RAILWAY_WS_URL, which is the precedent it
+   * follows. The requests it redirects carry **no credential of any kind** — no bearer, no
+   * cookie, no body — where a `ws://` Railway endpoint would put a live access token on
+   * the wire in clear text. And it does not widen the allowlist: the registry is still
+   * resolved from the reference against the same three hardcoded ids, and anything else is
+   * still refused without a request. A misconfigured value is an app that says nothing
+   * about images, which is what it says on every other failure too.
+   *
+   * No default, because there is no fallback to fall back to: unset means the real
+   * registries, which is what the constant table already holds.
+   */
+  REGISTRY_PROBE_URL: z
+    .url("REGISTRY_PROBE_URL must be an absolute URL")
+    .refine(
+      isSecureOrLocal,
+      "REGISTRY_PROBE_URL must use https unless it points at localhost",
+    )
+    .optional(),
 });
 
 export type Env = z.infer<typeof schema>;

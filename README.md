@@ -205,19 +205,43 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   or a JSON document is set on Railway's own Variables page rather than here. Names in the
   `RAILWAY_*` namespace are refused, because Railway sets those itself. Editing the
   variables of a service that already exists is a separate feature and is not built.
-- **Image references are validated for syntax, never for existence.** `nonexistent/image:tag`
-  is a well-formed reference, so it is accepted and becomes a failed deployment. Checking
-  the registry from the server was considered and refused on two grounds. First, it would
-  create an SSRF that does not exist today: `IMAGE_PATTERN` admits a bare host as the first
-  component (`169.254.169.254/foo/bar` is a valid reference, and Docker's own rules make a
-  first component containing a dot a registry), so dereferencing user input would reach
-  cloud metadata and every address the container can route to — closing that needs a
-  registry allowlist plus DNS-rebinding protection, guarding a check that is not
-  authoritative anyway. Second, Docker Hub's anonymous pull limits are per source IP, and
-  every user of a deployed instance shares one egress IP, so the failure mode is the worst
-  available: the form refuses a perfectly good image because the _server_ is rate-limited.
-  Registry existence would also not catch architecture mismatches, private images or
-  registry outages, all of which pass a manifest check and still fail the deploy.
+- **Image existence is checked, advisory only, and only on three registries.** A
+  well-formed reference used to be accepted whatever it named, so `nonexistent/image:tag`
+  became a failed deployment with nothing on screen connecting it to the typo. The form now
+  asks Docker Hub, ghcr.io or quay.io for the manifest as the field settles, and warns
+  beside it — a warning, not a validation error: nothing is refused, `aria-invalid` is not
+  set, and the submit button stays live.
+
+  This was refused twice before on two grounds, and both were right about the naive
+  version. The first was an SSRF that did not exist yet: `IMAGE_PATTERN` admits a bare host
+  as the first component, and Docker's own rules make a first component containing a dot a
+  registry, so `169.254.169.254/foo/bar` is a valid reference and dereferencing user input
+  would reach cloud metadata. What closes it is refusing rather than resolving — three
+  registries with their base _and_ token URLs as compile-time constants in
+  `src/lib/registry/registries.ts`, no `WWW-Authenticate` realm ever followed, and
+  `redirect: "manual"` so a registry cannot choose a URL either. Nothing derived from user
+  input is ever a host, a port or a scheme; a reference naming anything else is parsed,
+  reported as unsupported, and never dereferenced.
+
+  The second was shared egress, and that one turns out to have been about the wrong verb. A
+  manifest `HEAD` does **not** consume Docker Hub's anonymous pull budget and a `GET` does —
+  measured against `library/redis:7-alpine`, where two `HEAD`s left `ratelimit-remaining` at
+  `100;w=3600` and a `GET` took it to 99. The check is `HEAD` only. The cache, the
+  per-registry cool-off after a 429 and the per-user concurrency cap are insurance against
+  the request rate underneath that published budget, not against the budget itself, and a
+  preset is never checked at all — the catalog exists by construction, and it is the field's
+  default value.
+
+  **What it still does not catch**, which is most things: architecture mismatches, images
+  that need credentials, a tag deleted between the check and the deploy, and any registry
+  outside those three. A registry that is rate-limiting, timing out or down produces
+  `unknown`, which renders nothing — a check that could stop a spin-up would be worse than
+  the failed deployment it is warning about. And on all three registries, "no such
+  repository" and "private repository" are the same 401 or 403 with no way to tell them
+  apart anonymously, so one sentence covers both. That is honest rather than vague: this app
+  collects no registry credentials, so a private image fails to deploy exactly as an absent
+  one does.
+
 - **A failed deployment's reason is best effort, and Railway's page is still the fallback.**
   The deployment query returns a status and nothing else, so a failure reaches the poll loop
   as the enum `FAILED`; the `Deployment` type carries no explanation at all, and `diagnosis`
@@ -355,9 +379,12 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 7. **The way out:** click any container's name — every row, not only the broken ones —
    and confirm it opens that service on Railway in a new tab. The chevron beside it is
    the log panel's disclosure; check it still expands from the keyboard.
-8. **Failure paths:** submit `nonexistent/image:tag` and confirm it settles into
-   **Failed** rather than spinning forever, and that expanding the row explains the
-   failure and repeats **Open in Railway**. Do not expect build logs here: an image source
+8. **Failure paths:** type `nonexistent/image:tag` and confirm the field warns beside it
+   after a beat — then confirm the warning changes nothing else: the field is not marked
+   invalid, the submit button is live, and submitting still creates the container. That is
+   the whole point of the check being advisory. It settles into **Failed** rather than
+   spinning forever, and expanding the row explains the failure and repeats **Open in
+   Railway**. Do not expect build logs here: an image source
    performs no build, and a pull that never resolves may write nothing to either log
    phase — which is exactly why the row carries an explanation and a deep link. Reload the
    page and expand the row again; if Railway did write output to the other phase, the

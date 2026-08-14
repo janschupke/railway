@@ -61,7 +61,8 @@ describe("contentSecurityPolicy", () => {
   });
 
   it("keeps connect-src to same-origin in production", () => {
-    // The only browser-initiated request is the EventSource; Railway is server-to-server.
+    // Browser-initiated requests are the EventSource streams and the image check, both
+    // same-origin. Railway and the container registries are both reached server-side.
     expect(directive(production(), "connect-src")).toBe("'self'");
   });
 

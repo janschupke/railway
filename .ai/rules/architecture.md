@@ -29,7 +29,7 @@ React 19.2.8, Next 16.3.0.
 anything cross-directory; use relative `./` only for siblings, which in practice means
 inside `src/components`.
 
-## Server Components read, Server Actions write, one SSE route streams
+## Server Components read, Server Actions write, route handlers do the rest
 
 Three lanes, and a change belongs in exactly one of them.
 
@@ -38,10 +38,21 @@ Three lanes, and a change belongs in exactly one of them.
 - **Write** — `src/app/dashboard/actions.ts`. The only `"use server"` file in the repo.
   Actions return an `ActionResult`; they do not throw at the UI. See
   [errors-and-logging.md](errors-and-logging.md).
-- **Stream** — `src/app/api/streams/[deploymentId]/route.ts` multiplexes deployment status
-  and logs into a single SSE response; `src/app/api/watch/[projectId]/route.ts` is the
-  project watcher. SSE downstream, WebSocket upstream (ADR-3): the browser never opens a
-  socket to Railway, because that would require the token in the browser.
+- **Route handlers** — `src/app/api/**`. Two stream:
+  `src/app/api/streams/[deploymentId]/route.ts` multiplexes deployment status and logs into
+  a single SSE response, and `src/app/api/watch/[projectId]/route.ts` is the project
+  watcher. SSE downstream, WebSocket upstream (ADR-3): the browser never opens a socket to
+  Railway, because that would require the token in the browser. One does not:
+  `src/app/api/image-check/route.ts` answers a JSON enum member.
+
+**A route handler is the right lane when the browser needs an answer mid-interaction, or
+when the work needs the inbound `AbortSignal`.** The image check is both. A Server Action
+would have worked and was rejected for two reasons: `actions.ts` is documented as the only
+`"use server"` file _and_ as the write lane, so a read there makes the file something other
+than what it says it is — and actions are uncancellable, which is the wrong primitive for a
+request the next keystroke should abort. Do not read this as permission for a REST API;
+the read lane is still where reads belong, and this is the exception that names its own
+conditions.
 
 `"use client"` is a bundle decision as much as an interactivity one — see
 [performance.md](performance.md). Default to a Server Component.

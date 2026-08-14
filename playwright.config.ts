@@ -99,6 +99,8 @@ export default defineConfig({
         RAILWAY_ISSUER: FIXTURE_URL,
         RAILWAY_API_URL: `${FIXTURE_URL}/graphql/v2`,
         RAILWAY_WS_URL: `ws://localhost:${FIXTURE_PORT}/graphql/v2`,
+        // The stand-in registry, so the image check never reaches a real one.
+        REGISTRY_PROBE_URL: FIXTURE_URL,
       },
     },
   ],
