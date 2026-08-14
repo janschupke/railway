@@ -2,6 +2,9 @@
 
 Spin containers up and down in **your own** Railway projects, from a browser.
 
+**Live: <https://trains.schupke.io>** — signing in needs a Railway account, and it
+only ever acts on that account's own projects.
+
 Sign in with Railway, pick which projects to share on Railway's consent screen, choose a
 project and environment, and create or destroy Docker-image services — with live build
 and deploy logs streamed while it happens.
@@ -547,6 +550,9 @@ redirect URIs (they must match exactly):
 http://localhost:3000/api/auth/callback
 https://<your-deployment>.up.railway.app/api/auth/callback
 ```
+
+The deployed instance registers `https://trains.schupke.io/api/auth/callback`;
+substitute your own domain.
 
 `SESSION_SECRET` can be anything with enough entropy: `openssl rand -base64 32`.
 
