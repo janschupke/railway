@@ -3,9 +3,15 @@ import type messages from "../../messages/en.json";
 /*
  * The preset catalog.
  *
- * Deliberately NOT `server-only`: the client reads the labels and values to render the
- * image list, and the Server Action reads the variables. That sharing is the security
- * property, not a convenience — see `presetFor` below.
+ * Deliberately NOT `server-only`: the client reads the labels to render the image list and
+ * the variables to seed the environment editor's default rows, and the Server Action reads
+ * the same entries to decide which names it may mint a credential for.
+ *
+ * That second reading is what remains of the property this module used to carry alone.
+ * Until T-487 the client sent no variables at all, so the environment was whatever the
+ * catalog said and nothing else. It now sends them — but generation is still granted by
+ * the catalog rather than asked for by the request, and this is the file that grants it.
+ * See `resolveVariables` in ./railway/secrets and SECURITY.md, "Input surfaces".
  *
  * `import type` on the catalog is erased at compile time, so nothing here pulls the
  * message JSON into the client bundle; it only makes a mistyped key fail `tsc`.
@@ -23,6 +29,11 @@ export type PresetVariable =
    * own service → Variables page is where the user reads it, which is the same place they
    * would read any other Railway secret — this app holds no database (ADR-4) and is not
    * going to become a password manager.
+   *
+   * T-487 made that argument stronger rather than weaker. A user who needs to know the
+   * password now types their own into the editor, so generation is only the default for
+   * the users who do not care what it is — and a default nobody has to read is one this
+   * app has no reason to show.
    */
   | { name: string; generate: "password" };
 
@@ -125,5 +136,35 @@ export function presetFor(image: string): Preset | undefined {
   const repository = repositoryOf(image).toLowerCase();
   return PRESETS.find(
     (preset) => repositoryOf(preset.value).toLowerCase() === repository,
+  );
+}
+
+/** A catalog default, in the shape the environment editor holds a row in. */
+export type PresetVariableDefault = {
+  name: string;
+  /** Empty for a generated credential: the value does not exist until the server mints it. */
+  value: string;
+  /** Whether leaving the value blank asks the server for a freshly minted one. */
+  generated: boolean;
+};
+
+/**
+ * The rows the editor starts an image with.
+ *
+ * The one place the fact that a generated credential has no renderable value is turned
+ * into something a form can hold: a blank cell, marked so the editor can say why it is
+ * blank. Never a placeholder value, never a sentinel token — anything with content would
+ * be a value the browser holds, and the whole point is that it does not.
+ *
+ * Repository-matched via `presetFor`, so `postgres:17` seeds the row `postgres:16-alpine`
+ * does.
+ */
+export function presetVariableDefaults(
+  image: string,
+): readonly PresetVariableDefault[] {
+  return (presetFor(image)?.variables ?? []).map((variable) =>
+    "generate" in variable
+      ? { name: variable.name, value: "", generated: true }
+      : { name: variable.name, value: variable.value, generated: false },
   );
 }

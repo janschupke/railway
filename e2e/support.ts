@@ -96,7 +96,17 @@ export function toast(page: Page, text: string | RegExp) {
  */
 export const onlyVisible = (locator: Locator) => locator.filter({ visible: true });
 
-export const field = (page: Page, label: string) => onlyVisible(page.getByLabel(label));
+/**
+ * A form control, by its exact label.
+ *
+ * `exact` is load-bearing rather than tidy. `getByLabel` defaults to a case-insensitive
+ * substring match, so once the spin-up form grew an environment editor, `field(page,
+ * "Name")` matched both the container name and every "Variable name N" cell — three specs
+ * failed on a strict-mode violation that named neither of them. A label is an identifier
+ * here; matching part of one is how a spec silently starts acting on a different control.
+ */
+export const field = (page: Page, label: string) =>
+  onlyVisible(page.getByLabel(label, { exact: true }));
 
 export const button = (page: Page, name: RegExp | string) =>
   onlyVisible(page.getByRole("button", { name }));
@@ -246,14 +256,38 @@ export async function openDestroyDialog(page: Page, name: string) {
  * lets it close itself. It MUST leave the popup closed: the listbox is portalled and
  * overlaps the submit button, so a spec that leaves it open clicks the list instead.
  */
-export async function spinUp(page: Page, name: string, preset = "Redis") {
+export async function spinUp(
+  page: Page,
+  name: string,
+  preset = "Redis",
+  /**
+   * Extra environment rows to add before submitting.
+   *
+   * Optional so every existing caller stays as it is — which is only possible because the
+   * editor posts two native repeated fields rather than something a helper would have to
+   * serialise.
+   */
+  variables: Record<string, string> = {},
+) {
   await onlyVisible(page.getByRole("button", { name: /show preset images/i })).click();
   await onlyVisible(
     page.getByRole("option", { name: new RegExp(`^${preset}`) }),
   ).click();
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await field(page, "Name").fill(name);
+  for (const [key, value] of Object.entries(variables)) {
+    await addVariable(page, key, value);
+  }
   await button(page, /spin up container/i).click();
+}
+
+/** Appends one environment row and fills both of its cells. */
+export async function addVariable(page: Page, name: string, value: string) {
+  await button(page, /add variable/i).click();
+  // The new row is the last one, and its cells are labelled by that position.
+  const position = await page.getByLabel(/^Variable name \d+$/).count();
+  await page.getByLabel(`Variable name ${position}`).fill(name);
+  await page.getByLabel(`Variable value ${position}`).fill(value);
 }
 
 /**

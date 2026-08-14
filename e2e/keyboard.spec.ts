@@ -1,4 +1,6 @@
+import type { Locator } from "@playwright/test";
 import {
+  addVariable,
   button,
   containerRows,
   disclosure,
@@ -371,24 +373,44 @@ test.describe("keyboard operation", () => {
     // So the chip's remove control exists to be checked. It is the one focusable thing
     // on this page drawn from scratch rather than from the Button primitive, which makes
     // it the one most able to lose its ring without anyone noticing.
+    /*
+     * So the editor's own controls exist to be checked: a remove button is the next
+     * candidate for a control that loses its ring without anyone noticing.
+     *
+     * Before selectStatus, and that order is load-bearing. `focus-ring` is a
+     * :focus-visible style, and Chromium decides whether a *programmatic* .focus() counts
+     * as visible from the modality of the last real interaction. selectStatus ends on
+     * keyboard.press("Escape"); addVariable ends on a click and a fill. Adding the row
+     * afterwards flipped the whole loop to pointer modality, and the first control in it —
+     * the project select, which this change does not touch — lost its ring.
+     */
+    await addVariable(page, "MY_FLAG", "on");
     await selectStatus(page, "Running");
 
-    for (const locator of [
-      onlyVisible(page.getByRole("combobox", { name: "Project" })),
-      field(page, "Image reference"),
-      field(page, "Name"),
-      button(page, /spin up container/i),
-      searchBox(page),
-      button(page, /^Status/),
-      button(page, "Remove the Running filter"),
-      onlyVisible(page.getByLabel("Created here")),
-    ]) {
+    // Labelled, because a bare `expect(false).toBe(true)` inside a loop names neither the
+    // control that lost its ring nor how far the loop got.
+    const controls: Array<[string, Locator]> = [
+      ["project select", onlyVisible(page.getByRole("combobox", { name: "Project" }))],
+      ["image reference", field(page, "Image reference")],
+      ["container name", field(page, "Name")],
+      ["variable name cell", page.getByLabel("Variable name 1")],
+      ["variable value cell", page.getByLabel("Variable value 1")],
+      ["remove variable", button(page, "Remove MY_FLAG")],
+      ["add variable", button(page, /add variable/i)],
+      ["submit", button(page, /spin up container/i)],
+      ["search", searchBox(page)],
+      ["status filter", button(page, /^Status/)],
+      ["remove filter chip", button(page, "Remove the Running filter")],
+      ["created-here toggle", onlyVisible(page.getByLabel("Created here"))],
+    ];
+
+    for (const [name, locator] of controls) {
       await locator.focus();
       const outlineVisible = await locator.evaluate((el) => {
         const style = getComputedStyle(el);
         return style.outlineStyle !== "none" || style.boxShadow !== "none";
       });
-      expect(outlineVisible).toBe(true);
+      expect(outlineVisible, name).toBe(true);
     }
   });
 });

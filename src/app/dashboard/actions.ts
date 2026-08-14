@@ -66,6 +66,21 @@ function messageForIssue(t: Translator, key: string): string {
 const formField = (formData: FormData, name: string): string =>
   String(formData.get(name) ?? "");
 
+/**
+ * A repeated FormData field, as strings.
+ *
+ * `getAll` rather than `get`: the environment editor posts one entry per row under a
+ * single name, and FormData preserves per-name insertion order, so index i of the two
+ * lists is one row without an index ever being written down.
+ *
+ * A non-string entry is a hand-crafted request rather than anything a browser sends, and
+ * it has no honest coercion — `""` is what asks the catalog for a generated credential, so
+ * coercing to it would turn a `File` part into a request for a secret. It becomes a byte
+ * the value schema refuses instead.
+ */
+const formList = (formData: FormData, name: string): string[] =>
+  formData.getAll(name).map((entry) => (typeof entry === "string" ? entry : "\u0000"));
+
 export async function spinUp(
   _prev: ActionResult | null,
   formData: FormData,
@@ -81,20 +96,40 @@ async function create(formData: FormData): Promise<ActionResult> {
     environmentId: formField(formData, "environmentId"),
     name: formField(formData, "name"),
     image: formField(formData, "image"),
+    variableKey: formList(formData, "variableKey"),
+    variableValue: formList(formData, "variableValue"),
   });
 
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     if (!issue) return { ok: false, error: t("actions.invalidForm") };
     const field = issue.path[0];
+    const index = issue.path[1];
     return {
       ok: false,
       error: messageForIssue(t, issue.message),
       ...(isField(field) ? { field } : {}),
+      /*
+       * Only meaningful alongside a field, and only ever present for the repeated ones —
+       * zod builds the row index into the path itself. A rule about the whole list
+       * (too many rows, too large together) carries no index, and the form has to toast
+       * those rather than look for a row that does not exist.
+       */
+      ...(isField(field) && typeof index === "number" ? { index } : {}),
     };
   }
 
-  const { projectId, environmentId, name, image } = parsed.data;
+  const { projectId, environmentId, name, image, variableKey, variableValue } =
+    parsed.data;
+
+  /*
+   * The two parallel lists are one row per index. The schema has already refused a
+   * submission where they disagree in length, so this cannot produce a half-row.
+   */
+  const submittedVariables = variableKey.map((variableName, index) => ({
+    name: variableName,
+    value: variableValue[index]!,
+  }));
 
   try {
     const accessToken = await requireAccessToken();
@@ -126,16 +161,35 @@ async function create(formData: FormData): Promise<ActionResult> {
     }
 
     /*
-     * Variables are derived from the *submitted image string*, server-side.
+     * The environment the service is created with: what the person typed, with the
+     * catalog's own defaults filled in for anything they left blank.
      *
-     * The client never sends a preset id and never sends variables, so there is no
-     * request shape in which a caller can inject arbitrary environment into a service.
-     * The whole attack surface is the image reference, which IMAGE_PATTERN already
-     * bounds. That is why the preset catalog is a shared module rather than a client
-     * constant — see SECURITY.md.
+     * This action accepts user-supplied environment, and until T-487 it did not. The old
+     * property — "the client sends no preset id and no variables, so no request shape
+     * injects arbitrary environment" — was real, and it is gone deliberately: a spin-up
+     * form that cannot set a variable is a form that cannot start most images. It is
+     * replaced rather than deleted, by three bounds that do not overlap:
+     *
+     *   - `spinUpSchema` bounds the SHAPE — name charset, name and value lengths, the row
+     *     count, the total size, duplicates, and the RAILWAY_ namespace Railway sets
+     *     itself. A refused row is a form error; no mutation is attempted.
+     *   - `resolveVariables` bounds the AUTHORITY. It is still the only thing in the app
+     *     that mints a credential, it mints only for a name the CATALOG declares generated
+     *     for this image, and a generated value is returned to no browser on any path.
+     *     "Generate me a secret" is not a request shape; leaving blank a row the catalog
+     *     owns is.
+     *   - The log line below bounds the RECORD — see there.
+     *
+     * The blast radius is unchanged, and that is what makes the trade defensible: every
+     * mutation carries the requester's own token, so injecting environment means injecting
+     * it into a service they asked this app to create in a project their own Railway grant
+     * already reaches. See SECURITY.md, "Input surfaces".
      */
     const preset = presetFor(image);
-    const variables = resolveVariables(preset?.variables);
+    const { variables, generated } = resolveVariables(
+      preset?.variables,
+      submittedVariables,
+    );
 
     /*
      * Scoped to this one call, not to the whole action.
@@ -169,6 +223,10 @@ async function create(formData: FormData): Promise<ActionResult> {
       throw error;
     }
 
+    const presetNames = new Set((preset?.variables ?? []).map((v) => v.name));
+    const sentNames = variables ? Object.keys(variables) : [];
+    const presetSent = sentNames.filter((sent) => presetNames.has(sent));
+
     /*
      * The audit trail. This action creates billable infrastructure, and once a service is
      * deleted Railway retains no record that it existed — so without this line there is
@@ -190,9 +248,21 @@ async function create(formData: FormData): Promise<ActionResult> {
       service_id: created.serviceId,
       deployment_id: created.deploymentId,
       outcome: created.outcome,
-      // Names only, never values — they are generated credentials. The logger's own
-      // scalar-only field type is what makes that hard to get wrong. See secrets.ts.
-      variable_names: variables ? Object.keys(variables).join(",") : "",
+      /*
+       * Split in two, because the two halves have different cardinality.
+       *
+       * Preset-derived names come from a closed catalog, so naming them keeps the audit
+       * trail readable and keeps the label bounded. User-supplied names are neither closed
+       * nor bounded, and are attacker-chosen in exactly the way the rejected deploymentId
+       * is — so a count carries the diagnostic content instead, the same trade `id_length`
+       * makes on the stream route. Values, of either origin, are written nowhere at any
+       * level; the logger's scalar-only field type is what makes that hard to get wrong.
+       *
+       * The consequence, stated because it is a real loss: this record no longer says what
+       * environment a service was actually created with. SECURITY.md says so too.
+       */
+      variable_names: presetSent.join(","),
+      user_variable_count: sentNames.length - presetSent.length,
     });
 
     revalidatePath("/dashboard");
@@ -213,7 +283,12 @@ async function create(formData: FormData): Promise<ActionResult> {
 
     return {
       ok: true,
-      message: variables
+      /*
+       * Gated on what was minted, not on whether any variable was set. A user who typed
+       * their own password has their own copy, and pointing them at Railway to read it
+       * back would be telling them to go and look up something they already know.
+       */
+      message: generated
         ? t("actions.spinningUpWithCredentials", { name })
         : t("actions.spinningUp", { name }),
     };

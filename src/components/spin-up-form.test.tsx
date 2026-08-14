@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
@@ -224,5 +224,181 @@ describe("SpinUpForm", () => {
     expect(
       screen.getByText("Select a project and environment first."),
     ).toBeInTheDocument();
+  });
+
+  describe("environment variables", () => {
+    const pickPreset = async (user: UserEvent, name: RegExp) => {
+      await user.click(screen.getByRole("button", { name: "Show preset images" }));
+      await user.click(screen.getByRole("option", { name }));
+    };
+
+    const addRow = async (user: UserEvent, name: string, value: string) => {
+      await user.click(screen.getByRole("button", { name: "Add variable" }));
+      const position = screen.getAllByLabelText(/^Variable name/).length;
+      await user.type(screen.getByLabelText(`Variable name ${position}`), name);
+      if (value) {
+        await user.type(screen.getByLabelText(`Variable value ${position}`), value);
+      }
+    };
+
+    it("seeds no rows for an image that boots bare", () => {
+      renderForm();
+      expect(screen.queryByLabelText(/^Variable name/)).not.toBeInTheDocument();
+    });
+
+    it("seeds a locked, blank row for a database", async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await pickPreset(user, /PostgreSQL/);
+
+      const name = screen.getByLabelText("Variable name 1");
+      expect(name).toHaveValue("POSTGRES_PASSWORD");
+      expect(name).toHaveAttribute("readonly");
+      // Blank, with the placeholder saying why — never a value the browser holds.
+      const value = screen.getByLabelText("Variable value 1");
+      expect(value).toHaveValue("");
+      expect(value).toHaveAttribute("placeholder", "Generated for you");
+    });
+
+    it("drops an untouched preset row when the image changes", async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await pickPreset(user, /PostgreSQL/);
+      await pickPreset(user, /Nginx/);
+
+      expect(screen.queryByLabelText(/^Variable name/)).not.toBeInTheDocument();
+    });
+
+    it("keeps a preset row the user typed into, and unlocks it", async () => {
+      /*
+       * The one rule of the reseed: nothing a person typed is thrown away by changing the
+       * image. The row stops being locked because the catalog that owned its name is gone.
+       */
+      const user = userEvent.setup();
+      renderForm();
+
+      await pickPreset(user, /PostgreSQL/);
+      await user.type(screen.getByLabelText("Variable value 1"), "hunter2");
+      await pickPreset(user, /Nginx/);
+
+      expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
+      expect(screen.getByLabelText("Variable name 1")).not.toHaveAttribute("readonly");
+      expect(screen.getByLabelText("Variable value 1")).toHaveValue("hunter2");
+    });
+
+    it("keeps a user-added row when the image changes", async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await addRow(user, "MY_FLAG", "on");
+      await pickPreset(user, /PostgreSQL/);
+
+      // Seeded rows go first, so the user row moves down rather than away.
+      expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
+      expect(screen.getByLabelText("Variable name 2")).toHaveValue("MY_FLAG");
+    });
+
+    it("submits the rows as two parallel lists, skipping the blank one", async () => {
+      /*
+       * The wire-format regression test. Index i of the two lists has to be one row, and
+       * a row nobody typed into has to contribute to neither — that pairing is what the
+       * schema and the row-attributed errors are both built on.
+       */
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await addRow(user, "ONE", "1");
+      await addRow(user, "TWO", "2");
+      // A third row, left entirely blank.
+      await user.click(screen.getByRole("button", { name: "Add variable" }));
+      await user.click(submitButton());
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+      const formData = spinUp.mock.calls[0]![1];
+      expect(formData.getAll("variableKey")).toEqual(["ONE", "TWO"]);
+      expect(formData.getAll("variableValue")).toEqual(["1", "2"]);
+    });
+
+    it("submits a seeded database row with its value left blank", async () => {
+      // Blank is what asks the catalog for a generated credential, so it has to survive
+      // the trip rather than be filtered out as an empty field.
+      const user = userEvent.setup();
+      renderForm();
+
+      await pickPreset(user, /PostgreSQL/);
+      await user.type(screen.getByLabelText("Name"), "db");
+      await user.click(submitButton());
+
+      await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+      const formData = spinUp.mock.calls[0]![1];
+      expect(formData.getAll("variableKey")).toEqual(["POSTGRES_PASSWORD"]);
+      expect(formData.getAll("variableValue")).toEqual([""]);
+    });
+
+    it("shows a row-attributed error next to the row, not as a toast", async () => {
+      const user = userEvent.setup();
+      spinUp.mockResolvedValue({
+        ok: false,
+        error: "Names starting with RAILWAY_ are set by Railway itself",
+        field: "variableKey",
+        index: 0,
+      });
+      renderForm();
+
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await addRow(user, "RAILWAY_TOKEN", "x");
+      await user.click(submitButton());
+
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "Names starting with RAILWAY_ are set by Railway itself",
+        ),
+      );
+      expect(screen.queryByText("Could not spin up")).not.toBeInTheDocument();
+    });
+
+    it("toasts a variable error that names no row", async () => {
+      /*
+       * Too many rows, or too large together — real failures with nowhere to attach an
+       * inline message. Without this branch they set `field` and are swallowed by the
+       * guard that suppresses toasts for field-attributed errors.
+       */
+      const user = userEvent.setup();
+      spinUp.mockResolvedValue({
+        ok: false,
+        error: "Set at most 25 variables here",
+        field: "variableKey",
+      });
+      renderForm();
+
+      await user.type(screen.getByLabelText("Name"), "cache");
+      await user.click(submitButton());
+
+      await waitFor(() =>
+        expect(screen.getByText("Set at most 25 variables here")).toBeInTheDocument(),
+      );
+    });
+
+    it("clears user rows after a success and re-seeds the image's own", async () => {
+      /*
+       * Matching the name field rather than the image. A leftover variable set silently
+       * applied to the next container is worse than a leftover name: nothing on screen
+       * says the last spin-up's environment is still armed.
+       */
+      const user = userEvent.setup();
+      renderForm();
+
+      await pickPreset(user, /PostgreSQL/);
+      await addRow(user, "MY_FLAG", "on");
+      await user.type(screen.getByLabelText("Name"), "db");
+      await user.click(submitButton());
+
+      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+      expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
+      expect(screen.queryByLabelText("Variable name 2")).not.toBeInTheDocument();
+    });
   });
 });

@@ -249,6 +249,14 @@ const eslintConfig = defineConfig([
               "swipeDirection",
               "autoComplete",
               "labelKey",
+              /*
+               * KeyValueEditor's FormData field names. Same class as `name` above — they
+               * become the `name` attribute on the rendered inputs, and the server reads
+               * them back with formData.getAll(). A translator has nothing to do with
+               * "variableKey".
+               */
+              "nameFieldName",
+              "valueFieldName",
               ".*[Cc]lassName",
             ],
           },

@@ -4,10 +4,28 @@ import { reportError } from "@/lib/report-error";
 import type { MessageDescriptor } from "@/lib/messages";
 
 /** Field names a Server Action can attribute an error to. */
-export type ActionField = "name" | "image";
+export type ActionField = "name" | "image" | "variableKey" | "variableValue";
 
 export type ActionResult =
-  { ok: true; message: string } | { ok: false; error: string; field?: ActionField };
+  | { ok: true; message: string }
+  | {
+      ok: false;
+      error: string;
+      field?: ActionField;
+      /**
+       * Which row of a repeated field the error belongs to, zero-based over the rows that
+       * were actually submitted.
+       *
+       * Not the same as the rows on screen: a blank row carries no `name` attribute and
+       * so never reaches FormData at all. The form maps it back to a row id — see
+       * spin-up-form.tsx.
+       *
+       * Absent for the single-instance fields, and absent for a rule about the whole list
+       * rather than one row of it, where there is no row to point at. A field error with
+       * no index has to reach the user as a toast.
+       */
+      index?: number;
+    };
 
 /**
  * Turns any thrown value into a message the person who clicked the button can read.
@@ -29,6 +47,23 @@ export function describeActionError(error: unknown): MessageDescriptor {
   return reportError("action", error, "errors.generic");
 }
 
+/*
+ * A set rather than a chain of ===: the two variable fields made the expression long
+ * enough that the next addition would have been the one to get the || precedence wrong.
+ */
+const FIELDS: ReadonlySet<string> = new Set([
+  "name",
+  "image",
+  "variableKey",
+  "variableValue",
+]);
+
 export function isField(value: unknown): value is ActionField {
-  return value === "name" || value === "image";
+  /*
+   * The string guard is load-bearing rather than defensive. zod's path for a repeated
+   * field is ["variableKey", 3], so a numeric array index now genuinely arrives at this
+   * function — and `FIELDS.has` alone would be fine, but the guard is what makes that
+   * readable to the next person.
+   */
+  return typeof value === "string" && FIELDS.has(value);
 }

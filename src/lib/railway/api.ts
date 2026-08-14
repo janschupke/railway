@@ -192,7 +192,10 @@ export async function createContainer(
     /** Already prefixed by the caller via toManagedName(). */
     name: string;
     image: string;
-    /** Resolved by the caller from the preset catalog; never supplied by the browser. */
+    /**
+     * Merged by the caller from the catalog's defaults and the rows the user submitted,
+     * already validated. This layer sets what it is handed.
+     */
     variables?: Record<string, string>;
   },
   signal?: AbortSignal,
@@ -260,11 +263,18 @@ export async function createContainer(
         { accessToken, operationName: "VariableCollectionUpsert", signal },
       );
     } catch (error) {
-      // Names only. These are generated credentials, and this is the one log line in the
-      // system that would otherwise be holding them.
+      /*
+       * A count, not names, and never values.
+       *
+       * Since T-487 this map is a merge of catalog defaults and rows the user typed, so
+       * the names are no longer a closed set — the same reason the rejected deploymentId
+       * is not logged. Nothing is lost: the caller's `container.created` line is written
+       * on this path too, with `outcome: "variables_failed"`, and it names the closed
+       * half.
+       */
       log.warn("railway.variables_failed", {
         service_id: serviceId,
-        variable_names: Object.keys(params.variables).join(","),
+        variable_count: Object.keys(params.variables).length,
         error,
       });
       return { serviceId, deploymentId: null, outcome: "variables_failed" };

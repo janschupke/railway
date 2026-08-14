@@ -146,9 +146,15 @@ Update the document when you add or alter:
 - an OAuth scope, a cookie attribute, or a cookie name
 - a security header, or a CSP directive
 - a new outbound host
+- a new **input surface** — a field the browser can set that reaches an upstream mutation —
+  or a widening of what an existing one accepts
 - anything on an accepted-risk list — if you close one, move it out of that section
 
 A security claim that is no longer true is worse than no document.
+
+The input-surface line was added after T-487, which accepted user-supplied environment
+variables on the spin-up form. That was the largest change to the threat model in this
+repo's history, and nothing else on this list would have fired for it.
 
 ## Before you call this done
 

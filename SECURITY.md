@@ -24,6 +24,49 @@ Out of scope: isolation between Railway tenants, and anything Railway's own
 authorization is responsible for. In scope: everything between the browser and that
 upstream call.
 
+### Input surfaces
+
+Three things cross from a browser into a Railway mutation. None is trusted; each is
+bounded.
+
+| Input                 | Bound                                                                                                                              | Where                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                    | `src/lib/validation.ts`                               |
+| Container name        | 40 characters, and prefixed before it is sent                                                                                      | `src/lib/validation.ts`, `src/lib/railway/managed.ts` |
+| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                               |
+
+**Environment variables are user-supplied, and were not always.** Until T-487 the client
+sent neither a preset id nor a variable: the environment was derived server-side from the
+submitted image alone, which made "a caller cannot inject environment into a service" true
+for free. That was a real property, and it is gone deliberately — a spin-up form that
+cannot set a variable is a form that cannot start most images. It is replaced, not deleted,
+by three bounds that do not overlap:
+
+- **Shape.** The table above. A refused row produces a form error attributed to that row,
+  and no mutation is attempted.
+- **Authority.** `resolveVariables` (`src/lib/railway/secrets.ts`) is the only thing in the
+  app that mints a credential. It mints only for a name `src/lib/presets.ts` declares
+  generated _for the submitted image_, and only when that row's value is left blank. So
+  "generate me a secret" is not a request shape: a row named `MY_KEY` left blank on
+  postgres gets an empty string, not a password. A generated value is returned to the
+  browser on no path, and `e2e/containers.spec.ts` asserts the rendered page never contains
+  it. A user who needs to know a password types their own — generation is the default for
+  the users who do not, which is why not showing it costs nothing.
+- **Record.** `container.created` names only the preset-derived variables and counts the
+  rest; see the logging bullet under Operational notes.
+
+**The blast radius did not change**, and that is what makes the trade defensible. Every
+mutation carries the requester's own token, so injecting environment means injecting it
+into a service they asked this app to create, in a project their own Railway grant already
+reaches. Railway is still the gate.
+
+**`RAILWAY_*` is refused** because Railway injects that namespace itself and
+`variableCollectionUpsert` runs with `replace: false`, so a collision is a silent merge in
+one direction or the other and the loser is invisible.
+
+**Neither new pattern is ReDoS-able**, for the same reason the image regex is not: both are
+linear, with no nested quantifier and disjoint atom classes.
+
 ## Findings and dispositions
 
 | #   | Finding                                                                                                                                        | Found at                                                                      | Fixed in                                                                              | Severity |
@@ -122,6 +165,23 @@ Recorded because a review that reports only problems misrepresents the system.
 
 ## Accepted risks
 
+**A user can set any environment variable on a service they create.** The form validates
+shape, not meaning: nothing stops `LD_PRELOAD`, `NODE_OPTIONS`, or a variable that makes an
+image behave in a way its own documentation does not describe. Accepted rather than
+mitigated, because the service is the requester's own, created with the requester's own
+token, in the requester's own project — the same person can set the same variable from
+Railway's own dashboard in fewer clicks. An allow-list of "safe" names would be a guess
+about images this app has never heard of, and would break the feature's actual use case on
+its first day. What is not accepted, and is enforced: the name charset, the counts and
+sizes, the `RAILWAY_` namespace, and values reaching no log.
+
+**The create record no longer names every variable a service was created with.**
+`container.created` logs `variable_names` for preset-derived keys only — a closed set drawn
+from the catalog — plus `user_variable_count`. User-supplied names are unbounded and
+attacker-chosen in exactly the way the rejected `deploymentId` is, and a field an operator
+greps is not where that belongs. The trade is deliberate and it is a real loss: the audit
+trail says how many variables a user set, not which.
+
 **No app-level ownership check on `deploymentId`.** The stream endpoint validates the
 id's shape and caps concurrency, but it does not verify that the deployment belongs to
 the selected project. It deliberately does not: every upstream call carries the
@@ -182,9 +242,12 @@ reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm light
   They are now a first-class `incident` field, so `jq 'select(.incident=="abc12345")'`
   works as well as `grep`.
 - **Logs are structured JSON on stdout.** Recorded: the OIDC subject id, project /
-  environment / service / deployment ids, image references, incident ids, and an event
-  name per line. Never recorded: email, display name, profile image, access, refresh or
-  id tokens, `Error.cause`, the sealed cookie, or container stdout. Auth events
+  environment / service / deployment ids, image references, incident ids, the
+  preset-derived environment variable names on a spin-up — a closed set drawn from the
+  catalog — and an event name per line. Never recorded: email, display name, profile image,
+  access, refresh or id tokens, `Error.cause`, the sealed cookie, container stdout,
+  environment variable **values** of either origin, or user-supplied variable **names**.
+  Auth events
   (sign-in, sign-out, refresh, refresh failure, CSRF rejection) and state-changing
   actions (`container.created`, `container.create_failed`, `container.destroyed`,
   `container.destroy_refused`) are logged at `info` or `warn` — this is the audit trail

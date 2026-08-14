@@ -89,6 +89,25 @@ const spinUpForm = (over: Record<string, string> = {}) =>
     ...over,
   });
 
+/**
+ * The spin-up form with environment rows on it, as the editor posts them.
+ *
+ * Two parallel repeated fields rather than one structured value: index i of `variableKey`
+ * and index i of `variableValue` are one row, which is the wire format the schema and the
+ * row-attributed errors both depend on.
+ */
+const spinUpFormWith = (
+  rows: Array<[string, string]>,
+  over: Record<string, string> = {},
+) => {
+  const data = spinUpForm(over);
+  for (const [key, value] of rows) {
+    data.append("variableKey", key);
+    data.append("variableValue", value);
+  }
+  return data;
+};
+
 /** The one record carrying an event name, so an assertion names the event it means. */
 const record = (event: string) => logRecords().find((r) => r.msg === event);
 
@@ -131,20 +150,20 @@ describe("spinUp", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
-  it("sets a database's credentials from the image, not from the request", async () => {
-    /*
-     * The security property behind the shared preset catalog: variables are derived
-     * server-side from the submitted *image string*. The browser never sends a preset id
-     * and never sends variables, so there is no request shape in which a caller can
-     * inject arbitrary environment into a service — the whole surface is the image
-     * reference, which IMAGE_PATTERN already bounds.
-     */
+  /**
+   * Registers a working create path and collects what reached VariableCollectionUpsert.
+   *
+   * The array is the assertion surface for every variables test below: it is the only
+   * place the environment a service was actually created with can be read, since nothing
+   * logs it and nothing returns it.
+   */
+  function collectingVariables(serviceId = "svc_db") {
     const upserted: Array<Record<string, unknown>> = [];
     server.use(
       api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
       api.mutation("ServiceCreate", () =>
         HttpResponse.json({
-          data: { serviceCreate: { id: "svc_db", name: "spun-cache" } },
+          data: { serviceCreate: { id: serviceId, name: "spun-cache" } },
         }),
       ),
       api.mutation("VariableCollectionUpsert", ({ variables }) => {
@@ -155,15 +174,246 @@ describe("spinUp", () => {
         HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_db" } }),
       ),
     );
+    const sent = () =>
+      (upserted[0]?.input as { variables: Record<string, string> } | undefined)
+        ?.variables;
+    return { upserted, sent };
+  }
+
+  it("mints a database's credential when the row is left blank", async () => {
+    const { sent } = collectingVariables();
 
     // A tag the catalog does not list: postgres is postgres, and it still needs this.
-    const result = await spinUp(null, spinUpForm({ image: "postgres:17" }));
+    const result = await spinUp(
+      null,
+      spinUpFormWith([["POSTGRES_PASSWORD", ""]], { image: "postgres:17" }),
+    );
 
     expect(result).toMatchObject({ ok: true });
-    const sent = (upserted[0]?.input as { variables: Record<string, string> })
-      .variables;
-    expect(Object.keys(sent)).toEqual(["POSTGRES_PASSWORD"]);
-    expect(sent.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(32);
+    expect(Object.keys(sent()!)).toEqual(["POSTGRES_PASSWORD"]);
+    expect(sent()!.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(32);
+    // The user has no copy of what was minted, so they are told where to read it.
+    expect(result.ok && result.message).toMatch(/generated credentials are on Railway/);
+  });
+
+  it("uses the password the user typed instead of minting one", async () => {
+    const { sent } = collectingVariables();
+
+    const result = await spinUp(
+      null,
+      spinUpFormWith([["POSTGRES_PASSWORD", "hunter2hunter2"]], {
+        image: "postgres:17",
+      }),
+    );
+
+    expect(sent()).toEqual({ POSTGRES_PASSWORD: "hunter2hunter2" });
+    /*
+     * The whole reason resolveVariables reports whether it minted anything. Telling
+     * someone who typed their own password to go and read it on Railway is a lie, and it
+     * is the kind of lie a boolean on `variables` would have told.
+     */
+    expect(result).toEqual({ ok: true, message: "Spinning up cache" });
+  });
+
+  it("mints only for a name the catalog declares generated", async () => {
+    /*
+     * The replacement for the property this ticket retired, and the assertion that keeps
+     * it honest at this tier.
+     *
+     * The browser can now name any variable it likes. What it still cannot do is ask for
+     * a secret: minting is granted by the catalog, keyed on a name the catalog owns for
+     * the submitted image, and taken up by leaving that row blank. A row the catalog does
+     * not own is set to the empty string the user actually submitted.
+     */
+    const { sent } = collectingVariables();
+
+    await spinUp(
+      null,
+      spinUpFormWith(
+        [
+          ["NOT_A_PRESET_KEY", ""],
+          ["MYSQL_ROOT_PASSWORD", ""],
+        ],
+        { image: "postgres:17" },
+      ),
+    );
+
+    expect(sent()).toEqual({ NOT_A_PRESET_KEY: "", MYSQL_ROOT_PASSWORD: "" });
+  });
+
+  it("falls back to the catalog when the form carries no variable fields", async () => {
+    /*
+     * The pre-T-487 request shape, which is still what a form posted without JavaScript
+     * sends. Keeping it working is what lets the e2e helper and every older caller stay
+     * as they are.
+     */
+    const { sent } = collectingVariables();
+
+    await spinUp(null, spinUpForm({ image: "postgres:17" }));
+
+    expect(Object.keys(sent()!)).toEqual(["POSTGRES_PASSWORD"]);
+    expect(sent()!.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(32);
+  });
+
+  it("sets the variables the user typed on an image that boots bare", async () => {
+    const { sent } = collectingVariables();
+
+    await spinUp(
+      null,
+      spinUpFormWith(
+        [
+          ["GREETING", "hello"],
+          ["DEBUG", ""],
+        ],
+        { image: "ghcr.io/owner/app:1.0.0" },
+      ),
+    );
+
+    // The blank one is set empty, not minted: nothing in the catalog owns this image.
+    expect(sent()).toEqual({ GREETING: "hello", DEBUG: "" });
+  });
+
+  it("refuses a name Railway sets itself, without creating anything", async () => {
+    /*
+     * No ServiceCreate handler is registered, so `onUnhandledRequest: "error"` turns
+     * "a mutation was attempted" into a failure for free — which is the half of this that
+     * matters. A refused row must not leave a service behind.
+     */
+    const result = await spinUp(
+      null,
+      spinUpFormWith([["RAILWAY_TOKEN", "x"]], { image: "redis:7-alpine" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Names starting with RAILWAY_ are set by Railway itself",
+      field: "variableKey",
+      index: 0,
+    });
+  });
+
+  it("attributes a bad row to that row", async () => {
+    const result = await spinUp(
+      null,
+      spinUpFormWith([
+        ["FINE", "1"],
+        ["ALSO_FINE", "2"],
+        ["1bad", "3"],
+      ]),
+    );
+
+    expect(result).toMatchObject({ ok: false, field: "variableKey", index: 2 });
+  });
+
+  it("carries no row index for a rule about the whole list", async () => {
+    // The form has no row to attach these to, so they have to reach the user as a toast.
+    const result = await spinUp(
+      null,
+      spinUpFormWith(
+        Array.from(
+          { length: 26 },
+          (_unused, index) => [`V${index}`, ""] as [string, string],
+        ),
+      ),
+    );
+
+    expect(result).toMatchObject({ ok: false, field: "variableKey" });
+    expect(result.ok ? undefined : result.index).toBeUndefined();
+  });
+
+  it("reports a bad container name ahead of a bad variable row", async () => {
+    const result = await spinUp(
+      null,
+      spinUpFormWith([["1bad", ""]], { name: "x".repeat(41) }),
+    );
+
+    expect(result).toMatchObject({ ok: false, field: "name" });
+  });
+
+  it("names the preset variables in the audit line, and counts the rest", async () => {
+    /*
+     * The two halves have different cardinality, so they are recorded differently.
+     * Preset names come from a closed catalog and stay a usable label; a user-supplied
+     * name is unbounded and attacker-chosen, which is the same reason the rejected
+     * deploymentId is not logged.
+     */
+    collectingVariables();
+
+    await spinUp(
+      null,
+      spinUpFormWith(
+        [
+          ["POSTGRES_PASSWORD", ""],
+          ["MY_FLAG", "on"],
+        ],
+        { image: "postgres:17" },
+      ),
+    );
+
+    expect(record("container.created")).toMatchObject({
+      variable_names: "POSTGRES_PASSWORD",
+      user_variable_count: 1,
+    });
+  });
+
+  it("counts rather than names the variables when Railway refuses them", async () => {
+    server.use(
+      api.query("Project", () => HttpResponse.json({ data: projectWith([]) })),
+      api.mutation("ServiceCreate", () =>
+        HttpResponse.json({ data: { serviceCreate: { id: "s", name: "spun-cache" } } }),
+      ),
+      api.mutation("VariableCollectionUpsert", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    await spinUp(
+      null,
+      spinUpFormWith(
+        [
+          ["POSTGRES_PASSWORD", ""],
+          ["MY_FLAG", "on"],
+        ],
+        { image: "postgres:17" },
+      ),
+    );
+
+    const failed = record("railway.variables_failed");
+    expect(failed).toMatchObject({ variable_count: 2 });
+    expect(failed).not.toHaveProperty("variable_names");
+  });
+
+  it("writes no variable value, and no user-supplied name, to stdout", async () => {
+    /*
+     * The credential canary the OAuth callback has, for the other credential path.
+     *
+     * rawLogLines rather than logRecords on purpose: a parsed record cannot see a value
+     * that leaked through a message string, an err.stack, or a field added to this line
+     * after this test was written. All three halves are asserted — the value the user
+     * typed, the value the server minted, and the name the user chose, which T-487 puts
+     * on the same footing as the rejected deploymentId.
+     */
+    const typed = "s3cret-value-nobody-should-see";
+    const { sent } = collectingVariables();
+
+    await spinUp(
+      null,
+      spinUpFormWith(
+        [
+          ["POSTGRES_PASSWORD", ""],
+          ["MY_SECRET_FLAG", typed],
+        ],
+        { image: "postgres:17" },
+      ),
+    );
+
+    const minted = sent()!.POSTGRES_PASSWORD!;
+    const written = rawLogLines().join("\n");
+
+    expect(minted.length).toBeGreaterThanOrEqual(32);
+    expect(written).not.toContain(typed);
+    expect(written).not.toContain(minted);
+    expect(written).not.toContain("MY_SECRET_FLAG");
   });
 
   it("sends no variables for an image that boots bare", async () => {

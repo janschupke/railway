@@ -152,6 +152,12 @@ cost of that and why it is paid on the server rather than in the browser.
 Railway holds the state; mirroring it would only create drift. The dashboard queries
 project → services → `latestDeployment` in one request and streams deltas after that.
 
+T-487 tested that boundary and it held. Letting a user set environment variables raised the
+obvious question — where does a generated database password get shown? — and the answer is
+still nowhere: a user who wants a password they can keep now types their own into the form.
+Generation stayed the default for the users who do not care what it is, and a default
+nobody has to read is one this app has no reason to store.
+
 ### ADR-5 — The app only destroys what it created
 
 This tool deletes infrastructure, so ownership is the load-bearing safety property.
@@ -887,6 +893,11 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **Environment variables are single-line, and capped.** Twenty-five rows, 2 048 characters
+  a value, 16 000 characters in total, and no line breaks — so a certificate, a private key
+  or a JSON document is set on Railway's own Variables page rather than here. Names in the
+  `RAILWAY_*` namespace are refused, because Railway sets those itself. Editing the
+  variables of a service that already exists is a separate feature and is not built.
 - **Image references are validated for syntax, never for existence.** `nonexistent/image:tag`
   is a well-formed reference, so it is accepted and becomes a failed deployment. Checking
   the registry from the server was considered and refused on two grounds. First, it would

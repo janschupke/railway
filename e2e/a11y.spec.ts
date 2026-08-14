@@ -1,4 +1,5 @@
 import {
+  addVariable,
   alerts,
   button,
   containerRows,
@@ -246,6 +247,28 @@ test.describe("accessibility", () => {
       await expect(alerts(page).first()).toBeVisible();
 
       await expectNoA11yViolations(page, `form-errors/${theme}`);
+    });
+
+    test(`the environment editor has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Populated and in error, because that is the state with the most to get wrong:
+       * repeated controls whose labels have to disambiguate their row, a read-only cell
+       * inside a fieldset, and a per-row alert. An empty editor asserts almost nothing.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await onlyVisible(
+        page.getByRole("button", { name: /show preset images/i }),
+      ).click();
+      await onlyVisible(page.getByRole("option", { name: /^PostgreSQL/ })).click();
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+      await field(page, "Name").fill("db");
+      await addVariable(page, "RAILWAY_TOKEN", "x");
+      await button(page, /spin up container/i).click();
+      await expect(alerts(page).first()).toBeVisible();
+
+      await expectNoA11yViolations(page, `variables-editor/${theme}`);
     });
   }
 });

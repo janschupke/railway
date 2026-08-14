@@ -102,14 +102,22 @@ describe("describeActionError", () => {
 });
 
 describe("isField", () => {
-  it("recognises the two attributable fields", () => {
+  it("recognises every attributable field", () => {
     expect(isField("name")).toBe(true);
     expect(isField("image")).toBe(true);
+    expect(isField("variableKey")).toBe(true);
+    expect(isField("variableValue")).toBe(true);
   });
 
   it("rejects anything else, including zod's numeric array indices", () => {
+    /*
+     * The numeric case stopped being hypothetical with T-487: a repeated field's issue
+     * path is ["variableKey", 3], so an index is now genuinely passed through here.
+     */
     expect(isField("projectId")).toBe(false);
+    expect(isField("variables")).toBe(false);
     expect(isField(0)).toBe(false);
+    expect(isField(3)).toBe(false);
     expect(isField(undefined)).toBe(false);
   });
 });

@@ -1,8 +1,19 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_IMAGE, PRESETS, presetFor, repositoryOf } from "./presets";
-import { spinUpSchema } from "./validation";
+import { LIMITS } from "./constants";
+import {
+  DEFAULT_IMAGE,
+  PRESETS,
+  presetFor,
+  presetVariableDefaults,
+  repositoryOf,
+} from "./presets";
+import {
+  RESERVED_VARIABLE_PREFIX,
+  VARIABLE_NAME_PATTERN,
+  spinUpSchema,
+} from "./validation";
 
 const messages = JSON.parse(
   readFileSync(
@@ -95,5 +106,61 @@ describe("the catalog", () => {
   it("lists no image twice", () => {
     const seen = PRESETS.map((p) => p.value);
     expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("declares only variables its own form would accept", () => {
+    /*
+     * The drift this guards is specific and would be invisible until someone hit it: a
+     * preset's variables are seeded into the editor as rows, and those rows are submitted
+     * back through spinUpSchema. A catalog entry the schema refuses is one the form can
+     * display and then never accept — a container nobody can create, reported as a
+     * validation error against a name the user never typed.
+     *
+     * The reserved-prefix rule is the live hazard here, since RAILWAY_ is exactly the
+     * kind of name an image might plausibly document.
+     */
+    for (const preset of PRESETS) {
+      const variables = preset.variables ?? [];
+      expect(variables.length, preset.value).toBeLessThanOrEqual(LIMITS.VARIABLES_MAX);
+      for (const variable of variables) {
+        expect(variable.name, preset.value).toMatch(VARIABLE_NAME_PATTERN);
+        expect(variable.name.length, preset.value).toBeLessThanOrEqual(
+          LIMITS.VARIABLE_NAME_MAX,
+        );
+        expect(
+          variable.name.toUpperCase().startsWith(RESERVED_VARIABLE_PREFIX),
+          preset.value,
+        ).toBe(false);
+      }
+    }
+  });
+});
+
+describe("presetVariableDefaults", () => {
+  it("gives a generated credential a blank value, not a placeholder one", () => {
+    /*
+     * The value does not exist until the server mints it, and anything with content here
+     * would be a credential the browser holds. Blank is the whole representation; the
+     * `generated` flag is what lets the editor say why it is blank.
+     */
+    expect(presetVariableDefaults("postgres:17")).toEqual([
+      { name: "POSTGRES_PASSWORD", value: "", generated: true },
+    ]);
+  });
+
+  it("keeps a literal default readable, in catalog order", () => {
+    expect(presetVariableDefaults("mongo:7")).toEqual([
+      { name: "MONGO_INITDB_ROOT_USERNAME", value: "root", generated: false },
+      { name: "MONGO_INITDB_ROOT_PASSWORD", value: "", generated: true },
+    ]);
+  });
+
+  it("seeds nothing for an image that boots bare, or one it does not know", () => {
+    expect(presetVariableDefaults("nginx:alpine")).toEqual([]);
+    expect(presetVariableDefaults("ghcr.io/owner/app:1.0.0")).toEqual([]);
+  });
+
+  it("matches on the repository, like presetFor", () => {
+    expect(presetVariableDefaults("postgres")).toHaveLength(1);
   });
 });

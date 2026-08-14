@@ -6,15 +6,66 @@ import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { spinUp } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
-import { DEFAULT_IMAGE, PRESETS } from "@/lib/presets";
+import { LIMITS } from "@/lib/constants";
+import { DEFAULT_IMAGE, PRESETS, presetVariableDefaults } from "@/lib/presets";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
+import { KeyValueEditor, type KeyValueRow } from "./ui/key-value-editor";
 import { PendingStatus } from "./ui/misc";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
+
+/** A row plus what the form needs to know about where it came from. */
+type VariableRow = KeyValueRow & {
+  origin: "preset" | "user";
+  /** Whether a person has edited either cell since it was seeded. */
+  touched: boolean;
+};
+
+const PRESET_ORIGIN = "preset" as const;
+const USER_ORIGIN = "user" as const;
+
+/** Catalog defaults as locked rows: the name is the catalog's, the value is the user's. */
+function seedRows(image: string): VariableRow[] {
+  return presetVariableDefaults(image).map((variable) => ({
+    // Stable across a reseed, so switching images and back does not move focus.
+    id: `preset-${variable.name}`,
+    name: variable.name,
+    value: variable.value,
+    locked: true,
+    generatedWhenBlank: variable.generated,
+    origin: PRESET_ORIGIN,
+    touched: false,
+  }));
+}
+
+const isVariableField = (field: string | undefined) =>
+  field === "variableKey" || field === "variableValue";
+
+/** Whether a failure names a row, as opposed to the list as a whole. */
+const hasIndex = (result: ActionResult) => !result.ok && result.index !== undefined;
+
+/**
+ * The rows an image change should leave behind.
+ *
+ * One rule: nothing a person typed is thrown away by changing the image. A touched preset
+ * row survives and stops being locked, since the catalog that owned its name is gone; an
+ * untouched one is replaced. A user row whose name collides with a new preset default wins,
+ * and that default is not seeded — which is what keeps the duplicate rule from firing on
+ * something the app itself created.
+ */
+function reseed(rows: readonly VariableRow[], image: string): VariableRow[] {
+  const keep = rows
+    .filter((row) => row.origin === USER_ORIGIN || row.touched)
+    .map((row) => ({ ...row, locked: false }));
+  const seeded = seedRows(image).filter(
+    (row) => !keep.some((kept) => kept.name === row.name),
+  );
+  return [...seeded, ...keep];
+}
 
 export function SpinUpForm({
   projectId,
@@ -41,11 +92,60 @@ export function SpinUpForm({
    */
   const [refreshing, startRefresh] = useTransition();
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
+  const [rows, setRows] = useState<VariableRow[]>(() => seedRows(DEFAULT_IMAGE));
 
   /*
-   * Labels and group headings are catalog keys, resolved here. The catalog itself is a
-   * plain module so the Server Action can read the same entries' variables without the
-   * client ever sending any — see presetFor().
+   * The current image, readable from the result effect without being a dependency of it.
+   *
+   * Depending on `image` there would re-run that effect on every image change, with the
+   * same stale `result` still in hand — firing the success toast again and looping
+   * router.refresh(). That is ADR-7's hazard in its other form: the dependency is stable
+   * here precisely because it is not reactive.
+   */
+  const imageRef = useRef(DEFAULT_IMAGE);
+
+  /*
+   * Reseeded here rather than in an effect keyed on `image`. The rule in `reseed` needs to
+   * know what the image *was*, and an effect only sees what it now is — so an effect would
+   * have to keep a previous-value ref to say the same thing, and would run once on mount
+   * for a change that never happened.
+   */
+  const changeImage = (next: string) => {
+    setImage(next);
+    imageRef.current = next;
+    setRows((current) => reseed(current, next));
+  };
+
+  /**
+   * Re-attaches the provenance the editor does not carry.
+   *
+   * `KeyValueEditor` is domain-free — it holds rows of two strings and knows nothing about
+   * catalogs — so `origin` and `touched` are matched back on here by row id. A row the
+   * editor invented is a user row, and any edit to either cell marks it touched, which is
+   * what stops the next image change from discarding it.
+   */
+  const changeRows = (next: KeyValueRow[]) => {
+    setRows(
+      next.map((row) => {
+        const previous = rows.find((candidate) => candidate.id === row.id);
+        return {
+          ...row,
+          origin: previous?.origin ?? USER_ORIGIN,
+          touched:
+            previous === undefined ||
+            previous.touched ||
+            previous.name !== row.name ||
+            previous.value !== row.value,
+        };
+      }),
+    );
+  };
+
+  /*
+   * Labels and group headings are catalog keys, resolved here. The catalog is a plain
+   * module so the same entries can be read on both sides: here for the image list and the
+   * editor's default rows, and in the Server Action to decide which names it may mint a
+   * credential for. See presetVariableDefaults() and resolveVariables().
    */
   const presetOptions = PRESETS.map((preset) => ({
     value: preset.value,
@@ -64,14 +164,44 @@ export function SpinUpForm({
    */
   const failedTitle = t("failedTitle");
 
+  /*
+   * Rows that actually reach FormData, in the order they reach it. A blank row carries no
+   * `name` attribute and so is not submitted at all, which is why an error's index counts
+   * over this list rather than over what is on screen.
+   */
+  const submittedRows = rows.filter((row) => row.name !== "" || row.value !== "");
+
+  const rowError =
+    result &&
+    !result.ok &&
+    (result.field === "variableKey" || result.field === "variableValue") &&
+    result.index !== undefined
+      ? {
+          rowId: submittedRows[result.index]?.id ?? "",
+          cell: result.field === "variableKey" ? ("name" as const) : ("value" as const),
+          message: result.error,
+        }
+      : undefined;
+
   useEffect(() => {
     if (!result) return;
     if (result.ok) {
       if (nameRef.current) nameRef.current.value = "";
+      /*
+       * User rows are cleared and the preset defaults re-seeded, matching the name field
+       * rather than the image. A leftover variable set silently applied to the next
+       * container is worse than a leftover name: nothing on screen says the last
+       * spin-up's environment is still armed.
+       */
+      setRows(seedRows(imageRef.current));
       toast({ title: result.message, tone: "success" });
       startRefresh(() => router.refresh());
-    } else if (!result.field) {
-      // Field-attributed errors render inline next to the input instead.
+    } else if (!result.field || (isVariableField(result.field) && !hasIndex(result))) {
+      /*
+       * Field-attributed errors render inline next to the input instead — except a
+       * variable error with no row to attach it to (too many rows, too large together),
+       * which would otherwise be swallowed silently.
+       */
       toast({ title: failedTitle, description: result.error, tone: "error" });
     }
   }, [result, router, toast, failedTitle, startRefresh]);
@@ -118,7 +248,7 @@ export function SpinUpForm({
               error={fieldError("image")}
               name="image"
               value={image}
-              onValueChange={setImage}
+              onValueChange={changeImage}
               options={presetOptions}
               placeholder={t("imagePlaceholder")}
               noMatchesLabel={t("imageNoMatches")}
@@ -148,6 +278,42 @@ export function SpinUpForm({
             </Field>
           </div>
         </div>
+
+        {/*
+          After the name field in DOM order, and that placement is asserted: the keyboard
+          spec pins Image → Tab → Name, so an editor rendered between them would break a
+          tab order someone deliberately fixed.
+        */}
+        <KeyValueEditor
+          legend={t("variablesLegend")}
+          description={t("variablesDescription")}
+          rows={rows}
+          onRowsChange={changeRows}
+          nameFieldName="variableKey"
+          valueFieldName="variableValue"
+          nameLabel={t("variableNameLabel")}
+          valueLabel={t("variableValueLabel")}
+          namePlaceholder={t("variableNamePlaceholder")}
+          valuePlaceholder={t("variableValuePlaceholder")}
+          generatedPlaceholder={t("variableGeneratedPlaceholder")}
+          addLabel={t("addVariable")}
+          removeLabel={({ name, position }) =>
+            name
+              ? t("removeVariable", { name })
+              : t("removeVariableUnnamed", { position })
+          }
+          cellLabel={({ label, position }) => `${label} ${position}`}
+          addedAnnouncement={(position) => t("variableAdded", { position })}
+          removedAnnouncement={({ name, position }) =>
+            name
+              ? t("variableRemoved", { name })
+              : t("variableRemovedUnnamed", { position })
+          }
+          error={rowError}
+          max={LIMITS.VARIABLES_MAX}
+          maxReachedLabel={t("variablesFull")}
+          disabled={disabled}
+        />
 
         <div className="flex items-center gap-3">
           {/*

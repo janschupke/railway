@@ -1,4 +1,5 @@
 import {
+  addVariable,
   button,
   containerRows as rows,
   expect,
@@ -81,9 +82,43 @@ test.describe("the dashboard at phone width", () => {
       .getByRole("button");
     await expect(chips).toHaveCount(4);
 
-    // Every chip is inside the viewport, which is what "wrapped" means here — a strip
-    // that overflowed would leave the last few outside it.
-    for (const chip of await chips.all()) await expect(chip).toBeInViewport();
+    /*
+     * Horizontal containment, which is what "wrapped rather than clipped" actually means:
+     * a strip that overflowed would run its last chips past the right edge.
+     *
+     * This asserted `toBeInViewport()` until the spin-up form grew an environment editor,
+     * which is taller than what it replaced and pushes the filter strip below the fold on
+     * a phone. That is ordinary vertical scrolling — the page is allowed to be longer than
+     * a screen, and the sideways-scroll specs above are what hold the real line — but it
+     * failed a check that had never meant to be about vertical position at all.
+     */
+    const viewport = page.viewportSize()!;
+    for (const chip of await chips.all()) {
+      const box = (await chip.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    }
+  });
+
+  test("wraps an environment row instead of overflowing it", async ({ page }) => {
+    /*
+     * Three controls on one line is the widest thing on the dashboard, so this is the
+     * row most likely to push the page sideways. `flex-wrap` with `min-w-0 grow basis-*`
+     * on the cells is what stops it, and `min-w-0` is the load-bearing half — a flex
+     * item's default minimum is its content.
+     */
+    await addVariable(page, "MY_FLAG", "on");
+
+    const viewport = page.viewportSize()!;
+    for (const locator of [
+      page.getByLabel("Variable name 1"),
+      page.getByLabel("Variable value 1"),
+      button(page, "Remove MY_FLAG"),
+    ]) {
+      await expect(locator).toBeInViewport();
+      const box = (await locator.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    }
   });
 
   test("gives the search field the whole width it can have", async ({ page }) => {

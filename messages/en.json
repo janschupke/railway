@@ -142,7 +142,21 @@
     "failedTitle": "Could not spin up",
     "imageNoMatches": "No preset matches. Any public image reference works here.",
     "imageToggle": "Show preset images",
-    "imageListLabel": "Preset images"
+    "imageListLabel": "Preset images",
+    "variablesLegend": "Environment variables",
+    "variablesDescription": "Set what this image needs to run. A blank value on a preset row is generated for you and readable on Railway, under this service's Variables.",
+    "variableNameLabel": "Variable name",
+    "variableValueLabel": "Variable value",
+    "variableNamePlaceholder": "MY_VARIABLE",
+    "variableValuePlaceholder": "value",
+    "variableGeneratedPlaceholder": "Generated for you",
+    "addVariable": "Add variable",
+    "removeVariable": "Remove {name}",
+    "removeVariableUnnamed": "Remove variable {position}",
+    "variableAdded": "Added variable {position}.",
+    "variableRemoved": "Removed {name}.",
+    "variableRemovedUnnamed": "Removed variable {position}.",
+    "variablesFull": "That is the most you can set here. Add the rest on Railway."
   },
   "destroy": {
     "trigger": "Destroy",
@@ -176,7 +190,17 @@
     "projectRequired": "Select a project before continuing",
     "environmentRequired": "Select an environment before continuing",
     "serviceRequired": "Missing container reference.",
-    "referenceInvalid": "That reference is not one Railway could have issued. Reload the page and try again."
+    "referenceInvalid": "That reference is not one Railway could have issued. Reload the page and try again.",
+    "variableNameRequired": "Give this variable a name, or clear the row",
+    "variableNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",
+    "variableNameInvalid": "Variable names use letters, numbers and underscores, and cannot start with a number",
+    "variableNameReserved": "Names starting with RAILWAY_ are set by Railway itself",
+    "variableNameDuplicate": "This name is already set on another row",
+    "variableValueTooLong": "Keep the value under {max, plural, one {# character} other {# characters}}",
+    "variableValueInvalid": "Values cannot contain line breaks. Paste a single line, or set this one on Railway.",
+    "variablesTooMany": "Set at most {max, plural, one {# variable} other {# variables}} here",
+    "variablesTooLarge": "The variables are too large together. Keep them under {max} characters.",
+    "variablesMalformed": "The variables could not be read. Reload the page and try again."
   },
   "errors": {
     "generic": "Something went wrong. Please try again. Reference {incident}.",

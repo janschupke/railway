@@ -22,6 +22,46 @@ const IMAGE_PATTERN =
 export const RAILWAY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
+ * An environment variable name: POSIX's own definition.
+ *
+ * Underscore or letter, then letters, digits and underscores. Deliberately not
+ * uppercase-only — lowercase names are legal everywhere they matter, and a validator that
+ * guesses stricter than the platform turns a working variable into a form error.
+ *
+ * Linear, with no nested quantifier and disjoint atom classes, so it is not ReDoS-able for
+ * the same reason IMAGE_PATTERN is not. SECURITY.md makes that claim about the image regex
+ * and a reviewer will ask it of this one.
+ */
+export const VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Everything a value may hold: any character except the C0 controls and DEL, with tab
+ * allowed through.
+ *
+ * The exclusion is the whole rule. A line break is invisible in a single-line input — the
+ * browser's own value-sanitization algorithm strips it from a pasted string, so the user's
+ * secret is silently truncated — and it survives to whatever downstream reads an
+ * environment block line by line, which is the one character class that changes the shape
+ * of what is being set rather than its content. NUL is refused at the other end of the
+ * range for the same reason, and doubles as what a non-string FormData entry is coerced to
+ * before it gets here.
+ */
+const VARIABLE_VALUE_PATTERN = /^[^\u0000-\u0008\u000A-\u001F\u007F]*$/;
+
+/**
+ * The namespace Railway sets itself.
+ *
+ * Railway injects a RAILWAY_* block into every service — environment, project id, service
+ * name, the private and public domains. `variableCollectionUpsert` runs with
+ * `replace: false`, so a collision is a silent merge in one direction or the other and the
+ * loser is invisible. Refusing the namespace is cheaper than explaining it.
+ *
+ * Exported so presets.test.ts can prove no catalog entry is unsubmittable by its own form,
+ * which is the failure mode this rule would otherwise create.
+ */
+export const RESERVED_VARIABLE_PREFIX = "RAILWAY_";
+
+/**
  * Every rule carries a catalog key as its message, and every rule carries one — the
  * silent `.min(1)` calls used to fall through to zod's own built-in English, which no
  * amount of translation would have reached.
@@ -44,21 +84,100 @@ const railwayId = (missing: string) =>
     // The pattern carries the 64-character ceiling itself, so no separate .max().
     .regex(RAILWAY_ID_PATTERN, "validation.referenceInvalid");
 
-export const spinUpSchema = z.object({
-  projectId: railwayId("validation.projectRequired"),
-  environmentId: railwayId("validation.environmentRequired"),
-  name: z
-    .string()
-    .trim()
-    .min(1, "validation.nameRequired")
-    .max(LIMITS.CONTAINER_NAME_MAX, "validation.nameTooLong"),
-  image: z
-    .string()
-    .trim()
-    .min(1, "validation.imageRequired")
-    .max(LIMITS.IMAGE_REF_MAX, "validation.imageTooLong")
-    .regex(IMAGE_PATTERN, "validation.imageInvalid"),
-});
+const variableName = z
+  .string()
+  .min(1, "validation.variableNameRequired")
+  .max(LIMITS.VARIABLE_NAME_MAX, "validation.variableNameTooLong")
+  .regex(VARIABLE_NAME_PATTERN, "validation.variableNameInvalid")
+  .refine(
+    (name) => !name.toUpperCase().startsWith(RESERVED_VARIABLE_PREFIX),
+    "validation.variableNameReserved",
+  );
+
+const variableValue = z
+  .string()
+  .max(LIMITS.VARIABLE_VALUE_MAX, "validation.variableValueTooLong")
+  .regex(VARIABLE_VALUE_PATTERN, "validation.variableValueInvalid");
+
+/*
+ * The environment editor arrives as two parallel arrays rather than an array of pairs, and
+ * that is load-bearing rather than a serialisation accident.
+ *
+ * FormData preserves per-name insertion order and the two inputs' relative DOM order is
+ * fixed by the row markup, so `variableKey[i]` and `variableValue[i]` are one row by
+ * construction — there is no index to parse out of an attacker-chosen field name. More
+ * importantly, zod's own array machinery then produces `issue.path === ["variableKey", 3]`,
+ * which is exactly ActionResult's `field` plus `index` with nothing to translate.
+ *
+ * Reshaping this into `variables: z.array(z.object({ key, value }))` yields
+ * `["variables", 3, "key"]` and silently loses the cell, which is how a row error becomes
+ * "check the form". Do not tidy it.
+ *
+ * `.default([])` is what keeps every caller that sends no variable fields parsing, which is
+ * both the pre-T-487 request shape and what a form posted without JavaScript still sends.
+ */
+export const spinUpSchema = z
+  .object({
+    projectId: railwayId("validation.projectRequired"),
+    environmentId: railwayId("validation.environmentRequired"),
+    name: z
+      .string()
+      .trim()
+      .min(1, "validation.nameRequired")
+      .max(LIMITS.CONTAINER_NAME_MAX, "validation.nameTooLong"),
+    image: z
+      .string()
+      .trim()
+      .min(1, "validation.imageRequired")
+      .max(LIMITS.IMAGE_REF_MAX, "validation.imageTooLong")
+      .regex(IMAGE_PATTERN, "validation.imageInvalid"),
+    variableKey: z
+      .array(variableName)
+      .max(LIMITS.VARIABLES_MAX, "validation.variablesTooMany")
+      .default([]),
+    variableValue: z.array(variableValue).default([]),
+  })
+  .superRefine((data, ctx) => {
+    /*
+     * Cross-row rules only. Per-cell rules live on the element schemas above, where zod
+     * builds the path — and therefore the row index — itself.
+     */
+    if (data.variableKey.length !== data.variableValue.length) {
+      // Nothing a browser can produce: the row markup emits both cells or neither. Bail
+      // rather than validate one row's key against the next row's value.
+      ctx.addIssue({
+        code: "custom",
+        path: ["variableKey"],
+        message: "validation.variablesMalformed",
+      });
+      return;
+    }
+
+    const seen = new Set<string>();
+    for (const [index, key] of data.variableKey.entries()) {
+      // Attributed to the second occurrence: the first one is the row the user meant.
+      // Exact and case-sensitive — `Foo` and `FOO` are different variables on Linux.
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["variableKey", index],
+          message: "validation.variableNameDuplicate",
+        });
+      }
+      seen.add(key);
+    }
+
+    const total =
+      data.variableKey.reduce((sum, key) => sum + key.length, 0) +
+      data.variableValue.reduce((sum, value) => sum + value.length, 0);
+    if (total > LIMITS.VARIABLES_TOTAL_MAX) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["variableKey"],
+        message: "validation.variablesTooLarge",
+      });
+    }
+  });
 
 export const spinDownSchema = z.object({
   projectId: railwayId("validation.projectRequired"),
@@ -70,6 +189,10 @@ export const spinDownSchema = z.object({
 export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.nameTooLong": { max: LIMITS.CONTAINER_NAME_MAX },
   "validation.imageTooLong": { max: LIMITS.IMAGE_REF_MAX },
+  "validation.variableNameTooLong": { max: LIMITS.VARIABLE_NAME_MAX },
+  "validation.variableValueTooLong": { max: LIMITS.VARIABLE_VALUE_MAX },
+  "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
+  "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
 };
 
 /**
@@ -89,4 +212,14 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.environmentRequired",
   "validation.serviceRequired",
   "validation.referenceInvalid",
+  "validation.variableNameRequired",
+  "validation.variableNameTooLong",
+  "validation.variableNameInvalid",
+  "validation.variableNameReserved",
+  "validation.variableNameDuplicate",
+  "validation.variableValueTooLong",
+  "validation.variableValueInvalid",
+  "validation.variablesTooMany",
+  "validation.variablesTooLarge",
+  "validation.variablesMalformed",
 ]);

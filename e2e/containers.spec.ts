@@ -1,4 +1,5 @@
 import {
+  addVariable,
   button,
   disclosure,
   expect,
@@ -215,13 +216,18 @@ test.describe("container lifecycle", () => {
     page,
   }) => {
     /*
-     * The whole reason the catalog can carry databases at all. `postgres` exits on its
-     * first tick without POSTGRES_PASSWORD and Railway restarts it forever, so a preset
-     * that offered it without one would show a crash loop and read as a bug in this app.
+     * The default a user does not have to think about. `postgres` exits on its first tick
+     * without POSTGRES_PASSWORD and Railway restarts it forever, so a preset offering it
+     * without one would show a crash loop and read as a bug in this app. The form now
+     * seeds that row and leaves its value blank, which is what asks the server to mint.
      *
      * Both halves matter: the credential reaches Railway, and it never reaches the page.
      * The user reads it on Railway's own Variables page, which is where every other
      * Railway secret lives — this app stores nothing.
+     *
+     * The last assertion is also a design tripwire. Implement the generated default by
+     * prefilling a client-visible value rather than a placeholder attribute and this test
+     * fails, which is exactly the review it should perform.
      */
     await spinUp(page, "db", "PostgreSQL");
     await expect(row(page, "db")).toBeVisible();
@@ -233,6 +239,74 @@ test.describe("container lifecycle", () => {
     const password = created.variables.POSTGRES_PASSWORD!;
     expect(password.length).toBeGreaterThanOrEqual(32);
     expect(await page.content()).not.toContain(password);
+  });
+
+  test("sets the variables the user typed", async ({ page }) => {
+    await spinUp(page, "app", "Nginx", { GREETING: "hello", MODE: "test" });
+    await expect(row(page, "app")).toBeVisible();
+
+    const services = await fixtureServices(page);
+    const created = services.find((service) => service.name === "spun-app")!;
+
+    expect(created.variables).toEqual({ GREETING: "hello", MODE: "test" });
+  });
+
+  test("lets the user supply a database password instead of a generated one", async ({
+    page,
+  }) => {
+    /*
+     * The honest counterpart to the assertion above. The boundary this app holds is "it
+     * does not reveal what it generated", not "a password never appears on screen" — a
+     * value the user typed is theirs, and hiding it would be theatre.
+     *
+     * This is also what makes not showing generated credentials cost nothing: anyone who
+     * needs a password they can keep types one here.
+     */
+    await onlyVisible(
+      page.getByRole("button", { name: /show preset images/i }),
+    ).click();
+    await onlyVisible(page.getByRole("option", { name: /^PostgreSQL/ })).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await field(page, "Name").fill("db");
+    await page.getByLabel("Variable value 1").fill("hunter2hunter2");
+
+    /*
+     * Asserted before submitting, and on the control's value rather than on page.content().
+     * Two reasons, both worth writing down: a success clears the user's rows and re-seeds
+     * the image's own, so nothing typed survives to be found afterwards; and a controlled
+     * input's value is a DOM property that never appears in the serialised HTML at all.
+     */
+    await expect(page.getByLabel("Variable value 1")).toHaveValue("hunter2hunter2");
+
+    await button(page, /spin up container/i).click();
+
+    await expect(row(page, "db")).toBeVisible();
+    const services = await fixtureServices(page);
+    const created = services.find((service) => service.name === "spun-db")!;
+
+    expect(created.variables).toEqual({ POSTGRES_PASSWORD: "hunter2hunter2" });
+    // And the row is back to the catalog's blank default, ready for the next container.
+    await expect(page.getByLabel("Variable value 1")).toHaveValue("");
+  });
+
+  test("refuses a name Railway owns, at the row that caused it", async ({ page }) => {
+    await onlyVisible(
+      page.getByRole("button", { name: /show preset images/i }),
+    ).click();
+    await onlyVisible(page.getByRole("option", { name: /^Nginx/ })).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await field(page, "Name").fill("app");
+    await addVariable(page, "RAILWAY_TOKEN", "x");
+    await button(page, /spin up container/i).click();
+
+    await expect(onlyVisible(page.getByText(/set by Railway itself/))).toBeVisible();
+    await expect(page.getByLabel("Variable name 1")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    // Nothing was created: a refused row must not leave a service behind.
+    const services = await fixtureServices(page);
+    expect(services.find((service) => service.name === "spun-app")).toBeUndefined();
   });
 
   test("says a service was created when only its environment failed", async ({

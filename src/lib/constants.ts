@@ -196,6 +196,43 @@ export const LIMITS = {
   SERVICE_SLUG_MAX: 32,
   CONTAINER_NAME_MAX: 40,
   IMAGE_REF_MAX: 255,
+  /**
+   * Environment variables one spin-up may carry.
+   *
+   * A long way past every preset in the catalog — the largest declares two — and past the
+   * handful a real image documents, while staying a list a person can see on one screen.
+   * Not a Railway limit; Railway accepts far more. It is the point past which this editor
+   * is the wrong tool and the service's own Variables page on Railway is the right one.
+   */
+  VARIABLES_MAX: 25,
+  /**
+   * Variable name length.
+   *
+   * A legibility bound rather than a platform one: POSIX guarantees nothing here and
+   * Linux's own ceiling is the whole environment block rather than any single name. A
+   * name longer than this does not fit the editor's key column at any viewport.
+   */
+  VARIABLE_NAME_MAX: 64,
+  /**
+   * Variable value length.
+   *
+   * Sized for what people legitimately paste into a single-line field — a connection
+   * string, a JWT, an API key — and not for what does not belong in one: a certificate, a
+   * private key, a JSON document. Those need a multi-line editor, which is a different
+   * ticket, and a value arriving with a newline in it is refused rather than silently
+   * truncated by the browser.
+   */
+  VARIABLE_VALUE_MAX: 2048,
+  /**
+   * Characters of names and values in one submission, across every row.
+   *
+   * The per-row caps multiply — 25 × (64 + 2048) is over fifty thousand characters — so
+   * this is the bound that actually holds. Counted in characters rather than bytes on
+   * purpose: it is a form limit a person has to be told about, not a transport one, and
+   * the transport already has its own (Next's Server Action body limit, 1 MB by default).
+   * Deliberately below that, so the ceiling producing a readable sentence is this one.
+   */
+  VARIABLES_TOTAL_MAX: 16_000,
 } as const;
 
 /** Presentation thresholds that are not styling. */
