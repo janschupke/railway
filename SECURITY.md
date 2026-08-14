@@ -305,6 +305,20 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
   attacker-controlled string straight off the URL, and putting it in a field an operator
   greps is the injection surface the validator exists to close. `id_length` carries the
   diagnostic content instead.
+- **`next build` copies `.env` into the standalone output, and `postbuild` deletes it.**
+  `output: "standalone"` copies `.env` and `.env.production` next to the generated
+  `server.js`, which then does `process.chdir(__dirname)` before listening — so Next loads
+  env from there. `.dockerignore` keeps `.env` out of the image build context, but that rule
+  does not reach a directory produced inside the build, and it does not reach a developer
+  machine at all: `pnpm test:e2e` and `pnpm serve:e2e` run that same server against the
+  fixture, and any variable the harness does not set explicitly would have fallen through to
+  a real Railway account. `scripts/pack-standalone.ts` removes it. Three places now exclude
+  this one file, which is proportionate to the number of ways it has found out.
+- **The image ships a traced `node_modules`, not an installed one** — 504 MB to 44 MB. What
+  left with it: TypeScript, Playwright, the Babel closure and a native SWC compiler, none
+  imported by the server, all of which `pnpm install --prod` was obliged to keep because
+  pnpm had welded them into the identity of `next` and `next-intl` while resolving optional
+  peers. Attack surface follows code volume, and this was most of the volume.
 - **The deployment image is built, booted and scanned in CI**, by the `image` job, before
   it can reach Railway — every other gate could pass with a `Dockerfile` that fails at
   deploy. The base image is pinned by sha256 digest on both `FROM` lines, so the runtime

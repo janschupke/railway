@@ -63,10 +63,14 @@ COPY . .
 # legitimate CI failure" — enforced here rather than restated. A build that starts needing
 # a real secret now fails loudly at this line instead of quietly baking one into an image.
 #
-# Nothing about them survives into the runtime stage, which copies only .next, the
-# production node_modules and three files, and reads its own environment at startup.
-# APP_URL in particular is a placeholder and stays one: in production it is derived from
-# Railway's injected RAILWAY_PUBLIC_DOMAIN per request (see inferredAppUrl in src/env.ts).
+# Nothing about them survives into the runtime stage, which copies one directory and reads
+# its own environment at startup. APP_URL in particular is a placeholder and stays one: in
+# production it is derived from Railway's injected RAILWAY_PUBLIC_DOMAIN per request (see
+# inferredAppUrl in src/env.ts).
+#
+# `pnpm build` also runs `postbuild` — scripts/pack-standalone.ts — which copies
+# .next/static into .next/standalone and refuses to finish if the message catalog was not
+# traced. Both are silent failures at build time and page-shaped ones at run time.
 RUN RAILWAY_CLIENT_ID=build-placeholder \
     RAILWAY_CLIENT_SECRET=build-placeholder \
     SESSION_SECRET=build-placeholder-at-least-32-characters \
@@ -76,17 +80,21 @@ RUN RAILWAY_CLIENT_ID=build-placeholder \
 # measured. A route that grew past its budget should not reach a deployment.
 RUN pnpm size
 
-# 76 MB of Turbopack's incremental build cache, which `next start` never opens. Removed
-# here rather than in the runner: a COPY that brings it in and a RUN that deletes it leave
-# it sitting in the layer underneath, which is the whole trap with trimming an image.
-# `pnpm size` runs first — it reads .next/diagnostics, so the order is not arbitrary.
-RUN rm -rf .next/cache
-
-
-# Production dependencies only, resolved from the same lockfile as the build's.
-FROM base AS prod-deps
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+# No stage installing production dependencies. There used to be one, and it was the largest
+# thing in the image by an order of magnitude: 480 MB of node_modules against 4.6 MB of
+# compiled app. `output: "standalone"` traces what the server actually reaches instead, and
+# the answer is 38 MB.
+#
+# The gap was not waste in the usual sense. pnpm resolves optional peer dependencies at
+# lockfile time and writes them into the resolved package's identity —
+# `next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` — so
+# `pnpm install --prod` could not remove them: it prunes root devDependencies, and these
+# were part of the name of a production one. Playwright, TypeScript, `@types/node` and the
+# whole Babel closure shipped to production because they are devDependencies of the same
+# package.json. Tracing asks what the code imports, and none of them answer.
+#
+# .next/cache is not deleted here any more either. It never enters the image: the runtime
+# stage copies .next/standalone, and the build cache is not in it.
 
 
 FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runner
@@ -113,8 +121,8 @@ LABEL org.opencontainers.image.title="Railway Freight Loader" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision="${RAILWAY_GIT_COMMIT_SHA}"
 
-# `next start` is a Node process, so it needs no shell, no package manager and no build
-# toolchain. pnpm is deliberately not installed in this stage — see CMD.
+# The standalone server is a Node process, so it needs no shell, no package manager and no
+# build toolchain. pnpm is deliberately not installed in this stage — see CMD.
 #
 # npm, corepack and yarn are here for a different reason: the base image ships all three,
 # this file does not ask for any of them, and the app invokes none of them. They are the
@@ -146,14 +154,17 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
            /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
            /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/next.config.ts ./next.config.ts
-COPY --from=build /app/package.json ./package.json
-# next-intl resolves the catalog with a runtime `import()` of ../../messages/<locale>.json
-# (src/i18n/request.ts), so the file is read from disk on every render rather than bundled.
-# Without this the app builds, starts, serves a health check, and 500s on the first page.
-COPY --from=build /app/messages ./messages
+# One directory, and everything in it was put there by the trace rather than by a list kept
+# here. It carries server.js, the traced node_modules, the compiled routes, package.json,
+# .next/static (copied in by postbuild) and messages/ (pulled in by
+# outputFileTracingIncludes, since src/i18n/request.ts imports the catalog with a template
+# literal that static analysis cannot follow).
+#
+# next.config.ts is deliberately not copied. `next start` read it at every boot and compiled
+# it, which is why this image used to need a native SWC binary; standalone inlines the
+# resolved config into server.js, and headers() is already baked into
+# .next/routes-manifest.json at build time.
+COPY --from=build /app/.next/standalone ./
 
 # Not root. Alpine's node image ships a `node` user; the app writes nothing, so read-only
 # ownership is all it needs.
@@ -161,17 +172,22 @@ USER node
 
 EXPOSE 3000
 
-# Railway sets PORT and `next start` reads it — measured, with PORT=8080 answering on
-# 8080. 3000 is the fallback for a plain `docker run`.
+# Railway sets PORT and the standalone server reads it — `parseInt(process.env.PORT, 10) ||
+# 3000`. 3000 is the fallback for a plain `docker run`.
 #
-# Deliberately no HOSTNAME. The usual Next Docker recipe sets it, and `next start` does
-# not read it: with HOSTNAME=127.0.0.1 this container still listens on `:::3000`. Only
-# Next's standalone `server.js` consults it, and this image does not use standalone output.
-# `::` is the IPv6 wildcard bound dual-stack — `ipv6Only` is false by default — so it takes
-# IPv4 connections too, which is what a platform routing over either will find.
+# Still deliberately no HOSTNAME, but for the opposite reason to the one that used to be
+# written here. This image now does use standalone output, and server.js does consult
+# HOSTNAME — with a default of `0.0.0.0`, so it already binds every interface. Setting it
+# could only narrow that. The usual Next Docker recipe sets `HOSTNAME=0.0.0.0` to restate
+# the default; earlier Next versions defaulted to localhost, which is where that line comes
+# from and why it is not needed here.
 ENV PORT=3000
 
-# `next start` directly rather than `pnpm start`. Going through pnpm would mean installing
-# a package manager into the runtime image to read one line of package.json, and it would
-# put a process between the container and the signal that stops it.
-CMD ["node", "node_modules/next/dist/bin/next", "start"]
+# server.js, which the build traced and wrote. `pnpm start` would mean installing a package
+# manager into the runtime image to read one line of package.json, and it would put a
+# process between the container and the signal that stops it.
+#
+# server.js does `process.chdir(__dirname)` before listening, so relative reads — the
+# message catalog among them — resolve against /app rather than wherever the process
+# started.
+CMD ["node", "server.js"]

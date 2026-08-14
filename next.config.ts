@@ -64,6 +64,42 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  /*
+   * The runtime image copies `.next/standalone` instead of a production `node_modules`
+   * tree. Measured: 504 MB of app payload became 44 MB, because the trace keeps what the
+   * server reaches rather than what the lockfile resolves.
+   *
+   * The difference is not fat, it is other people's peers. pnpm resolves optional peer
+   * dependencies at lockfile time and writes them into the resolved package's identity —
+   * `next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` —
+   * so `--prod` could not drop them: it prunes root devDependencies, and these are part of
+   * the name of a production one. That is how typescript, playwright and the Babel closure
+   * reached a deployment. Tracing asks a different question and none of them survive it.
+   *
+   * It also stops this file being read at boot. `next start` compiles next.config.ts on
+   * every start, which is why the image carried a native SWC compiler; standalone inlines
+   * the resolved config into server.js, and `headers()` below is already baked into
+   * .next/routes-manifest.json at build time, so nothing is lost by that.
+   *
+   * The cost is that `next start` does not serve a standalone build. `pnpm start`,
+   * playwright.config.ts and scripts/serve-e2e.ts run `node .next/standalone/server.js`
+   * instead, and `postbuild` copies .next/static in — see scripts/pack-standalone.ts.
+   */
+  output: "standalone",
+
+  /*
+   * src/i18n/request.ts loads the catalog with `import(`../../messages/${locale}.json`)`,
+   * and tracing is static analysis over `import`, `require` and `fs` — a template literal
+   * is exactly the shape it cannot follow. Next's own documentation uses a locale
+   * directory as the example for this option.
+   *
+   * Without it the image builds, starts, answers /api/health and 500s on the first page,
+   * which is the same failure the Dockerfile's explicit `COPY messages` used to prevent.
+   */
+  outputFileTracingIncludes: {
+    "/*": ["messages/**/*.json"],
+  },
+
   // Framework fingerprinting on every response, for no benefit.
   poweredByHeader: false,
 

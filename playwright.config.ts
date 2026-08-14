@@ -65,7 +65,15 @@ export default defineConfig({
       env: { FAKE_RAILWAY_PORT: String(FIXTURE_PORT), RAILWAY_CLIENT_ID: "e2e-client" },
     },
     {
-      command: `pnpm exec next start -p ${APP_PORT}`,
+      /*
+       * The standalone server, not `next start` — which refuses to serve a build made
+       * with `output: "standalone"`. This is the same server.js the deployment runs, so
+       * the suite exercises the artefact rather than a second way of starting it, and
+       * `pnpm build` has to have run: postbuild copies .next/static into place.
+       *
+       * Port comes from the environment because server.js takes no arguments.
+       */
+      command: "node .next/standalone/server.js",
       url: `${APP_URL}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
@@ -73,6 +81,7 @@ export default defineConfig({
       stderr: "pipe",
       env: {
         NODE_ENV: "production",
+        PORT: String(APP_PORT),
         APP_URL,
         RAILWAY_CLIENT_ID: "e2e-client",
         RAILWAY_CLIENT_SECRET: "e2e-secret",

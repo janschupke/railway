@@ -36,7 +36,17 @@ it does add is a refusal: it will not _use_ that access on anything it did not c
 ## Never read, echo, or commit `.env`
 
 `.env` exists on disk and is gitignored (`.env*` ignored, `!.env.example` re-included). Only
-`.env.example` is tracked. No secret has ever been committed, and the `secrets` job in
+`.env.example` is tracked. **`.dockerignore` excludes it too, and
+`scripts/pack-standalone.ts` deletes the copy `next build` makes** — three places, because
+the file has three ways of escaping.
+
+That last one is not hypothetical. `output: "standalone"` copies `.env` and
+`.env.production` into `.next/standalone`, and `server.js` runs `process.chdir(__dirname)`
+before listening — so Next loads env from there. Left alone it would put this machine's real
+Railway credentials next to the server that `pnpm test:e2e` and `pnpm serve:e2e` run against
+the fixture, where any variable the harness does not set explicitly falls through to a real
+account. It is removed rather than ignored: a file that must not be read is worse than one
+that is not there. The deployment's only configuration channel is service variables. No secret has ever been committed, and the `secrets` job in
 `ci.yml` is what keeps that true rather than merely checked once: gitleaks over
 `--log-opts=--all`, every run, on the whole history rather than the pushed commits. CodeQL
 does not do this and never did. When you need to know what a variable is for, read
@@ -173,6 +183,12 @@ Two consequences for the `Dockerfile`:
   before that line sat inside npm's own bundled tree — `tar`, `sigstore`, `brace-expansion`
   — none of it upgradable from here, none of it ever invoked. Do not put a package manager
   back into that stage.
+- **The image ships a traced `node_modules`, not an installed one.** `output: "standalone"`
+  took the payload from 504 MB to 44 MB, and with it went TypeScript, Playwright, the Babel
+  closure and a native SWC compiler — none of which the server imports, all of which
+  `pnpm install --prod` was obliged to keep because pnpm had written them into the identity
+  of `next` and `next-intl`. Less code in the image is less code a scanner can find a CVE
+  in, and this removed most of it.
 
 ## When a change is also a `SECURITY.md` change
 

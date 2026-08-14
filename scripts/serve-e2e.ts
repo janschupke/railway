@@ -59,8 +59,16 @@ start("pnpm", ["exec", "tsx", "e2e/fixtures/fake-railway/server.ts"], {
   RAILWAY_CLIENT_ID: "e2e-client",
 });
 
-start("pnpm", ["exec", "next", "start", "-p", String(APP_PORT)], {
+/*
+ * The standalone server, not `next start` — which refuses to serve a build made with
+ * `output: "standalone"`. It is the same server.js the deployment runs, and it takes no
+ * arguments, so the port arrives through the environment. `pnpm build` has to have run:
+ * postbuild is what copies .next/static into the standalone directory, and without it
+ * every page answers 200 with every asset 404.
+ */
+start("node", [".next/standalone/server.js"], {
   NODE_ENV: "production",
+  PORT: String(APP_PORT),
   APP_URL,
   RAILWAY_CLIENT_ID: "e2e-client",
   RAILWAY_CLIENT_SECRET: "e2e-secret",
@@ -74,6 +82,6 @@ start("pnpm", ["exec", "next", "start", "-p", String(APP_PORT)], {
 });
 
 await waitFor(`${FIXTURE_URL}/oauth/.well-known/openid-configuration`, "fake Railway");
-await waitFor(`${APP_URL}/api/health`, "next start");
+await waitFor(`${APP_URL}/api/health`, "the standalone server");
 
 console.log(`ready: app ${APP_URL}, fixture ${FIXTURE_URL}`);

@@ -59,6 +59,21 @@ and all of which the base image ships. The deployed image carries OCI labels, in
 `org.opencontainers.image.revision`, taken from `RAILWAY_GIT_COMMIT_SHA`: the same commit
 the logger stamps on every line, on the artefact rather than only in its output.
 
+It ships a **traced** `node_modules` — `output: "standalone"` — rather than an installed
+one. That took the app payload from 504 MB to 44 MB, and the difference was almost entirely
+other people's peer dependencies: pnpm resolves optional peers at lockfile time and writes
+them into the resolved package's identity, so `next` was literally named
+`next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` and
+`pnpm install --prod` could not drop any of them. Playwright and TypeScript were being
+deployed because they are devDependencies of the same package.json. Tracing asks what the
+server imports instead, and the answer is 38 MB.
+
+The cost is that `next start` does not serve a standalone build, so `pnpm start`, the
+Playwright `webServer` and `scripts/serve-e2e.ts` all run `node .next/standalone/server.js`
+— the same file the container runs. `pnpm build` finishes with `scripts/pack-standalone.ts`,
+which copies in the static assets Next deliberately leaves out, checks the message catalog
+was traced, and deletes the `.env` that `next build` otherwise copies next to the server.
+
 The app deploys itself the same way it deploys containers.
 
 ### Checks

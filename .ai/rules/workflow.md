@@ -120,7 +120,39 @@ once.
 Railway, **`DOCKERFILE` builder** — see `railway.json` and the `Dockerfile`. Healthcheck
 `/api/health` with a 60 s timeout, restart `ON_FAILURE` ×3. There is **no
 `startCommand`**: the runtime stage has no package manager in it, so `pnpm start` would
-build cleanly and then fail to boot. `CMD` runs `next start` directly.
+build cleanly and then fail to boot. `CMD` runs `node server.js` directly.
+
+## `output: "standalone"`, and what it costs
+
+The runtime image copies `.next/standalone` — a traced server — rather than installing
+production dependencies. Measured: **504 MB of app payload became 44 MB**, and the
+`prod-deps` stage is gone.
+
+The gap was not fat. pnpm resolves optional peer dependencies at lockfile time and writes
+them into the resolved package's identity —
+`next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` — so
+`pnpm install --prod` could not remove them: it prunes root devDependencies, and these were
+part of the name of a production one. Playwright, TypeScript, `@types/node` and the Babel
+closure shipped to production because they are devDependencies of the same package.json.
+Tracing asks what the code imports, and none of them answer.
+
+Three consequences to work with rather than around:
+
+- **`next start` does not serve a standalone build.** `pnpm start`, `playwright.config.ts`
+  and `scripts/serve-e2e.ts` all run `node .next/standalone/server.js`, which takes no
+  arguments — the port comes from `PORT`. A new consumer of a production build does the
+  same.
+- **`pnpm build` is not finished without `postbuild`.** `scripts/pack-standalone.ts` copies
+  `.next/static` in, which `next build` deliberately omits, and without it every page
+  answers 200 while every chunk, stylesheet and font 404s. It also asserts the message
+  catalog was traced, and deletes the `.env` that `next build` copies in — see
+  [security.md](security.md).
+- **`next.config.ts` is not read at runtime any more.** The resolved config is inlined into
+  `server.js` and `headers()` is baked into `.next/routes-manifest.json` at build time.
+  That is what removed the native SWC compiler from the image: `next start` used to compile
+  this file on every boot. **A config value that only exists as a function evaluated at
+  request time would not survive** — nothing here is one, and `e2e/security.spec.ts` reads
+  the headers off a live response.
 
 **CI builds that image, boots it and scans it** before it can reach Railway — the `image`
 job. That is the gate a change to this file has to clear, and it is deliberately more than
@@ -216,8 +248,10 @@ docker save rw -o /tmp/rw.tar && docker run --rm -v /tmp:/w -w /w \
   --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
 ```
 
-Curl `/api/health` for 200, then open the page — a missing `COPY` of `messages/` passes the
-health check and 500s on the first render.
+Curl `/api/health` for 200, then **open the page**. Two failure modes pass the health check
+and break the first render: an untraced message catalog 500s, and a missing `.next/static`
+serves the HTML with every asset 404ing. `pnpm test:e2e` covers both, since it now runs the
+same `server.js`.
 
 and, if the tree was already dirty when you started, confirm you changed only what you
 meant to:
