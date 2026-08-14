@@ -214,6 +214,19 @@ export function execute(
       };
     }
 
+    case "DeploymentEvents": {
+      // Railway's real refusal shape, so the app meets the one it will actually see.
+      if (store.faults.deploymentEventsFail) return notAuthorized(["deploymentEvents"]);
+
+      const deployment = store.deployments.get(variables.id as string);
+      // `last` slices the tail, which is the Relay semantics the app's picker depends on:
+      // it walks the connection backwards to find the newest event carrying text.
+      const last = Number(variables.last ?? 10);
+      return {
+        data: { deploymentEvents: edges((deployment?.events ?? []).slice(-last)) },
+      };
+    }
+
     case "DeploymentLogs":
     case "BuildLogs": {
       const deployment = store.deployments.get(variables.deploymentId as string);

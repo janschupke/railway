@@ -22,6 +22,15 @@ export type StreamState = {
   done: boolean;
   warning: string | null;
   error: string | null;
+  /**
+   * What Railway said about a terminal failure, when it said anything.
+   *
+   * Free text rather than a catalog key, because nothing on this side chooses the words —
+   * the server bounds it before it goes on the wire. Null covers three cases the row
+   * deliberately renders identically: the event feed was empty, it was refused, or the
+   * deployment never failed. The reader's next step is the same in all three.
+   */
+  failure: { step: string | null; reason: string | null } | null;
 };
 
 const INITIAL: StreamState = {
@@ -32,6 +41,7 @@ const INITIAL: StreamState = {
   done: false,
   warning: null,
   error: null,
+  failure: null,
 };
 
 /**
@@ -128,6 +138,20 @@ export function useDeploymentStream(
       const payload = parse<{ state: ContainerState; rawStatus: string | null }>(event);
       if (!payload) return;
       update((s) => ({ ...s, state: payload.state, rawStatus: payload.rawStatus }));
+    });
+
+    source.addEventListener("failure", (event) => {
+      const payload = parse<{ step: string | null; reason: string | null }>(event);
+      if (!payload) return;
+      /*
+       * Deliberately touches neither `done` nor `status`. The server sends this before
+       * the drain and `done` a drain later; closing here would cut off the trailing log
+       * frames that drain window exists to deliver.
+       */
+      update((s) => ({
+        ...s,
+        failure: { step: payload.step ?? null, reason: payload.reason ?? null },
+      }));
     });
 
     source.addEventListener("warning", (event) => {

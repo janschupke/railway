@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Container } from "@/lib/railway/types";
 
 vi.mock("@/app/dashboard/actions", () => ({
@@ -15,6 +15,7 @@ const streamState = {
   done: false,
   warning: null as string | null,
   error: null as string | null,
+  failure: null as { step: string | null; reason: string | null } | null,
 };
 const useDeploymentStream = vi.fn(() => streamState);
 vi.mock("@/hooks/use-deployment-stream", () => ({
@@ -308,9 +309,9 @@ describe("ContainerRow", () => {
 
   it("points a failed deployment at the page that has the reason", async () => {
     /*
-     * Railway answers this app with the enum FAILED and nothing else, and an image source
-     * that fails to pull may write to neither log phase — so the row was a red badge over
-     * an empty pane with no route to the explanation.
+     * The no-information branch, and the regression guard on it. The event feed can be
+     * empty, refused or withdrawn, and when it is the row says exactly what it always
+     * said. Railway's own page is the route to the explanation in that case.
      */
     const user = userEvent.setup();
     renderRow({ state: "failed", rawStatus: "FAILED" });
@@ -324,6 +325,77 @@ describe("ContainerRow", () => {
       "https://railway.com/project/p1/service/svc_1?environmentId=e1",
     );
     expect(link).toHaveAttribute("rel", "noreferrer");
+  });
+
+  describe("when Railway said why a deployment failed", () => {
+    /** Renders a failed row with whatever the event feed produced. */
+    const renderFailure = async (
+      failure: { step: string | null; reason: string | null } | null,
+    ) => {
+      const user = userEvent.setup();
+      streamState.failure = failure;
+      renderRow({ state: "failed", rawStatus: "FAILED" });
+      await expand(user);
+    };
+
+    afterEach(() => {
+      streamState.failure = null;
+    });
+
+    it("names the step and quotes the reason", async () => {
+      await renderFailure({
+        step: "BUILD_IMAGE",
+        reason: "manifest for redis:nope not found",
+      });
+
+      expect(
+        screen.getByText(
+          /failed at the build image step, and said: “manifest for redis:nope not found”/i,
+        ),
+      ).toBeInTheDocument();
+      // The link is not a fallback the reason replaces: one bounded line is not the page.
+      expect(
+        screen.getByRole("link", { name: /open in railway/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("names the step alone when the feed carried no text", async () => {
+      await renderFailure({ step: "HEALTHCHECK", reason: null });
+
+      expect(
+        screen.getByText(/failed at the health check step, and carried no reason/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: /open in railway/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("quotes the reason alone when the step is one this app does not model", async () => {
+      /*
+       * Railway adds DeploymentEventStep members without notice. The narrowing in
+       * isDeploymentStep is what keeps an unknown one out of the catalog, where it would
+       * render as a missing-message marker at the user.
+       */
+      await renderFailure({ step: "SOME_FUTURE_STEP", reason: "pull refused" });
+
+      expect(screen.getByText(/failed, and said: “pull refused”/i)).toBeInTheDocument();
+      expect(screen.queryByText(/SOME_FUTURE_STEP/)).toBeNull();
+      expect(
+        screen.getByRole("link", { name: /open in railway/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders upstream text as text, never as markup", async () => {
+      // Railway's words go into a paragraph as a child, so React escapes them. This is
+      // the assertion behind the accepted risk recorded in SECURITY.md.
+      await renderFailure({
+        step: "PRE_DEPLOY_COMMAND",
+        reason: "<img src=x onerror=alert(1)>",
+      });
+
+      expect(screen.getByText(/“<img src=x onerror=alert\(1\)>”/)).toBeInTheDocument();
+      expect(document.querySelector("img")).toBeNull();
+    });
   });
 
   it("says nothing of the sort for a deployment that is fine", async () => {

@@ -127,6 +127,31 @@ export const STREAM = {
    * whatever that ladder is tuned to.
    */
   UNSETTLED_POLLS_BEFORE_STOP: 8,
+  /**
+   * Deployment events read once when a deployment settles as FAILED.
+   *
+   * Ten because DeploymentEventStep has ten members: a deployment that walked every step
+   * still fits in one page, so the reason — which is on the last step that ran — is never
+   * behind a cursor and this never needs to paginate.
+   *
+   * Read once per failed deployment, from its own document, and never from the status
+   * poll. See DEPLOYMENT_EVENTS_QUERY for what putting a withdrawable field in that loop
+   * would cost: one extra request per failure is quota this app can afford, and 360 schema
+   * rejections per wedged stream is not.
+   */
+  FAILURE_EVENTS: 10,
+  /**
+   * Ceiling on the failure text a failed row will render.
+   *
+   * DeploymentEventPayload.error is an unbounded String from upstream that ends up in one
+   * SSE frame and one paragraph. 300 characters is roughly three lines at the row's width
+   * — enough for "manifest for redis:nope not found" or a health-check response body,
+   * short enough that a stack trace cannot push "Open in Railway" below the fold.
+   *
+   * Nothing is lost by cutting: Railway's own page holds all of it, and the button to that
+   * page is on the same block in every branch.
+   */
+  FAILURE_REASON_MAX: 300,
 } as const;
 
 /**
@@ -312,12 +337,12 @@ export const LINKS = {
  * Built entirely from ids a container row already holds, so this escape hatch costs no
  * API call — which is the only reason it can sit on every row, as the container name.
  *
- * It is repeated inside a failed row's panel because the app's whole knowledge of a
- * failed deployment is the enum FAILED:
- * the deployment query returns a status and nothing else, a service created from an image
- * performs no build, and a pull that fails may write no deployment logs either. The badge
- * says "Failed" over a legitimately empty pane, and Railway's own page is the only place
- * the reason exists. Pointing at it is more honest than leaving the user to guess.
+ * It is repeated inside a failed row's panel, and stays there now that the row asks
+ * `deploymentEvents` for a reason. That read is best effort by design — the feed can be
+ * empty, refused, or withdrawn — and the deployment query still returns a status and
+ * nothing else, so "Failed" over a legitimately empty pane remains a state the app can
+ * reach. Railway's own page is where the rest of it lives in every one of those branches,
+ * which is why this link is unconditional rather than a fallback the reason replaces.
  *
  * The ids are Railway's rather than the user's, and encoded anyway — a link builder that
  * trusts its inputs is one refactor away from not being able to.

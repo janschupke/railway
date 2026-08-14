@@ -18,6 +18,7 @@
     "test:e2e:ui": "playwright test --ui",
     "verify:schema": "node --no-warnings --experimental-strip-types scripts/verify-schema.ts",
     "probe:projects": "tsx --env-file-if-exists=.env scripts/probe-projects.ts",
+    "probe:deployment": "tsx --env-file-if-exists=.env scripts/probe-deployment.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm knip && pnpm test:coverage",
     "size": "node --no-warnings --experimental-strip-types scripts/check-bundle-budget.ts",
     "knip": "knip",

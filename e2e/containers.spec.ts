@@ -18,6 +18,7 @@ import {
   test,
   toast,
 } from "./support";
+import { FAILURE_TEXT } from "./fixtures/fake-railway/store";
 
 test.describe("container lifecycle", () => {
   test.beforeEach(async ({ page }) => {
@@ -386,6 +387,89 @@ test.describe("container lifecycle", () => {
       "href",
       /railway\.com\/project\/proj_demo\/service\/svc_\d+\?environmentId=env_prod/,
     );
+  });
+
+  test("names the step and the reason Railway gave for a failure", async ({ page }) => {
+    /*
+     * The pane is legitimately empty here — no build, no deploy logs — so the reason has
+     * nothing else on screen carrying it. That is the case the ticket opens with: a red
+     * badge over an empty pane whose only route to an explanation was a link out.
+     */
+    await injectFaults(page, { deploymentsFail: true, logPhase: "none" });
+
+    await spinUp(page, "broken");
+
+    const broken = row(page, "broken");
+    await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "broken").click();
+
+    const alert = broken.getByRole("alert");
+    await expect(alert).toContainText("failed at the build image step", {
+      timeout: 20_000,
+    });
+    await expect(alert).toContainText(FAILURE_TEXT);
+    // One bounded line is not Railway's page, so the link stays whatever else is shown.
+    await expect(alert.getByRole("link", { name: /open in railway/i })).toBeVisible();
+  });
+
+  for (const failureField of ["reason", "detail"] as const) {
+    test(`reads the reason off payload.${failureField} too`, async ({ page }) => {
+      /*
+       * Which member Railway populates has never been observed on a real failed
+       * deployment — only introspected — so the app tries error, then reason, then
+       * detail. These two specs are the only mechanical evidence that the other branches
+       * work; `pnpm probe:deployment` against a real failure settles which one is real.
+       */
+      await injectFaults(page, {
+        deploymentsFail: true,
+        logPhase: "none",
+        failureField,
+      });
+
+      await spinUp(page, "broken");
+
+      const broken = row(page, "broken");
+      await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+      await disclosure(page, "broken").click();
+
+      await expect(broken.getByRole("alert")).toContainText(FAILURE_TEXT, {
+        timeout: 20_000,
+      });
+    });
+  }
+
+  test("still points at Railway when the event feed is refused too", async ({
+    page,
+  }) => {
+    /*
+     * The degradation is silent by design: the user is already reading one failure, and a
+     * banner saying the app could not explain it is worse than the sentence it falls back
+     * to. The absence assertions are the point of this spec — a version that only checked
+     * the happy path would not notice the day this starts shouting.
+     */
+    await injectFaults(page, {
+      deploymentsFail: true,
+      logPhase: "none",
+      deploymentEventsFail: true,
+    });
+
+    await spinUp(page, "broken");
+
+    const broken = row(page, "broken");
+    await expect(broken.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "broken").click();
+
+    const alert = broken.getByRole("alert");
+    await expect(alert).toContainText("Its API returns the status and nothing else", {
+      timeout: 20_000,
+    });
+    await expect(alert.getByRole("link", { name: /open in railway/i })).toBeVisible();
+    await expect(broken.getByText(FAILURE_TEXT)).toHaveCount(0);
+    // No second thing on screen: the failed block is the only alert in this row.
+    await expect(alert).toHaveCount(1);
   });
 
   test("surfaces a Railway rate limit instead of failing silently", async ({

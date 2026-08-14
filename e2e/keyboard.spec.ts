@@ -335,8 +335,20 @@ test.describe("keyboard operation", () => {
     await search.focus();
     await page.keyboard.type("fake-railway");
 
+    /*
+     * Waits for a SECOND match before stepping, and that bound is the point.
+     *
+     * The fixture writes one log line per status transition, 400ms apart, so a pane opened
+     * promptly holds exactly one. Pressing Enter there wraps 1 → 1; the second line then
+     * arrives and the counter reads "Match 1 of 2" forever, because the keypress it needed
+     * has already happened. No amount of retrying the next assertion recovers from that —
+     * which is why this failed under the full suite and passed run on its own.
+     *
+     * Stated as the precondition rather than waited out: stepping between matches needs
+     * matches to step between.
+     */
     const counter = cache.getByText(/^Match \d+ of \d+$/);
-    await expect(counter).toHaveText(/^Match 1 of \d+$/);
+    await expect(counter).toHaveText(/^Match 1 of [2-9]\d*$/);
 
     await page.keyboard.press("Enter");
     await expect(counter).toHaveText(/^Match 2 of \d+$/);

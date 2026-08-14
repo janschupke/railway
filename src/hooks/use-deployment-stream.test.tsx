@@ -70,6 +70,9 @@ function Probe({
       <span data-testid="logs">{stream.logs.map((l) => l.message).join(",")}</span>
       <span data-testid="warning">{stream.warning ?? ""}</span>
       <span data-testid="error">{stream.error ?? ""}</span>
+      <span data-testid="failure">
+        {stream.failure ? `${stream.failure.step}|${stream.failure.reason}` : ""}
+      </span>
     </div>
   );
 }
@@ -205,6 +208,43 @@ describe("useDeploymentStream", () => {
 
     expect(text("warning")).toBe("Could not load earlier logs");
     expect(source.closed).toBe(false);
+  });
+
+  it("keeps a failure reason without closing the stream", () => {
+    /*
+     * The server sends this before the drain window and `done` a drain later. Closing
+     * here would cut off the trailing log frames that window exists to deliver.
+     */
+    render(<Probe deploymentId="dep_1" />);
+    const source = FakeEventSource.latest();
+
+    act(() =>
+      source.emit("failure", { step: "BUILD_IMAGE", reason: "manifest not found" }),
+    );
+
+    expect(text("failure")).toBe("BUILD_IMAGE|manifest not found");
+    expect(text("done")).toBe("false");
+    expect(source.closed).toBe(false);
+  });
+
+  it("keeps a failure that names no step", () => {
+    // Railway can carry text on an event whose step this app does not model.
+    render(<Probe deploymentId="dep_1" />);
+    const source = FakeEventSource.latest();
+
+    act(() => source.emit("failure", { step: null, reason: "pull refused" }));
+
+    expect(text("failure")).toBe("null|pull refused");
+  });
+
+  it("ignores a malformed failure frame rather than dropping what it had", () => {
+    render(<Probe deploymentId="dep_1" />);
+    const source = FakeEventSource.latest();
+
+    act(() => source.emit("failure", { step: "HEALTHCHECK", reason: "no response" }));
+    act(() => source.emitRaw("failure", "not json"));
+
+    expect(text("failure")).toBe("HEALTHCHECK|no response");
   });
 
   it("does not leak one container's logs into another", () => {

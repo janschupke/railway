@@ -466,9 +466,11 @@ introspects the **input objects the app builds by hand** — `ServiceCreateInput
 `VariableCollectionUpsertInput`. That gap was real: a renamed member inside an input
 passes a root-field check and fails every spin-up.
 
-It also prints the capabilities the app does not use, with the consequence of each. As of
-2026-08-13 `deploymentStop`, `deploymentRemove` and `serviceInstanceUpdate` all exist —
-see Limitations for why spin-down is still destroy-only regardless.
+It also prints the optional capabilities, with the consequence of each. As of 2026-08-13
+`deploymentStop`, `deploymentRemove` and `serviceInstanceUpdate` all exist — see
+Limitations for why spin-down is still destroy-only regardless. `Query.deploymentEvents`
+is the one entry in that list the app actually sends: it is optional not because it is
+unused but because losing it costs no capability, only the reason on a failed row.
 
 CI runs the discovery half on every push.
 
@@ -500,6 +502,24 @@ Copy the cookie from DevTools → Application → Cookies. It prints the granted
 against the requested ones, the raw payload from each candidate project source, and a
 type-level introspection of `User` and `Query`. Read the payloads before changing
 `PROJECTS_QUERY` — that is what the script is for.
+
+### When a failed row does not say why
+
+`scripts/probe-deployment.ts` answers the one question introspection could not. The
+`deploymentEvents` feed and its `DeploymentEventPayload` were confirmed against the live
+schema, but _which_ of `payload.error`, `payload.reason` and `payload.detail` Railway fills
+in on a real failure has never been observed — so the app tries all three in a documented
+order, and this checks that order against a real deployment:
+
+```bash
+RC_SESSION="<rc_session cookie value>" pnpm probe:deployment <deployment-id>
+```
+
+Take the id from a failed deployment's URL on Railway. It prints every event verbatim,
+which text members were populated, and what the app's own picker chose from them. If the
+populated member is not the one that won, reorder `TEXT_MEMBERS` in
+`src/lib/railway/failure-reason.ts` and correct the Limitations entry — nothing else in the
+app depends on which one it is.
 
 ---
 
@@ -911,16 +931,26 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   available: the form refuses a perfectly good image because the _server_ is rate-limited.
   Registry existence would also not catch architecture mismatches, private images or
   registry outages, all of which pass a manifest check and still fail the deploy.
-- **A failed deployment's reason lives on Railway, not here.** The deployment query returns
-  a status and nothing else, so a failure reaches this app as the enum `FAILED`. When the
-  subscribed log phase produced nothing, the monitor fetches the other phase before giving
-  up; when both are empty — the usual shape for a failed image pull — the row says so and
-  links straight to the service on Railway, which does have the reason. Surfacing it here
-  would mean selecting a field nobody has proved exists, and the deployment query is polled
-  for the life of every open stream: a withdrawn or refused field there would turn each of
-  those polls into a schema rejection the monitor treats as transient — and now backs off
-  from, so the silence would last the full duration ceiling and be quieter than before. That needs a probe against a real failed
-  deployment and a separate best-effort document, not a guess in the hot path.
+- **A failed deployment's reason is best effort, and Railway's page is still the fallback.**
+  The deployment query returns a status and nothing else, so a failure reaches the poll loop
+  as the enum `FAILED`; the `Deployment` type carries no explanation at all, and `diagnosis`
+  and `meta` are opaque `SCALAR`s with no documented shape. The reason lives on
+  `deploymentEvents`, which the monitor reads **once**, on the terminal-failed transition, as
+  its own document — never from the status poll, which runs for the life of every open stream
+  and would turn a withdrawn field into a schema rejection the monitor treats as transient
+  and now backs off from, so the silence would last the full duration ceiling and be quieter
+  than before. `deploymentEvents` is in `OPTIONAL_FIELDS`, so `pnpm verify:schema` reports its
+  withdrawal without failing CI, and a row whose feed is empty, refused or withdrawn shows
+  exactly what it showed before: the status, the sentence, and the link out. Three things stay
+  unresolved. Which of `payload.error`, `payload.reason` and `payload.detail` Railway actually
+  populates has never been observed on a real failed deployment — the schema was introspected,
+  not the behaviour — so the app tries all three newest-event-first and `pnpm probe:deployment
+<id>` settles it. `verify:schema` introspects **root** fields only, so it can report that
+  `deploymentEvents` is gone but not that a member of `DeploymentEventPayload` is; that
+  arrives at runtime, is swallowed by the same best-effort catch, and shows up as one `debug`
+  record. And the reason arrives on **expand**, not on page load: the stream only opens for a
+  settled container once its panel is open, and fetching per failed row at render time is the
+  cost profile the whole streaming design exists to avoid.
 - **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
   API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been
   built. Offering it means a second confirm path, a fourth container state the dashboard

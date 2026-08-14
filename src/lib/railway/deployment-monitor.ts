@@ -5,7 +5,7 @@ import { STREAM } from "@/lib/constants";
 import { log } from "@/lib/logger";
 import { reportError } from "@/lib/report-error";
 import { sleep } from "@/lib/utils";
-import { getDeployment, getLogs } from "./api";
+import { getDeployment, getDeploymentFailure, getLogs } from "./api";
 import { RailwayApiError } from "./errors";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
 import { createLogClient, streamLogs } from "./subscribe";
@@ -29,6 +29,23 @@ export type MonitorEvent =
       rawStatus: string | null;
       updatedAt: string | null;
     }
+  /**
+   * What Railway said about a terminal failure, when it said anything.
+   *
+   * The one variant carrying upstream free text rather than a catalog key, because
+   * nothing on this side chooses the words — see getDeploymentFailure, and the accepted
+   * risk in SECURITY.md for why this text is a different class from a GraphQL error.
+   *
+   * The field is `reason` and NOT `message`, and that is load-bearing: the SSE route
+   * branches on `"message" in event` and would hand this string to `t()` as if it were a
+   * catalog key. A future variant carrying free text must avoid that name too.
+   */
+  | {
+      type: "failure";
+      deploymentId: string;
+      step: string | null;
+      reason: string | null;
+    }
   // Descriptors, not sentences: the monitor has no translator and no request scope.
   | { type: "warning"; message: MessageDescriptor }
   | { type: "error"; message: MessageDescriptor }
@@ -38,6 +55,7 @@ export type MonitorEvent =
 export type MonitorDeps = {
   getLogs: typeof getLogs;
   getDeployment: typeof getDeployment;
+  getDeploymentFailure: typeof getDeploymentFailure;
   subscribeLogs: (
     accessToken: string,
     document: string,
@@ -50,6 +68,7 @@ export type MonitorDeps = {
 const defaultDeps: MonitorDeps = {
   getLogs,
   getDeployment,
+  getDeploymentFailure,
   subscribeLogs: async function* (accessToken, document, field, deploymentId, signal) {
     const client = createLogClient(accessToken);
     try {
@@ -250,6 +269,48 @@ export async function* monitorDeployment(
     }
   };
 
+  /**
+   * What Railway says went wrong, asked once when the deployment has already failed.
+   *
+   * Deliberately NOT gated on `linesEmitted`, unlike the fallback above. That gate answers
+   * "did the reader see anything at all", which is a question `linesEmitted` can answer.
+   * This one answers "why did it fail", and log output is not an answer to it: the
+   * commonest real shape is a build that printed two hundred plausible lines and then
+   * failed on HEALTHCHECK, where the pane is full and the row still says nothing but
+   * "Failed". Gating here would hide the feature in exactly the case it exists for.
+   *
+   * The cost argument does not carry over either. The fallback's gate protects the
+   * *commonest* case — a quiet success, on every settle. This runs on `failed` only, and
+   * the terminal branch is reached once because the poll loop is serial: one request per
+   * failed deployment, against a poll that spends one every STREAM.STATUS_POLL_MS, at the
+   * moment the user is looking at a red badge asking this exact question.
+   *
+   * Best effort throughout, for the reason the fallback gives: a failure to explain the
+   * failure is not worth a banner over the one the user is already reading.
+   */
+  const describeFailure = async () => {
+    try {
+      const failure = await deps.getDeploymentFailure(
+        accessToken,
+        deploymentId,
+        signal,
+      );
+      if (!failure) return;
+      queue.push({
+        type: "failure",
+        deploymentId,
+        step: failure.step,
+        reason: failure.reason,
+      });
+    } catch (error) {
+      if (signal.aborted) return;
+      log.debug("railway.deployment.failure_reason_failed", {
+        deployment_id: deploymentId,
+        error,
+      });
+    }
+  };
+
   const pollStatus = async () => {
     try {
       const deployment = await deps.getDeployment(
@@ -322,7 +383,16 @@ export async function* monitorDeployment(
          * it. The drain still does its own job afterwards: trailing frames from the live
          * subscription routinely arrive after the status flips.
          */
-        if (state === "failed") await explainFailure();
+        /*
+         * Sequential rather than Promise.all. Concurrency would halve the worst-case
+         * latency added here and would make frame order nondeterministic in the fake-timer
+         * tests to buy it — for no user-visible gain, since the badge has already flipped
+         * to Failed by the time either request goes out.
+         */
+        if (state === "failed") {
+          await explainFailure();
+          await describeFailure();
+        }
         // The caller's signal, deliberately: `pollSignal` was aborted three lines up.
         if (signal.aborted) return;
 

@@ -71,6 +71,39 @@ export function isTransitioning(state: ContainerState): boolean {
   );
 }
 
+/**
+ * Railway's `DeploymentEventStep`, mirrored so the catalog can be keyed on it.
+ *
+ * The same reasoning `toContainerState` states for `DeploymentStatus`: these are upstream
+ * enum members, Railway can add one at any time, and an eleventh must degrade rather than
+ * render a missing-message marker. `isDeploymentStep` is the narrowing that makes
+ * `t(\`deploymentStep.${step}\`)` safe — a member this app does not know falls back to the
+ * branch that names no step at all.
+ *
+ * Ordered as a deployment walks them, not alphabetically, so a reader can see where in the
+ * lifecycle a given failure sits.
+ */
+export const DEPLOYMENT_STEPS = [
+  "SNAPSHOT_CODE",
+  "BUILD_IMAGE",
+  "PUBLISH_IMAGE",
+  "WAIT_FOR_DEPENDENCIES",
+  "MIGRATE_VOLUMES",
+  "CREATE_CONTAINER",
+  "PRE_DEPLOY_COMMAND",
+  "CONFIGURE_NETWORK",
+  "HEALTHCHECK",
+  "DRAIN_INSTANCES",
+] as const;
+
+export type DeploymentStep = (typeof DEPLOYMENT_STEPS)[number];
+
+export function isDeploymentStep(value: unknown): value is DeploymentStep {
+  return (
+    typeof value === "string" && (DEPLOYMENT_STEPS as readonly string[]).includes(value)
+  );
+}
+
 export type RailwayEnvironment = {
   id: string;
   name: string;

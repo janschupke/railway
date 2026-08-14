@@ -129,6 +129,12 @@ async function handle(
          * The monitor names messages; this is the first layer with a request scope, so
          * it is where a key becomes a sentence. The wire format stays `{ message }`.
          *
+         * The branch is keyed on the FIELD NAME, not on the event type, which is a trap
+         * for anything added to the union later: a variant carrying upstream free text in
+         * a field called `message` would be handed to `t()` as though it were a catalog
+         * key. `failure` names its text `reason` for exactly that reason, and passes
+         * through untranslated — the words are Railway's, and nothing here chooses them.
+         *
          * Container stdout is never re-logged here or anywhere else. It is the user's
          * data, it is unbounded, and re-emitting it would multiply this deployment's own
          * log volume by every stream open. Stated because it is the most tempting wrong

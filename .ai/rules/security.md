@@ -89,6 +89,13 @@ own sentence (rejected credential, withheld scope, rate limit, outage) so the us
 whether to retry, re-authorize, or stop. Do not collapse those branches back into one
 generic message.
 
+**One exception, and it is narrow.** A failed row renders the text on Railway's failing
+`DeploymentEvent`, bounded by `src/lib/railway/failure-reason.ts`. That is content about the
+requester's own deployment, next to container stdout the log pane already shows verbatim —
+not an error envelope about this app. The reasoning and the bounds are recorded as an
+accepted risk in `SECURITY.md`; read it before extending the exception to anything else, and
+note that the transport failures on that same request still go through `reportError`.
+
 ## One writer per header
 
 - **CSP is written in `src/proxy.ts` only**, because it carries a per-request nonce.

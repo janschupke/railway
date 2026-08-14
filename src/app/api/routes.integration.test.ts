@@ -325,6 +325,35 @@ describe("GET /api/streams/[deploymentId]", () => {
     expect(body).not.toContain("after done");
   });
 
+  it("passes a failure through untranslated, and keeps the stream open after it", async () => {
+    /*
+     * Two properties, both easy to break from a distance.
+     *
+     * The translation branch is keyed on the field name `message`, so a variant carrying
+     * upstream free text must not use it — otherwise Railway's sentence is handed to t()
+     * as a catalog key. And `failure` is not terminal: the drain still has to run, and
+     * `done` still has to arrive, or the browser sits on "Connecting…" and redials.
+     */
+    monitorDeployment.mockImplementation(async function* () {
+      yield {
+        type: "failure",
+        deploymentId: "dep_1",
+        step: "BUILD_IMAGE",
+        reason: "manifest for redis:nope not found",
+      };
+      yield { type: "done", deploymentId: "dep_1", state: "failed" };
+    });
+
+    const body = await readEvents(
+      await stream(request("/api/streams/dep_1"), params("dep_1")),
+    );
+
+    expect(body.match(/event: (\w+)/g)).toEqual(["event: failure", "event: done"]);
+    expect(body).toContain(
+      'data: {"deploymentId":"dep_1","step":"BUILD_IMAGE","reason":"manifest for redis:nope not found"}',
+    );
+  });
+
   it("ends the stream on a monitor error", async () => {
     monitorDeployment.mockImplementation(async function* () {
       yield { type: "error", message: "Authorization revoked" };

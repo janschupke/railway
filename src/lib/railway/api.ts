@@ -6,6 +6,7 @@ import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
 import {
   BUILD_LOGS_QUERY,
+  DEPLOYMENT_EVENTS_QUERY,
   DEPLOYMENT_LOGS_QUERY,
   DEPLOYMENT_QUERY,
   PROJECTS_PERSONAL_QUERY,
@@ -16,6 +17,11 @@ import {
   SERVICE_DEPLOY_MUTATION,
   VARIABLE_COLLECTION_UPSERT_MUTATION,
 } from "./operations";
+import {
+  pickFailureReason,
+  type DeploymentEventNode,
+  type DeploymentFailure,
+} from "./failure-reason";
 import {
   nodes,
   toContainers,
@@ -340,6 +346,70 @@ export async function getDeployment(
     { accessToken, operationName: "Deployment", signal },
   );
   return data.deployment;
+}
+
+/**
+ * Why a deployment failed, from the one place Railway keeps it.
+ *
+ * Read once, when a deployment has already settled as FAILED, and never from the poll
+ * loop — see DEPLOYMENT_EVENTS_QUERY for what a withdrawable field in that loop costs.
+ *
+ * `gqlPartial` rather than `gql`, which is the one non-obvious choice here. Railway
+ * refuses a field it does not permit with HTTP 200, an `errors[]` entry and the field
+ * nulled; `gql` throws on that and would discard the `step` that did arrive alongside it.
+ * Keeping the partial answer is the whole reason gqlPartial exists.
+ *
+ * Transport, rate-limit and 5xx failures still throw out of here, because `execute` throws
+ * before this returns. That is deliberate: every other read in this file throws, and the
+ * monitor's catch is where "best effort" is actually spelled out — one closure away from
+ * the identical catch on the log fallback.
+ */
+export async function getDeploymentFailure(
+  accessToken: string,
+  deploymentId: string,
+  signal?: AbortSignal,
+): Promise<DeploymentFailure | null> {
+  const { data, errors } = await gqlPartial<{
+    deploymentEvents: Edges<DeploymentEventNode>;
+  }>(
+    DEPLOYMENT_EVENTS_QUERY,
+    { id: deploymentId, last: STREAM.FAILURE_EVENTS },
+    { accessToken, operationName: "DeploymentEvents", signal },
+  );
+
+  for (const error of errors) {
+    /*
+     * Debug, not warn. This runs while the user is already looking at a failure, and a
+     * feed the token cannot read is a capability this app degrades out of rather than an
+     * incident — a warn per failed deployment would train people to ignore warns.
+     */
+    log.debug("railway.deployment.failure_reason_refused", {
+      deployment_id: deploymentId,
+      error,
+    });
+  }
+
+  const failure = pickFailureReason(
+    nodes(data?.deploymentEvents),
+    STREAM.FAILURE_REASON_MAX,
+  );
+
+  /*
+   * The reason text is deliberately NOT logged, only its length.
+   *
+   * It is unbounded and partly container-authored — a PRE_DEPLOY_COMMAND or HEALTHCHECK
+   * payload can carry the container's own output — so it is exactly the unbounded label
+   * the logging rules keep out of a log store. Unlike a redacted upstream error there is
+   * no incident-id join to preserve either: the user can read the text on their own
+   * screen, which is the point of the ticket.
+   */
+  log.debug("railway.deployment.failure_reason", {
+    deployment_id: deploymentId,
+    step: failure?.step ?? null,
+    reason_length: failure?.reason?.length ?? 0,
+  });
+
+  return failure;
 }
 
 /**

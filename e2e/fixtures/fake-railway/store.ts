@@ -13,6 +13,17 @@
  */
 type LogLine = { timestamp: string; message: string; severity: string };
 
+/** One node of the `deploymentEvents` connection, with the members the app selects. */
+export type DeploymentEvent = {
+  step: string;
+  payload: {
+    error: string | null;
+    reason: string | null;
+    detail: string | null;
+    skipped: boolean;
+  };
+};
+
 export type Deployment = {
   id: string;
   serviceId: string;
@@ -28,6 +39,14 @@ export type Deployment = {
    * always had output and the app's phase selection could never be wrong.
    */
   logs: { build: LogLine[]; deploy: LogLine[] };
+  /**
+   * Deployment events, as `deploymentEvents` returns them.
+   *
+   * A failed deployment's reason lives here and in no other part of Railway's API — the
+   * Deployment type carries a status and no explanation at all — so a fixture without
+   * these cannot express the case the failed row now exists to render.
+   */
+  events: DeploymentEvent[];
   /** Index into PROGRESSION. */
   step: number;
   failing: boolean;
@@ -55,6 +74,24 @@ export type Service = {
 const PROGRESSION = ["QUEUED", "BUILDING", "DEPLOYING", "SUCCESS"] as const;
 const FAILING_PROGRESSION = ["QUEUED", "BUILDING", "FAILED"] as const;
 
+/**
+ * Which DeploymentEventStep each status transition reports.
+ *
+ * Railway's steps are finer-grained than its statuses, so this is a plausible mapping
+ * rather than a faithful one — the app only reads the step off the *last* event, and what
+ * matters for a spec is that the step is a member the catalog knows.
+ */
+const STATUS_STEPS: Record<string, string> = {
+  QUEUED: "SNAPSHOT_CODE",
+  BUILDING: "BUILD_IMAGE",
+  DEPLOYING: "CREATE_CONTAINER",
+  SUCCESS: "HEALTHCHECK",
+  FAILED: "BUILD_IMAGE",
+};
+
+/** What a failed deployment says. A pull that never resolves is the commonest real shape. */
+export const FAILURE_TEXT = 'image "redis:does-not-exist" not found in registry';
+
 /** Fast enough that a spec does not wait, slow enough that transitions are observable. */
 export const TICK_MS = 400;
 
@@ -81,6 +118,17 @@ export type ProjectsSource =
  */
 export type LogPhaseFault = "both" | "build" | "deploy" | "none";
 
+/**
+ * Which member of DeploymentEventPayload carries the failure text, if any.
+ *
+ * A knob rather than a constant precisely *because* the real answer is unverified: which
+ * of these Railway populates has never been observed on a real failed deployment, only
+ * introspected. The app tries all three, and a spec per shape is the only mechanical
+ * evidence available that it copes with each. `none` is the feed that answers with steps
+ * and no words at all.
+ */
+export type FailureFieldFault = "error" | "reason" | "detail" | "none";
+
 export type Faults = {
   /** Next N GraphQL calls answer 429. */
   rateLimit: number;
@@ -94,6 +142,15 @@ export type Faults = {
   deploymentsFail: boolean;
   /** Which phase newly created deployments write their output to. */
   logPhase: LogPhaseFault;
+  /** Which payload member a failing deployment's last event carries its text on. */
+  failureField: FailureFieldFault;
+  /**
+   * `deploymentEvents` is refused, as it would be for a token without the scope.
+   *
+   * Read at request time rather than snapshotted onto the deployment, unlike `logPhase`:
+   * this describes what the API will answer, not what a deployment did.
+   */
+  deploymentEventsFail: boolean;
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
   /** Where the Projects query finds projects, if anywhere. */
@@ -124,6 +181,8 @@ const DEFAULT_FAULTS: Faults = {
   accessTokenTtl: 3600,
   deploymentsFail: false,
   logPhase: "both",
+  failureField: "error",
+  deploymentEventsFail: false,
   projectsSource: "personal",
   variablesFail: false,
   rejectWorkspaces: false,
@@ -217,6 +276,7 @@ export class Store {
       status: "QUEUED",
       updatedAt: new Date(0).toISOString(),
       logs: { build: [], deploy: [] },
+      events: [],
       step: 0,
       failing: this.faults.deploymentsFail,
       // Snapshotted, like `failing`: a spec that flips the fault afterwards is describing
@@ -252,7 +312,26 @@ export class Store {
       if (deployment.logPhase === "both" || deployment.logPhase === "deploy") {
         deployment.logs.deploy.push(line);
       }
+
+      deployment.events.push(this.#eventFor(deployment.status));
     }
+  }
+
+  /**
+   * The deployment event a status transition produces.
+   *
+   * Only the terminal FAILED event carries text; the ones before it are all-null. That is
+   * what makes the app's "walk backwards to the newest event with text" behaviour
+   * observable — with a one-element feed it would be satisfied by any implementation.
+   */
+  #eventFor(status: string): DeploymentEvent {
+    const empty = { error: null, reason: null, detail: null, skipped: false };
+    const step = STATUS_STEPS[status] ?? "BUILD_IMAGE";
+    if (status !== "FAILED") return { step, payload: empty };
+
+    const field = this.faults.failureField;
+    if (field === "none") return { step, payload: empty };
+    return { step, payload: { ...empty, [field]: FAILURE_TEXT } };
   }
 
   start(): void {

@@ -24,6 +24,12 @@ function deps(overrides: Partial<MonitorDeps> = {}): MonitorDeps {
       status: "SUCCESS",
       updatedAt: null,
     })),
+    /*
+     * Present in the default rather than only where it is asserted. Left off, the terminal
+     * branch calls undefined, the best-effort catch swallows the TypeError, and every
+     * failure case in this file passes while measuring nothing.
+     */
+    getDeploymentFailure: vi.fn(async () => null),
     subscribeLogs: async function* () {},
     ...overrides,
   } as MonitorDeps;
@@ -321,6 +327,125 @@ describe("monitorDeployment", () => {
     expect(getDeployment).toHaveBeenCalledTimes(1);
     expect(getLogs.mock.calls.map((c) => c[2])).toEqual(["deploy", "build"]);
     expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+  });
+
+  describe("when a deployment fails", () => {
+    const failed = () =>
+      vi.fn(async () => ({ id: "dep_1", status: "FAILED", updatedAt: null }));
+
+    const runToDone = async (overrides: Partial<MonitorDeps>) =>
+      drain(
+        monitorDeployment(params(), deps({ getDeployment: failed(), ...overrides })),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+    it("says which step failed and what Railway said, before it says done", async () => {
+      const events = await runToDone({
+        getDeploymentFailure: vi.fn(async () => ({
+          step: "BUILD_IMAGE",
+          reason: "manifest for redis:nope not found",
+        })),
+      });
+
+      expect(events).toContainEqual({
+        type: "failure",
+        deploymentId: "dep_1",
+        step: "BUILD_IMAGE",
+        reason: "manifest for redis:nope not found",
+      });
+      // Pushed before the drain window, or AsyncQueue would drop it after stop().
+      expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+    });
+
+    it("asks even when the log phase already produced output", async () => {
+      /*
+       * The deliberate difference from the log fallback above, which is empty-only. The
+       * commonest real failure prints two hundred plausible build lines and then fails on
+       * HEALTHCHECK: the pane is full and the row still says nothing but "Failed", so a
+       * `linesEmitted` gate here would hide this in exactly the case it exists for.
+       */
+      const getDeploymentFailure = vi.fn(async () => ({
+        step: "HEALTHCHECK",
+        reason: "no response on :8080",
+      }));
+
+      const events = await runToDone({
+        getLogs: vi.fn(async () => [line("step 1/4 : FROM node")]),
+        getDeploymentFailure,
+      });
+
+      expect(getDeploymentFailure).toHaveBeenCalledTimes(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "failure", step: "HEALTHCHECK" }),
+      );
+    });
+
+    it("does not ask about a deployment that succeeded", async () => {
+      const getDeploymentFailure = vi.fn(async () => null);
+
+      await drain(
+        monitorDeployment(params(), deps({ getDeploymentFailure })),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(getDeploymentFailure).not.toHaveBeenCalled();
+    });
+
+    it("asks exactly once, however long the answer takes", async () => {
+      // Serial polling is what retires the guard a `settling` flag used to provide; this
+      // is the assertion that it still holds when the answer outlives a poll interval.
+      const getDeploymentFailure = vi.fn(async () => {
+        await sleep(STREAM.STATUS_POLL_MS * 3);
+        return { step: "BUILD_IMAGE", reason: "slow to answer" };
+      });
+
+      const events = await drain(
+        monitorDeployment(
+          params(),
+          deps({ getDeployment: failed(), getDeploymentFailure }),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(
+            STREAM.STATUS_POLL_MS * 3 + STREAM.DRAIN_MS + 100,
+          );
+        },
+      );
+
+      expect(getDeploymentFailure).toHaveBeenCalledTimes(1);
+      expect(events.filter((e) => e.type === "failure")).toHaveLength(1);
+    });
+
+    it("says nothing extra when Railway has nothing to add", async () => {
+      const events = await runToDone({ getDeploymentFailure: vi.fn(async () => null) });
+
+      expect(events.some((e) => e.type === "failure")).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+    });
+
+    it("still finishes, and stays quiet, when the reason fetch fails", async () => {
+      /*
+       * Silent by design: the user is already reading one failure, and a banner saying the
+       * app could not explain it is worse than the sentence the row falls back to. The
+       * trace is a debug record, not a second thing on screen.
+       */
+      const events = await runToDone({
+        getDeploymentFailure: vi.fn(async () => {
+          throw new RailwayApiError("Not Authorized", { kind: "auth" });
+        }),
+      });
+
+      expect(events.some((e) => e.type === "warning" || e.type === "error")).toBe(
+        false,
+      );
+      expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+      expect(logRecords().map((r) => r.msg)).toContain(
+        "railway.deployment.failure_reason_failed",
+      );
+    });
   });
 
   it("stretches the interval while a deployment sits in one state", async () => {

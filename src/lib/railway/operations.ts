@@ -176,6 +176,45 @@ export const DEPLOYMENT_QUERY = /* GraphQL */ `
   }
 `;
 
+/**
+ * Why a deployment failed. A second document on purpose, not four more fields above.
+ *
+ * The `Deployment` type carries no reason at all — `diagnosis` and `meta` are opaque
+ * SCALARs with no documented shape, which is not something to select and render — so the
+ * only place the reason exists is this event feed.
+ *
+ * It stays out of DEPLOYMENT_QUERY because that document is polled every
+ * STREAM.STATUS_POLL_MS for the life of every open stream. A field withdrawn or refused
+ * there is a rejection on *every* poll, which pollStatus classifies as transient, logs
+ * once at warn and then at debug, and rides out for the full STREAM.MAX_DURATION_MS. Here
+ * the same withdrawal costs one best-effort read per failed deployment and the row falls
+ * back to the sentence it already had.
+ *
+ * The selection is deliberately minimal for the same reason: `id`, `createdAt`,
+ * `completedAt`, `attempt` and `maxAttempts` all exist and are all left out, because each
+ * is one more field whose withdrawal would take the whole document with it and none of
+ * them changes what the row says. `skipped` earns its place by changing which event is
+ * chosen; `step` earns its place by being a bounded enum this app can translate, and the
+ * only useful thing left when all three text members come back null.
+ */
+export const DEPLOYMENT_EVENTS_QUERY = /* GraphQL */ `
+  query DeploymentEvents($id: String!, $last: Int) {
+    deploymentEvents(id: $id, last: $last) {
+      edges {
+        node {
+          step
+          payload {
+            error
+            reason
+            detail
+            skipped
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const DEPLOYMENT_LOGS_QUERY = /* GraphQL */ `
   query DeploymentLogs($deploymentId: String!, $limit: Int) {
     deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
@@ -272,10 +311,26 @@ export const REQUIRED_FIELDS: Array<{
  * wrong for `serviceInstanceUpdate`.
  */
 export const OPTIONAL_FIELDS: Array<{
-  root: "Mutation";
+  root: "Query" | "Mutation";
   field: string;
   note: string;
 }> = [
+  /*
+   * Where a failed deployment's reason lives, and the one entry here the app actually
+   * sends. Optional rather than required because losing it costs no capability: a failed
+   * row degrades to exactly what it showed before — the status, the fallback sentence, and
+   * the link to Railway's own page.
+   *
+   * verify:schema reports the *root* field only. A withdrawn member of
+   * DeploymentEventPayload is two types down and invisible to it; that arrives at runtime,
+   * is swallowed by the same best-effort catch, and shows up as one debug record. Stated
+   * in README's Limitations rather than papered over.
+   */
+  {
+    root: "Query",
+    field: "deploymentEvents",
+    note: "a failed row shows the status and a link, with no reason",
+  },
   {
     root: "Mutation",
     field: "deploymentStop",

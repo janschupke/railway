@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 import { useThrottledRefresh } from "@/hooks/use-throttled-refresh";
 import {
+  isDeploymentStep,
   isTerminal,
   isTransitioning,
   type Container,
@@ -157,6 +158,32 @@ export function ContainerRow({
    */
   const nextPhase = phaseFor(state);
   if (nextPhase !== phase) setPhase(nextPhase);
+
+  /*
+   * What a failed row says, from the four things Railway may have told us.
+   *
+   * The step is a bounded enum, so it is a catalog lookup — the same shape StatusBadge
+   * uses for `states.${state}`. `isDeploymentStep` is what keeps that safe: Railway adds
+   * enum members without notice, and an unknown one falls to the reason-only branch rather
+   * than rendering a missing-message marker at the user.
+   *
+   * The reason is an ICU *value*, never a key. It is Railway's own words, bounded on the
+   * server, and it renders as a text child so React escapes it — it is never a href, an
+   * attribute, or markup. See the accepted risk in SECURITY.md.
+   */
+  const failureStep = isDeploymentStep(stream.failure?.step)
+    ? stream.failure.step
+    : null;
+  const failureReason = stream.failure?.reason ?? null;
+  const stepLabel = failureStep ? t(`deploymentStep.${failureStep}`) : null;
+  const failureMessage =
+    stepLabel && failureReason
+      ? t("failedWithReason", { step: stepLabel, reason: failureReason })
+      : stepLabel
+        ? t("failedAtStep", { step: stepLabel })
+        : failureReason
+          ? t("failedReasonOnly", { reason: failureReason })
+          : t("failedExplanation");
 
   /*
    * Pull the authoritative list once the deployment settles, so sources refresh.
@@ -379,14 +406,16 @@ export function ContainerRow({
                 {/*
                   A terminal failure says what it can, and where the rest of it is.
 
-                  Railway's API answers this app with one enum member. A service created
-                  from an image performs no build, so the build logs are empty, and a pull
-                  that never resolves writes no deployment logs either — which is a red
-                  badge over a pane reading "No log output for this deployment", and no
-                  route from there to the reason. The monitor already tries the other log
-                  phase before giving up; this is what is left when that also comes back
-                  empty, and it is the only thing on screen that Railway's own page can
-                  answer.
+                  The deployment query answers this app with one enum member, so the reason
+                  comes from a second, best-effort read of Railway's deployment-event feed
+                  once the deployment has settled as failed. That read can come back empty,
+                  refused or withdrawn, and the four branches below are those outcomes: a
+                  step and a reason, a step alone, a reason alone, or neither — which is the
+                  sentence this block has always shown.
+
+                  "Open in Railway" is unconditional in every branch. Even a named reason is
+                  one bounded line of what Railway's own page holds in full, so the link is
+                  not a fallback the reason replaces.
 
                   ErrorBlock rather than Banner because this one has an action attached:
                   Banner is a <p> and cannot legally hold a control — see its docblock for
@@ -394,11 +423,12 @@ export function ContainerRow({
 
                   Driven by `state`, which prefers the stream but falls back to the server
                   render, so a row that was already failed when the page loaded gets this
-                  on expand without a stream ever having spoken.
+                  on expand without a stream ever having spoken. The reason itself needs the
+                  stream, so it arrives on expand rather than on page load.
                 */}
                 {state === "failed" && (
                   <ErrorBlock
-                    message={t("failedExplanation")}
+                    message={failureMessage}
                     actions={
                       <Button asChild variant="danger" size="sm">
                         <a

@@ -182,6 +182,22 @@ attacker-chosen in exactly the way the rejected `deploymentId` is, and a field a
 greps is not where that belongs. The trade is deliberate and it is a real loss: the audit
 trail says how many variables a user set, not which.
 
+**Deployment-event text is rendered; GraphQL and `ws` failure text still is not.** A failed
+row shows the free text Railway puts on the failing `DeploymentEvent` — `payload.error`,
+`payload.reason` or `payload.detail` — which is the first upstream-authored string to reach
+the browser since findings 3 and 4. It is a different class from what those closed. A GraphQL
+error envelope is _about this app_: it names internal fields and, on a schema rejection,
+quotes the document we sent. A `ws` failure carries the resolved address of the upstream host.
+A deployment event describes **the requester's own deployment**, in the requester's own
+account, and sits beside container stdout that `LogPane` already renders verbatim line by
+line. It is bounded before it leaves the server (`src/lib/railway/failure-reason.ts`): first
+non-empty line only, C0/C1 control characters and Unicode line separators replaced with
+spaces, whitespace collapsed, capped at `STREAM.FAILURE_REASON_MAX`. It renders as a text
+child of a `<p>`, so React escapes it — never a URL, an attribute, or HTML, and
+`container-row.test.tsx` asserts that with a markup payload. It is not logged, only its
+length. Transport-level failures on that same request are unchanged: they never reach the
+browser, and the row falls back to its own sentence.
+
 **No app-level ownership check on `deploymentId`.** The stream endpoint validates the
 id's shape and caps concurrency, but it does not verify that the deployment belongs to
 the selected project. It deliberately does not: every upstream call carries the
