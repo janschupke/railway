@@ -77,6 +77,15 @@ export type Service = {
    * leak a credential into the page it is checking.
    */
   variables: Record<string, string>;
+  /**
+   * The hostnames Railway has minted for this service, newest last.
+   *
+   * A list rather than one value because that is what the real API answers, and the shape
+   * is what the mapper's ordering rule is about: `serviceDomainCreate` mints a second domain
+   * rather than refusing one, so a fixture holding a single value could not reproduce the
+   * state the app's own guard exists to prevent.
+   */
+  domains: string[];
 };
 
 /**
@@ -182,6 +191,15 @@ export type Faults = {
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
   /**
+   * `serviceDomainCreate` is refused.
+   *
+   * The one Railway refusal in the create path that must NOT stop the container: a spin-up
+   * that asked for an address and did not get one still deployed, still succeeded, and still
+   * says so. Reused by the row control, where the same refusal is a plain failure because
+   * minting the domain is the whole of what that action does.
+   */
+  domainFails: boolean;
+  /**
    * `volumeCreate` is refused, stranding a stateful service before its deploy.
    *
    * The branch this exists for is the one that must NOT deploy: a database whose volume
@@ -262,6 +280,7 @@ const DEFAULT_FAULTS: Faults = {
   deploymentEventsFail: false,
   projectsSource: "personal",
   variablesFail: false,
+  domainFails: false,
   metricsFail: false,
   workspaceFail: false,
   noWorkspace: false,
@@ -356,6 +375,8 @@ export class Store {
      * at all, are expressible too.
      */
     status?: string;
+    /** Seeds a service that is already reachable, for the row that must not offer a second. */
+    domains?: string[];
   }): Service {
     const service: Service = {
       id: this.id("svc"),
@@ -367,6 +388,7 @@ export class Store {
       createdAt: new Date(0).toISOString(),
       deploymentId: null,
       variables: {},
+      domains: input.domains ?? [],
     };
     this.services.set(service.id, service);
     if (input.deployed || input.status) {
@@ -376,6 +398,32 @@ export class Store {
       deployment.step = Math.max(PROGRESSION.length, FAILING_PROGRESSION.length);
     }
     return service;
+  }
+
+  /**
+   * What `serviceDomainCreate` does here: a hostname derived from the service's name.
+   *
+   * Derived rather than random, because the specs assert on it — Railway's own hostnames are
+   * `<service>-<environment>.up.railway.app`, and reproducing that shape is what lets a spec
+   * check the row's link rather than merely that a link appeared.
+   *
+   * Appends, and deliberately does not refuse a service that already has one. The real API
+   * mints a second domain here, and the app's guard against asking twice is in the action
+   * rather than upstream — a fixture that refused would make that guard untestable by
+   * quietly doing its job.
+   */
+  addServiceDomain(serviceId: string, environmentId: string): string | null {
+    const service = this.services.get(serviceId);
+    if (!service) return null;
+    const environment = this.projects
+      .flatMap((project) => project.environments)
+      .find((candidate) => candidate.id === environmentId);
+    const suffix = service.domains.length;
+    const domain = `${service.name}-${environment?.name ?? "production"}${
+      suffix === 0 ? "" : `-${suffix}`
+    }.up.railway.app`;
+    service.domains.push(domain);
+    return domain;
   }
 
   addDeployment(serviceId: string): Deployment {

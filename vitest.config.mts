@@ -98,10 +98,18 @@ export default defineConfig({
        * as raising a bundle budget: allowed, and it should be argued for in the commit.
        */
       thresholds: {
-        lines: 97,
-        branches: 89,
-        functions: 96,
-        statements: 95,
+        /*
+         * Raised with T-485, which is what this ratchet is for: the measured figures moved
+         * to 98.34 / 91.09 / 97.79 / 96.94, and thresholds left at the old numbers would
+         * have let a later change delete every test the domain work brought with it and
+         * still pass. Each sits a point or so under its measurement, which is the margin
+         * the previous set carried — close enough to defend the figure, far enough that one
+         * branch of legitimate refactoring is not a red build.
+         */
+        lines: 98,
+        branches: 90,
+        functions: 97,
+        statements: 96,
 
         /*
          * Per-directory, because a global aggregate cannot see a single file at zero.
@@ -116,8 +124,8 @@ export default defineConfig({
          * exclude list, which testing.md forbids for exactly this reason. Directory
          * floors put the pressure where the logic is without inviting that.
          */
-        "src/lib/**": { lines: 95, branches: 89, functions: 95, statements: 94 },
-        "src/hooks/**": { lines: 95, branches: 87, functions: 95, statements: 95 },
+        "src/lib/**": { lines: 98, branches: 93, functions: 97, statements: 97 },
+        "src/hooks/**": { lines: 98, branches: 91, functions: 98, statements: 97 },
         /*
          * The rail yard. It gets a floor of its own for the same reason lib and hooks do:
          * it is the largest body of logic in the app outside those two, and a global

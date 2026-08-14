@@ -37,7 +37,7 @@ describe("the GraphQL documents", () => {
      * an export, or an export that stopped being a string and quietly left the set, is
      * invisible everywhere else.
      */
-    expect(DOCUMENTS).toHaveLength(25);
+    expect(DOCUMENTS).toHaveLength(26);
     expect(DOCUMENTS.map(operationNameOf).toSorted()).toEqual([
       "BuildLogs",
       "Deployment",
@@ -54,6 +54,7 @@ describe("the GraphQL documents", () => {
       "ProjectsWorkspace",
       "ServiceCreate",
       "ServiceDelete",
+      "ServiceDomainCreate",
       "ServiceInstanceDeployV2",
       "ServiceInstanceUpdate",
       "ServiceUpdate",

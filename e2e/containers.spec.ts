@@ -23,6 +23,7 @@ import {
   toast,
 } from "./support";
 import { FAILURE_TEXT } from "./fixtures/fake-railway/store";
+import type { Page } from "@playwright/test";
 
 test.describe("container lifecycle", () => {
   test.beforeEach(async ({ page }) => {
@@ -121,8 +122,15 @@ test.describe("container lifecycle", () => {
 
     const cache = row(page, "cache");
     await expect(cache).toContainText("nginx:alpine");
-    // Displayed as "cache"; stored in Railway as "spun-cache".
-    await expect(cache).not.toContainText("spun-cache");
+    /*
+     * Scoped to the name link rather than asserted over the whole row, and the narrowing is
+     * the point rather than a convenience. Since T-485 an nginx row also carries the
+     * hostname Railway minted for it — `spun-cache-production.up.railway.app` — which
+     * genuinely contains the prefix, because Railway derives the domain from the service's
+     * real name and this app does not get to rename it. So the row contains "spun-cache"
+     * and always will; what must not is the name the reader is shown.
+     */
+    await expect(railwayLink(page, "cache")).toHaveText("cache");
   });
 
   test("points every container at its own page on Railway", async ({ page }) => {
@@ -857,6 +865,163 @@ test.describe("container lifecycle", () => {
      * sentence built around it — directly on top of the empty state that says this.
      */
     await expect(onlyVisible(page.getByText(/\d+ of /))).toHaveCount(0);
+  });
+});
+
+/**
+ * A container nobody can reach is the defect T-485 was raised about: half the preset catalog
+ * is web servers, and the whole payoff of spinning one up used to be a green badge.
+ */
+test.describe("a container's public address", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  /**
+   * Opens the preset list, picks one, and waits for the list to actually close.
+   *
+   * The wait is what `spinUp` in support.ts already does, and for the reason it does it: the
+   * listbox animates out, so reopening it while the previous one is still leaving resolves
+   * the option locator against a node that is detached a frame later. That is a stale
+   * element rather than a slow one, and no timeout makes it deterministic.
+   */
+  const pickPreset = async (page: Page, name: RegExp) => {
+    await onlyVisible(
+      page.getByRole("button", { name: /show preset images/i }),
+    ).click();
+    await onlyVisible(page.getByRole("option", { name })).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+  };
+
+  test("gives a web preset an address, and puts it in the sentence", async ({
+    page,
+  }) => {
+    // The port is seeded from the catalog rather than typed: picking Nginx is the whole of
+    // what the person does, which is the point of the catalog carrying the port at all.
+    await spinUp(page, "web", "Nginx");
+
+    await expect(
+      toast(page, /It will answer at https:\/\/spun-web-production/),
+    ).toBeVisible();
+
+    const link = row(page, "web").getByRole("link", {
+      name: /Open web at spun-web-production\.up\.railway\.app/,
+    });
+    await expect(link).toHaveAttribute(
+      "href",
+      "https://spun-web-production.up.railway.app",
+    );
+    await expect(link).toHaveAttribute("rel", "noreferrer");
+    await expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  test("seeds the port from the image, and leaves it blank for one that serves nothing", async ({
+    page,
+  }) => {
+    await pickPreset(page, /^Nginx/);
+    await expect(field(page, "Public port")).toHaveValue("80");
+
+    await pickPreset(page, /^Redis/);
+    await expect(field(page, "Public port")).toHaveValue("");
+  });
+
+  test("exposes nothing when the port is cleared", async ({ page }) => {
+    /*
+     * Clearing the seeded 80 is the only way to say "do not expose this" for a web image,
+     * so it has to be honoured — a form that helpfully put the port back would publish a
+     * container the person had just declined to publish.
+     */
+    await pickPreset(page, /^Nginx/);
+    await field(page, "Public port").fill("");
+    await field(page, "Name").fill("private");
+    await button(page, /spin up container/i).click();
+
+    await expect(toast(page, "Spinning up private")).toBeVisible();
+    await expect(row(page, "private")).toBeVisible();
+    await expect(
+      row(page, "private").getByRole("button", { name: "Add a public URL" }),
+    ).toBeVisible();
+  });
+
+  test("adds an address to a container that has none", async ({ page }) => {
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await cache.getByRole("button", { name: "Add a public URL" }).click();
+
+    await expect(
+      toast(page, /cache is now at https:\/\/spun-cache-production/),
+    ).toBeVisible();
+    await expect(
+      cache.getByRole("link", { name: /Open cache at spun-cache-production/ }),
+    ).toBeVisible();
+    await expect(cache.getByRole("button", { name: "Add a public URL" })).toHaveCount(
+      0,
+    );
+  });
+
+  test("offers nothing to a service this app did not create", async ({ page }) => {
+    /*
+     * The row for someone else's service carries Open in Railway and nothing this app could
+     * act on — an offer here would be one `withManagedContainer` refuses anyway.
+     */
+    // Not "postgres": the fixture seeds one of those already, and a second would make the
+    // row locator ambiguous rather than the assertion wrong.
+    await seedServices(page, { name: "someone-elses-api" });
+    await page.reload();
+
+    const foreign = row(page, "someone-elses-api");
+    await expect(foreign).toBeVisible();
+    await expect(foreign.getByRole("button", { name: "Add a public URL" })).toHaveCount(
+      0,
+    );
+  });
+
+  test("shows an address a service already had, without offering a second", async ({
+    page,
+  }) => {
+    // `serviceDomainCreate` mints a second domain rather than refusing one, so the row is
+    // where asking twice has to be prevented.
+    await seedServices(page, {
+      name: "spun-api",
+      domains: ["spun-api-production.up.railway.app"],
+    });
+    await page.reload();
+
+    const api = row(page, "api");
+    await expect(
+      api.getByRole("link", { name: /Open api at spun-api-production/ }),
+    ).toBeVisible();
+    await expect(api.getByRole("button", { name: "Add a public URL" })).toHaveCount(0);
+  });
+
+  test("still creates the container when Railway refuses the address", async ({
+    page,
+  }) => {
+    /*
+     * The one refusal in the create path that does not fail the spin-up. The person asked
+     * for a container and got one; what is missing is a convenience, and the row's own
+     * control is the retry — so the sentence talks about the container rather than the
+     * failure.
+     */
+    await injectFaults(page, { domainFails: true });
+    await spinUp(page, "web", "Nginx");
+
+    await expect(toast(page, "Spinning up web")).toBeVisible();
+    const web = row(page, "web");
+    await expect(web).toBeVisible();
+    await expect(web.getByRole("button", { name: "Add a public URL" })).toBeVisible();
+  });
+
+  test("says so when the row control cannot mint one either", async ({ page }) => {
+    // The same refusal, and a plain failure this time: minting the domain is the whole of
+    // what this action does, so there is no half-success to report instead.
+    await spinUp(page, "cache");
+    await injectFaults(page, { domainFails: true });
+
+    await row(page, "cache").getByRole("button", { name: "Add a public URL" }).click();
+
+    await expect(toast(page, "Could not add a public URL")).toBeVisible();
   });
 });
 

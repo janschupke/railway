@@ -333,6 +333,21 @@ export const LIMITS = {
    * Deliberately below that, so the ceiling producing a readable sentence is this one.
    */
   VARIABLES_TOTAL_MAX: 16_000,
+  /**
+   * The port a public domain routes to, inside the container.
+   *
+   * The whole legal range rather than a shorter opinionated one, and that is deliberate:
+   * this bounds what can reach `ServiceDomainCreateInput.targetPort`, it does not advise
+   * which port an image ought to use. A ceiling at 10000 or a floor above 1024 would refuse
+   * real images — rabbitmq's own console is 15672, and plenty of containers legitimately
+   * run as root on 80 — while stopping nothing, because Railway is the thing that decides
+   * whether the port answers.
+   *
+   * What it does stop is a value that is not a port at all reaching the mutation, which is
+   * the only claim a bound like this can honestly make.
+   */
+  PORT_MIN: 1,
+  PORT_MAX: 65_535,
 } as const;
 
 /**

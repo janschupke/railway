@@ -115,8 +115,20 @@ test.describe("the dashboard at phone width", () => {
       page.getByLabel("Variable value 1"),
       button(page, "Remove MY_FLAG"),
     ]) {
-      await expect(locator).toBeInViewport();
+      /*
+       * Scrolled to, rather than asserted to be in view already.
+       *
+       * This case is about HORIZONTAL overflow — the two assertions below are both about
+       * `x` — and vertical position was only ever incidental to it. It stopped being
+       * incidental when the spin-up form grew its port field (T-485): at 412×915 the
+       * variable rows now start below the fold, so `toBeInViewport` was reporting that the
+       * page had got taller rather than that anything had spilled sideways. A page that
+       * scrolls down is not the failure this test exists to catch; a page that scrolls
+       * across is.
+       */
+      await locator.scrollIntoViewIfNeeded();
       const box = (await locator.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     }
   });

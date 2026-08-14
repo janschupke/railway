@@ -206,11 +206,52 @@ const refineVariableRows = (
   }
 };
 
+/**
+ * The port a public domain should route to, and whether to mint one at all.
+ *
+ * One field carrying both, which is the design rather than an economy. A checkbox beside a
+ * port would have a state that means nothing — ticked, with the port blank — and the app
+ * would have to invent an answer for it. A port present says "give this container an
+ * address, here"; a blank field says nothing was asked for.
+ *
+ * Blank is therefore ORDINARY and not an error: it is what every database preset submits,
+ * and what the form posts when a person clears the seeded 80 because they did not want the
+ * container exposed. `undefined`, never 0 — a falsy port and an absent one have to stay
+ * tellable apart all the way down to `ServiceDomainCreateInput`.
+ *
+ * Coerced from a string because that is all FormData holds, and the digits are checked
+ * BEFORE the coercion rather than after. Both of the obvious ways round are wrong on real
+ * input: `parseInt("80abc")` is 80, so a typo becomes a working port aimed somewhere nobody
+ * meant, and `Number` accepts `"0x50"` and `"1e3"` as 80 and 1000 — a field whose own
+ * `inputMode` says numeric should not be quietly reading hex. A port is decimal digits.
+ */
+const PORT_PATTERN = /^\d+$/;
+
+const port = z
+  .string()
+  .trim()
+  .refine((value) => value === "" || PORT_PATTERN.test(value), "validation.portInvalid")
+  .transform((value) => (value === "" ? undefined : Number(value)))
+  .refine(
+    (value) =>
+      value === undefined || (value >= LIMITS.PORT_MIN && value <= LIMITS.PORT_MAX),
+    "validation.portInvalid",
+  )
+  .optional();
+
 export const spinUpSchema = z
   .object({
     projectId: railwayId("validation.projectRequired"),
     environmentId: railwayId("validation.environmentRequired"),
     ...containerFields,
+    /*
+     * On spin-up only, and deliberately not in `containerFields` beside the image it goes
+     * with. Editing a container cannot mint a domain: `serviceDomainCreate` refuses a
+     * service that already has one, and a port field on the edit form would be a control
+     * that does nothing on every container that already answers somewhere. The row is where
+     * a container without an address gets one.
+     */
+    port,
     /*
      * Last on purpose. Zod reports shape issues in declaration order and the action reads
      * `issues[0]`, so anything a person can actually fix — the name, the image, a variable
@@ -296,6 +337,7 @@ export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
   "validation.variableValueTooLong": { max: LIMITS.VARIABLE_VALUE_MAX },
   "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
   "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
+  "validation.portInvalid": { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
   "validation.projectNameTooLong": { max: LIMITS.PROJECT_NAME_MAX },
   "validation.environmentNameTooLong": { max: LIMITS.ENVIRONMENT_NAME_MAX },
 };
@@ -327,6 +369,7 @@ export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
   "validation.variablesTooMany",
   "validation.variablesTooLarge",
   "validation.variablesMalformed",
+  "validation.portInvalid",
   "validation.submissionInvalid",
   "validation.projectNameRequired",
   "validation.projectNameTooLong",

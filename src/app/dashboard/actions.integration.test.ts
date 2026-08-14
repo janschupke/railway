@@ -38,6 +38,7 @@ const {
   stopContainer,
   restartContainer,
   redeployContainer,
+  generateDomain,
   editContainer,
   createProject,
   createEnvironment,
@@ -66,6 +67,10 @@ function projectWith(
      * and the one the redeploy action exists to rescue — so it has to be expressible here.
      */
     undeployed?: boolean;
+    /** What the service runs, when a case needs the catalog to recognise it or not. */
+    image?: string;
+    /** The host Railway already minted for it, for the branch that must not mint a second. */
+    domain?: string;
   }> = [
     { id: "svc_managed", name: "spun-cache" },
     { id: "svc_foreign", name: "postgres" },
@@ -88,7 +93,10 @@ function projectWith(
                   node: {
                     id: `si_${s.id}`,
                     environmentId: "e1",
-                    source: { image: "redis:7-alpine", repo: null },
+                    source: { image: s.image ?? "redis:7-alpine", repo: null },
+                    domains: {
+                      serviceDomains: s.domain ? [{ domain: s.domain }] : [],
+                    },
                     latestDeployment: s.undeployed
                       ? null
                       : {
@@ -220,6 +228,160 @@ describe("spinUp", () => {
     });
     expect(deployed[0]).toMatchObject({ serviceId: "svc_new", environmentId: "e1" });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+  });
+
+  describe("the public port", () => {
+    /** A working create and deploy, with whatever the domain call did handed back. */
+    const creating = () => {
+      const minted: Array<Record<string, unknown>> = [];
+      server.use(
+        api.mutation("ServiceCreate", () =>
+          HttpResponse.json({
+            data: { serviceCreate: { id: "svc_new", name: "spun-web" } },
+          }),
+        ),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+        ),
+        api.mutation("ServiceDomainCreate", ({ variables }) => {
+          minted.push(variables.input as Record<string, unknown>);
+          return HttpResponse.json({
+            data: {
+              serviceDomainCreate: {
+                id: "dom_1",
+                domain: "spun-web-production.up.railway.app",
+                targetPort: 80,
+              },
+            },
+          });
+        }),
+      );
+      return minted;
+    };
+
+    it("mints a domain and puts the url in the sentence", async () => {
+      const minted = creating();
+
+      const result = await spinUp(
+        null,
+        spinUpForm({ name: "web", image: "nginx:alpine", port: "80" }),
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        message:
+          "Spinning up web. It will answer at https://spun-web-production.up.railway.app once it is running.",
+      });
+      expect(minted[0]).toEqual({
+        environmentId: "e1",
+        serviceId: "svc_new",
+        targetPort: 80,
+      });
+    });
+
+    /*
+     * A blank port is what every database preset submits and what a person types when they
+     * clear the seeded 80. It is a request for no public address, not an incomplete form —
+     * so the mutation must not be reached at all.
+     */
+    it("mints nothing, and says nothing, when the port is blank", async () => {
+      server.use(
+        api.mutation("ServiceCreate", () =>
+          HttpResponse.json({
+            data: { serviceCreate: { id: "svc_new", name: "spun-cache" } },
+          }),
+        ),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+        ),
+        api.mutation("ServiceDomainCreate", () => {
+          throw new Error("must not expose a container nobody asked to expose");
+        }),
+      );
+
+      const result = await spinUp(null, spinUpForm({ port: "" }));
+
+      expect(result).toEqual({ ok: true, message: "Spinning up cache" });
+    });
+
+    it("carries both the credentials note and the url when both apply", async () => {
+      const minted = creating();
+      server.use(
+        api.mutation("VolumeCreate", () =>
+          HttpResponse.json({
+            data: { volumeCreate: { id: "vol_1", name: "spun-web-volume" } },
+          }),
+        ),
+        api.mutation("VariableCollectionUpsert", () =>
+          HttpResponse.json({ data: { variableCollectionUpsert: 1 } }),
+        ),
+      );
+
+      const result = await spinUp(
+        null,
+        spinUpFormWith([["RABBITMQ_DEFAULT_PASS", ""]], {
+          name: "web",
+          image: "rabbitmq:3-management",
+          port: "15672",
+        }),
+      );
+
+      expect(result).toMatchObject({ ok: true });
+      expect(result.ok && result.message).toContain(
+        "https://spun-web-production.up.railway.app",
+      );
+      expect(result.ok && result.message).toContain("generated credentials");
+      expect(minted[0]).toMatchObject({ targetPort: 15672 });
+    });
+
+    /*
+     * The one Railway refusal on this path that does not fail the spin-up. The container
+     * the person asked for exists and is running; what is missing is a convenience the row
+     * offers a control for.
+     */
+    it("still succeeds when Railway refuses the domain, and says nothing about it", async () => {
+      server.use(
+        api.mutation("ServiceCreate", () =>
+          HttpResponse.json({
+            data: { serviceCreate: { id: "svc_new", name: "spun-web" } },
+          }),
+        ),
+        api.mutation("ServiceInstanceDeployV2", () =>
+          HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
+        ),
+        api.mutation("ServiceDomainCreate", () =>
+          HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+        ),
+      );
+
+      const result = await spinUp(
+        null,
+        spinUpForm({ name: "web", image: "nginx:alpine", port: "80" }),
+      );
+
+      expect(result).toEqual({ ok: true, message: "Spinning up web" });
+      expect(record("container.created")).toMatchObject({
+        outcome: "deployed",
+        target_port: 80,
+        domain_created: false,
+      });
+    });
+
+    it("attributes a bad port to the field, so the form can render it inline", async () => {
+      server.use(
+        api.mutation("ServiceCreate", () => {
+          throw new Error("must not create anything from a form it refused");
+        }),
+      );
+
+      const result = await spinUp(null, spinUpForm({ port: "70000" }));
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Give a port between 1 and 65,535, or leave it blank",
+        field: "port",
+      });
+    });
   });
 
   /**
@@ -1524,6 +1686,185 @@ describe("container lifecycle", () => {
 
       expect(result).toEqual({ ok: false, error: "That container no longer exists." });
       expect(deployCalls).toBe(0);
+    });
+  });
+
+  describe("generateDomain", () => {
+    /** Railway minting a hostname, with the input handed back to the caller. */
+    const domainOk = (onCall?: (input: Record<string, unknown>) => void) =>
+      api.mutation("ServiceDomainCreate", ({ variables }) => {
+        onCall?.(variables.input as Record<string, unknown>);
+        return HttpResponse.json({
+          data: {
+            serviceDomainCreate: {
+              id: "dom_1",
+              domain: "spun-web-production.up.railway.app",
+              targetPort: 80,
+            },
+          },
+        });
+      });
+
+    it("mints a domain and names it in the sentence", async () => {
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-web", image: "nginx:alpine" },
+            ]),
+          }),
+        ),
+        domainOk(),
+      );
+
+      const result = await generateDomain(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({
+        ok: true,
+        message: "web is now at https://spun-web-production.up.railway.app",
+      });
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    });
+
+    /*
+     * The rule this action is built on. The browser posts three ids and nothing else, so the
+     * port cannot be chosen by the request — it comes from the catalog, keyed on the image
+     * Railway itself reported for the service.
+     */
+    it("takes the port from the catalog rather than from the request", async () => {
+      let input: Record<string, unknown> | undefined;
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-web", image: "nginx:alpine" },
+            ]),
+          }),
+        ),
+        domainOk((i) => (input = i)),
+      );
+
+      const data = actionForm("svc_managed");
+      data.append("port", "9999");
+
+      await generateDomain(null, data);
+
+      expect(input).toEqual({
+        environmentId: "e1",
+        serviceId: "svc_managed",
+        targetPort: 80,
+      });
+      expect(record("container.domain_created")).toMatchObject({
+        service_id: "svc_managed",
+        target_port: 80,
+      });
+    });
+
+    it("lets Railway infer the port for an image the catalog does not know", async () => {
+      let input: Record<string, unknown> | undefined;
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-api", image: "ghcr.io/owner/api:1" },
+            ]),
+          }),
+        ),
+        domainOk((i) => (input = i)),
+      );
+
+      await generateDomain(null, actionForm("svc_managed"));
+
+      expect("targetPort" in (input ?? {})).toBe(false);
+      // Zero, so the record distinguishes "the app chose 80" from "Railway chose" — which
+      // is the question asked when a domain points somewhere unexpected.
+      expect(record("container.domain_created")).toMatchObject({ target_port: 0 });
+    });
+
+    /*
+     * `serviceDomainCreate` mints a SECOND domain rather than refusing one, so a stale page
+     * or two tabs would leave a service with two hostnames and a row showing whichever
+     * sorted first. The guard is on Railway's own answer, like the ownership check above it.
+     */
+    it("refuses a container that already has an address, without calling Railway", async () => {
+      let mintCalls = 0;
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              {
+                id: "svc_managed",
+                name: "spun-web",
+                image: "nginx:alpine",
+                domain: "spun-web-production.up.railway.app",
+              },
+            ]),
+          }),
+        ),
+        api.mutation("ServiceDomainCreate", () => {
+          mintCalls += 1;
+          return HttpResponse.json({
+            data: {
+              serviceDomainCreate: { id: "dom_2", domain: "second", targetPort: 80 },
+            },
+          });
+        }),
+      );
+
+      const result = await generateDomain(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({
+        ok: false,
+        error: "web already has a public URL. Reload the page to see it.",
+      });
+      expect(mintCalls).toBe(0);
+      expect(record("container.domain_skipped")).toMatchObject({ reason: "exists" });
+    });
+
+    it("refuses to expose a service it did not create", async () => {
+      let mintCalls = 0;
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("ServiceDomainCreate", () => {
+          mintCalls += 1;
+          return HttpResponse.json({
+            data: {
+              serviceDomainCreate: { id: "dom_1", domain: "nope", targetPort: 80 },
+            },
+          });
+        }),
+      );
+
+      const result = await generateDomain(null, actionForm("svc_foreign"));
+
+      expect(result).toEqual({
+        ok: false,
+        error: "This service was not created here, so this app cannot act on it.",
+      });
+      expect(mintCalls).toBe(0);
+      expect(record("container.domain_refused")).toMatchObject({
+        reason: "unmanaged",
+        service_id: "svc_foreign",
+      });
+    });
+
+    it("reports a Railway refusal as a failure rather than a silent no-op", async () => {
+      server.use(
+        api.query("Project", () =>
+          HttpResponse.json({
+            data: projectWith([
+              { id: "svc_managed", name: "spun-web", image: "nginx:alpine" },
+            ]),
+          }),
+        ),
+        api.mutation("ServiceDomainCreate", () =>
+          HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+        ),
+      );
+
+      const result = await generateDomain(null, actionForm("svc_managed"));
+
+      expect(result.ok).toBe(false);
     });
   });
 });

@@ -25,6 +25,14 @@ import type { Container } from "./types";
  * Metric values are not excluded here because they never arrive here at all. They are not
  * on `Container`, which is the whole point of keeping them off it — see ContainerMetrics.
  *
+ * `url` is INCLUDED, and it is the field that shows what the `updatedAt` rule is actually
+ * about. Both are values this app does not control, and the difference is not how important
+ * they are but how often they move: Railway rewrites `updatedAt` on every tick of a build,
+ * while a service domain is minted once and then reads identically forever. So the URL costs
+ * nothing per poll and buys the one case a watcher exists for — the tab that did NOT submit
+ * the action, and would otherwise show a container with no address until its next full
+ * navigation.
+ *
  * Sorted after formatting, so Railway reordering its own `edges` is not a change.
  * Hashed rather than kept verbatim, so a watcher's memory is 28 bytes whatever the size
  * of the project.
@@ -39,6 +47,7 @@ export function fingerprint(containers: Container[]): string {
         container.repo ?? "",
         container.state,
         container.deploymentId ?? "",
+        container.url ?? "",
       ].join(""),
     )
     .sort();

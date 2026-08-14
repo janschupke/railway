@@ -23,6 +23,7 @@ const container = (overrides: Partial<Container> = {}): Container => ({
   createdAt: "2026-08-01T10:00:00Z",
   updatedAt: "2026-08-01T10:05:00Z",
   deployedAt: "2026-08-01T10:00:00Z",
+  url: null,
   managed: true,
   ...overrides,
 });

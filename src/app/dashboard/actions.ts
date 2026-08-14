@@ -7,6 +7,7 @@ import { describeActionError, isField, type ActionResult } from "@/lib/action-re
 import { runOnce, type Retainable } from "@/lib/idempotency";
 import {
   createContainer,
+  createServiceDomain,
   deleteVolume,
   deployService,
   destroyContainer,
@@ -28,7 +29,7 @@ import {
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { stripPrefix, toManagedName } from "@/lib/railway/managed";
-import { presetFor } from "@/lib/presets";
+import { httpPortFor, presetFor } from "@/lib/presets";
 import { resolveVariables } from "@/lib/railway/secrets";
 import {
   VALIDATION_KEYS,
@@ -116,6 +117,7 @@ async function create(formData: FormData): Promise<ActionResult> {
     environmentId: formField(formData, "environmentId"),
     name: formField(formData, "name"),
     image: formField(formData, "image"),
+    port: formField(formData, "port"),
     variableKey: formList(formData, "variableKey"),
     variableValue: formList(formData, "variableValue"),
     idempotencyKey: formField(formData, "idempotencyKey"),
@@ -217,7 +219,8 @@ async function attempt(
    * above, since that one is the namespaced overload.
    */
   const t = await getTranslations();
-  const { projectId, environmentId, name, image, variableKey, variableValue } = data;
+  const { projectId, environmentId, name, image, port, variableKey, variableValue } =
+    data;
 
   /*
    * The two parallel lists are one row per index. The schema has already refused a
@@ -279,6 +282,15 @@ async function attempt(
       name: managedName,
       image,
       ...(variables ? { variables } : {}),
+      /*
+       * Passed straight through, and it is the one field on this call the browser chose the
+       * value of. The catalog seeded the form's field and the person could overwrite it,
+       * which is deliberate — a custom image is exactly the case the catalog cannot answer
+       * for — and `spinUpSchema` has already bounded it to an integer in the port range.
+       * Unlike a variable value it reaches no environment and no shell: its only
+       * destination is `ServiceDomainCreateInput.targetPort`.
+       */
+      ...(port === undefined ? {} : { targetPort: port }),
     });
   } catch (error) {
     // Rethrown immediately: `describeActionError` still owns what the user is told. This
@@ -334,6 +346,18 @@ async function attempt(
      */
     variable_names: presetSent.join(","),
     user_variable_count: sentNames.length - presetSent.length,
+    /*
+     * Whether this container was put on the public internet, and on which port. Part of the
+     * audit trail rather than diagnostics: "reachable from anywhere" is the single most
+     * consequential thing this action can do to a service, and a record that says a
+     * container was created without saying that would be describing a different container.
+     *
+     * The port, not the hostname. Railway derives the hostname from the service name, which
+     * is already in this record, so the URL would be a second copy of a value above — and
+     * the port is the half that says what the domain actually points at.
+     */
+    target_port: port ?? 0,
+    domain_created: created.url !== null,
   });
 
   revalidatePath("/dashboard");
@@ -375,17 +399,37 @@ async function attempt(
     };
   }
 
+  /*
+   * Four whole sentences over two independent facts, rather than one sentence with pieces
+   * bolted on.
+   *
+   * The two are genuinely independent — a postgres mints a credential and gets no address,
+   * an nginx gets an address and mints nothing, a rabbitmq does both — so something has to
+   * carry the combinations. Composing them from fragments at runtime is the version that
+   * cannot be translated: word order, and whether the second clause is even a separate
+   * sentence, are decisions the catalog has to be allowed to make per language. See
+   * .ai/rules/i18n.md.
+   *
+   * `generated` is gated on what was MINTED rather than on whether any variable was set: a
+   * user who typed their own password has their own copy, and sending them to Railway to
+   * read it back would be telling them to look up something they already know.
+   *
+   * `created.url` may be null on a spin-up that asked for a domain — Railway refused it, and
+   * `railway.domain_failed` has the record. The user is told about the container rather than
+   * about the missing address, because the container is what they asked for and the row now
+   * offers the control that fixes the rest.
+   */
+  const url = created.url;
   return {
     value: {
       ok: true,
-      /*
-       * Gated on what was minted, not on whether any variable was set. A user who typed
-       * their own password has their own copy, and pointing them at Railway to read it
-       * back would be telling them to go and look up something they already know.
-       */
-      message: generated
-        ? t("actions.spinningUpWithCredentials", { name })
-        : t("actions.spinningUp", { name }),
+      message: url
+        ? generated
+          ? t("actions.spinningUpWithCredentialsAtUrl", { name, url })
+          : t("actions.spinningUpAtUrl", { name, url })
+        : generated
+          ? t("actions.spinningUpWithCredentials", { name })
+          : t("actions.spinningUp", { name }),
     },
     retain: true,
   };
@@ -551,6 +595,11 @@ const LIFECYCLE_EVENTS = {
     skipped: "container.edit_skipped",
     refused: "container.edit_refused",
     done: "container.updated",
+  },
+  domain: {
+    skipped: "container.domain_skipped",
+    refused: "container.domain_refused",
+    done: "container.domain_created",
   },
 } as const;
 
@@ -871,6 +920,72 @@ export async function redeployContainer(
         ok: true,
         message: t("actions.redeployed", { name: context.target.displayName }),
       };
+    }),
+  );
+}
+
+/**
+ * Give an existing container a public address.
+ *
+ * The counterpart to the port field on the spin-up form, and it exists because that field
+ * only ever gets one chance. A container spun up before this app could mint domains, one
+ * whose port was left blank, one whose domain Railway refused at create time — all three are
+ * rows with no address and, until this, no way to get one short of Railway's own dashboard.
+ *
+ * **The browser sends no port.** It posts the same three ids every lifecycle verb posts, and
+ * the port is derived server-side from the image `withManagedContainer` read back from
+ * Railway. That is the same rule the credential minting follows: what the catalog declares
+ * for an image is granted, and what a request asks for is not. It also means this action
+ * cannot be used to point a domain at an arbitrary port on a service the caller owns.
+ *
+ * For an image the catalog has never heard of, `targetPort` is omitted and Railway infers a
+ * port from the running deployment. That inference is undocumented and is why the spin-up
+ * form takes a port at all — a custom image says its port there. Stated in README
+ * Limitations rather than hidden behind a control that sometimes picks wrong.
+ */
+export async function generateDomain(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("generateDomain", { trustInboundId: true }, () =>
+    withManagedContainer("domain", formData, async (context) => {
+      const t = await getTranslations();
+      const name = context.target.displayName;
+
+      /*
+       * Re-checked here even though the control is only rendered for a row with no address.
+       * `serviceDomainCreate` mints a SECOND domain rather than refusing, so a stale page —
+       * or two tabs pressing the button — would leave a service with two hostnames and a
+       * row showing whichever sorted first. The check is on Railway's own answer, like the
+       * ownership check above it.
+       */
+      if (context.target.url) {
+        log.info(LIFECYCLE_EVENTS.domain.skipped, {
+          reason: "exists",
+          project_id: context.projectId,
+          service_id: context.target.serviceId,
+        });
+        revalidatePath("/dashboard");
+        return { ok: false, error: t("actions.domainExists", { name }) };
+      }
+
+      const targetPort = httpPortFor(context.target.image ?? "");
+
+      const url = await createServiceDomain(context.accessToken, {
+        environmentId: context.environmentId,
+        serviceId: context.target.serviceId,
+        ...(targetPort === undefined ? {} : { targetPort }),
+      });
+
+      /*
+       * `target_port: 0` where the catalog knew nothing, so the record distinguishes "the
+       * app chose 80" from "Railway chose". Those are different answers to the question an
+       * operator asks when a domain points somewhere unexpected.
+       */
+      logLifecycle("domain", context, { target_port: targetPort ?? 0 });
+
+      revalidatePath("/dashboard");
+      return { ok: true, message: t("actions.domainCreated", { name, url }) };
     }),
   );
 }

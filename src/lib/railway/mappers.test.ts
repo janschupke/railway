@@ -36,6 +36,30 @@ const service = (overrides: Partial<ServiceNode> = {}): ServiceNode => ({
   ...overrides,
 });
 
+/** The same service, with the domains Railway would have answered for it. */
+const withDomains = (hosts: string[]): Container => {
+  const base = service();
+  const instance = base.serviceInstances!.edges[0]!.node;
+  const mapped = toContainer(
+    {
+      ...base,
+      serviceInstances: {
+        edges: [
+          {
+            node: {
+              ...instance,
+              domains: { serviceDomains: hosts.map((domain) => ({ domain })) },
+            },
+          },
+        ],
+      },
+    },
+    "env_1",
+  );
+  if (!mapped) throw new Error("the fixture service is in env_1");
+  return mapped;
+};
+
 describe("nodes", () => {
   it("unwraps a Relay connection", () => {
     expect(nodes({ edges: [{ node: 1 }, { node: 2 }] })).toEqual([1, 2]);
@@ -115,6 +139,43 @@ describe("toContainer", () => {
       repo: null,
     });
   });
+
+  it("has no url when the service carries no domain", () => {
+    expect(toContainer(service(), "env_1")?.url).toBeNull();
+  });
+
+  it("builds an https url from the domain Railway minted", () => {
+    // The domain arrives as a bare host; the scheme is added here and nowhere downstream,
+    // because Railway terminates TLS for every domain it mints.
+    expect(withDomains(["spun-web-production.up.railway.app"]).url).toBe(
+      "https://spun-web-production.up.railway.app",
+    );
+  });
+
+  /*
+   * The reason this is sorted rather than `[0]`. Railway documents no ordering for the list,
+   * and a service can hold several domains — one per target port, plus any the user added in
+   * Railway's own dashboard. Reading whichever end the response happened to put first means
+   * two polls of an unchanged service disagree, which flips the watch fingerprint and wakes
+   * every open tab on a change that did not happen.
+   */
+  it("picks the same domain however Railway orders them", () => {
+    const forwards = withDomains(["a.up.railway.app", "z.up.railway.app"]);
+    const backwards = withDomains(["z.up.railway.app", "a.up.railway.app"]);
+
+    expect(forwards.url).toBe("https://a.up.railway.app");
+    expect(backwards.url).toEqual(forwards.url);
+  });
+
+  /*
+   * `AllDomains!` is non-null on the schema, so neither of these is a shape Railway should
+   * send. They are what a partial or malformed body looks like to a mapper, and the answer
+   * is the same as no domain rather than a throw that would take the whole list down.
+   */
+  it("survives a response that carries no domains field, or an empty one", () => {
+    expect(toContainer(service(), "env_1")?.url).toBeNull();
+    expect(withDomains([]).url).toBeNull();
+  });
 });
 
 describe("sortContainers", () => {
@@ -130,6 +191,7 @@ describe("sortContainers", () => {
     createdAt: null,
     updatedAt: null,
     deployedAt: null,
+    url: null,
     managed: false,
     ...over,
   });

@@ -249,6 +249,20 @@ export type LogEvent =
   | "container.stop_refused"
   | "container.stop_skipped"
   | "container.stopped"
+  /*
+   * Giving a container a public address. The same three shapes, and `domain_skipped` carries
+   * a second reason the others do not: `exists`, for a stale page asking twice — Railway
+   * mints a second domain rather than refusing, so that branch is the app declining rather
+   * than reporting a Railway refusal.
+   *
+   * `container.domain_created` is `info` and part of the audit trail for the strongest
+   * reason on this list: it is the record that a container was put on the public internet.
+   * `railway.domain_failed` is the other half — a refusal during spin-up, which does not
+   * fail the spin-up.
+   */
+  | "container.domain_created"
+  | "container.domain_refused"
+  | "container.domain_skipped"
   | "dashboard"
   | "dashboard.metrics_failed"
   | "dashboard.render"
@@ -278,6 +292,13 @@ export type LogEvent =
   | "image.checked"
   | "proxy.env_invalid"
   | "railway.deploy_failed"
+  /*
+   * A domain Railway refused during a spin-up, and the only one of these `railway.*_failed`
+   * names that does NOT stop the container being created. The container is deployed and the
+   * user is told about it; what they are not given is an address, and the row's own control
+   * is the retry. See createContainer.
+   */
+  | "railway.domain_failed"
   | "railway.deploymentPoll"
   | "railway.deployment.fallback_logs"
   | "railway.deployment.fallback_logs_failed"

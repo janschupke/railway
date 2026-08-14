@@ -5,6 +5,7 @@ import { STREAM } from "@/lib/constants";
 import { logRecords, rawLogLines } from "@/test/log-capture";
 import {
   createContainer,
+  createServiceDomain,
   deleteVolume,
   destroyContainer,
   getEnvironmentVolumes,
@@ -322,6 +323,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: "dep_1",
+      url: null,
       outcome: "deployed",
     });
   });
@@ -440,6 +442,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
+      url: null,
       outcome: "variables_failed",
     });
   });
@@ -470,6 +473,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
+      url: null,
       outcome: "deploy_failed",
     });
 
@@ -542,6 +546,7 @@ describe("createContainer", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
+      url: null,
       outcome: "deployed",
     });
   });
@@ -649,6 +654,7 @@ describe("createContainer, attaching a volume", () => {
     expect(result).toEqual({
       serviceId: "svc_1",
       deploymentId: null,
+      url: null,
       outcome: "volume_failed",
     });
 
@@ -691,6 +697,209 @@ describe("createContainer, attaching a volume", () => {
       volume_name: "spun-db-volume",
       mount_path: "/data/db",
     });
+  });
+});
+
+describe("createContainer, minting a public domain", () => {
+  /** Railway answering `serviceDomainCreate`, with the input handed to the caller. */
+  const domainOk = (onCall?: (input: Record<string, unknown>) => void) =>
+    api.mutation("ServiceDomainCreate", ({ variables }) => {
+      onCall?.(variables.input as Record<string, unknown>);
+      return HttpResponse.json({
+        data: {
+          serviceDomainCreate: {
+            id: "dom_1",
+            domain: "spun-web-production.up.railway.app",
+            targetPort: 80,
+          },
+        },
+      });
+    });
+
+  /** The two stubs every case here needs before the domain is even reached. */
+  const createdAndDeployed = () => [
+    api.mutation("ServiceCreate", () =>
+      HttpResponse.json({ data: { serviceCreate: { id: "svc_1", name: "spun-web" } } }),
+    ),
+    api.mutation("ServiceInstanceDeployV2", () =>
+      HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } }),
+    ),
+  ];
+
+  it("returns the url, with the scheme Railway serves it on", async () => {
+    server.use(...createdAndDeployed(), domainOk());
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-web",
+      image: "nginx:alpine",
+      targetPort: 80,
+    });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: "dep_1",
+      url: "https://spun-web-production.up.railway.app",
+      outcome: "deployed",
+    });
+  });
+
+  it("sends the environment, the service and the port it was given", async () => {
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...createdAndDeployed(),
+      domainOk((i) => (input = i)),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-web",
+      image: "ghcr.io/owner/api:1",
+      targetPort: 8080,
+    });
+
+    expect(input).toEqual({
+      environmentId: "e1",
+      serviceId: "svc_1",
+      targetPort: 8080,
+    });
+  });
+
+  /*
+   * The order is the argument in createContainer's docblock: a domain routes to a container
+   * that is already coming up, so putting it before the deploy would only create a way for a
+   * refused hostname to cost someone a running container.
+   */
+  it("mints the domain after the deploy, never before", async () => {
+    const calls: string[] = [];
+    server.use(
+      api.mutation("ServiceCreate", () => {
+        calls.push("create");
+        return HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-web" } },
+        });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        calls.push("deploy");
+        return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } });
+      }),
+      domainOk(() => calls.push("domain")),
+    );
+
+    await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-web",
+      image: "nginx:alpine",
+      targetPort: 80,
+    });
+
+    expect(calls).toEqual(["create", "deploy", "domain"]);
+  });
+
+  it("mints nothing when no port was asked for", async () => {
+    server.use(
+      ...createdAndDeployed(),
+      volumeOk(),
+      api.mutation("ServiceDomainCreate", () => {
+        throw new Error("must not expose a container nobody asked to expose");
+      }),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-cache",
+      image: "redis:7-alpine",
+    });
+
+    expect(result.url).toBeNull();
+    expect(result.outcome).toBe("deployed");
+  });
+
+  /*
+   * The one Railway refusal in this whole function that does NOT change the outcome. Every
+   * other branch leaves an un-deployed service the user has to clean up; this leaves the
+   * container they asked for, running, missing one convenience — and the row's own control
+   * is the retry.
+   */
+  it("still reports a deployed container when Railway refuses the domain", async () => {
+    server.use(
+      ...createdAndDeployed(),
+      api.mutation("ServiceDomainCreate", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    const result = await createContainer(TOKEN, {
+      projectId: "p1",
+      environmentId: "e1",
+      name: "spun-web",
+      image: "nginx:alpine",
+      targetPort: 80,
+    });
+
+    expect(result).toEqual({
+      serviceId: "svc_1",
+      deploymentId: "dep_1",
+      url: null,
+      outcome: "deployed",
+    });
+
+    // The port is in the record because it is the likeliest cause: an image serving nothing
+    // on the port the catalog claims, or a number someone typed for a custom image.
+    expect(logRecords().find((r) => r.msg === "railway.domain_failed")).toMatchObject({
+      service_id: "svc_1",
+      target_port: 80,
+    });
+  });
+});
+
+describe("createServiceDomain", () => {
+  it("omits targetPort entirely when the caller has none", async () => {
+    /*
+     * Omitted rather than sent as null. Both mean "infer from the deployment" to Railway,
+     * but an explicit null reads as a decision — and the row control reaching this branch
+     * has no port to decide with, because the catalog does not know the image.
+     */
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      api.mutation("ServiceDomainCreate", ({ variables }) => {
+        input = variables.input as Record<string, unknown>;
+        return HttpResponse.json({
+          data: {
+            serviceDomainCreate: {
+              id: "dom_1",
+              domain: "spun-x-production.up.railway.app",
+              targetPort: null,
+            },
+          },
+        });
+      }),
+    );
+
+    const url = await createServiceDomain(TOKEN, {
+      environmentId: "e1",
+      serviceId: "svc_1",
+    });
+
+    expect(input).toEqual({ environmentId: "e1", serviceId: "svc_1" });
+    expect("targetPort" in (input ?? {})).toBe(false);
+    expect(url).toBe("https://spun-x-production.up.railway.app");
+  });
+
+  it("throws on a refusal, because the whole of its action is this call", async () => {
+    server.use(
+      api.mutation("ServiceDomainCreate", () =>
+        HttpResponse.json({ errors: [{ message: "Not Authorized" }] }),
+      ),
+    );
+
+    await expect(
+      createServiceDomain(TOKEN, { environmentId: "e1", serviceId: "svc_1" }),
+    ).rejects.toThrow();
   });
 });
 

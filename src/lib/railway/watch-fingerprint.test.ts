@@ -14,6 +14,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   createdAt: "2026-08-01T00:00:00Z",
   updatedAt: "2026-08-01T00:00:00Z",
   deployedAt: "2026-08-01T00:00:00Z",
+  url: null,
   managed: true,
   ...over,
 });
@@ -56,6 +57,12 @@ describe("the watch fingerprint", () => {
     ["a different image", { image: "redis:8" }],
     ["a rename", { rawName: "spun-renamed" }],
     ["a switch to a repo source", { image: null, repo: "owner/app" }],
+    /*
+     * The one field here that a tab did NOT necessarily ask for. A domain added from
+     * another tab, or from Railway's own dashboard, has to reach this one — and unlike
+     * updatedAt above it is safe to hash because it is minted once and then never moves.
+     */
+    ["a container gaining an address", { url: "https://spun-cache.up.railway.app" }],
   ])("notices %s", (_label, over) => {
     const changed = [container(over), base[1]!];
     expect(fingerprint(changed)).not.toBe(fingerprint(base));

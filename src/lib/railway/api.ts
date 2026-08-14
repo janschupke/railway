@@ -26,6 +26,7 @@ import {
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
+  SERVICE_DOMAIN_CREATE_MUTATION,
   SERVICE_INSTANCE_UPDATE_MUTATION,
   SERVICE_UPDATE_MUTATION,
   SERVICE_VARIABLES_QUERY,
@@ -392,11 +393,31 @@ export async function createContainer(
      * already validated. This layer sets what it is handed.
      */
     variables?: Record<string, string>;
+    /**
+     * The port a public domain should route to, or absent to mint no domain at all.
+     *
+     * Absent is what every database preset sends and what a person who cleared the form's
+     * port field sends, and the two are the same request: do not put this container on the
+     * public internet. See `port` in lib/validation.ts on why one field carries both.
+     */
+    targetPort?: number;
   },
   signal?: AbortSignal,
 ): Promise<{
   serviceId: string;
   deploymentId: string | null;
+  /**
+   * Where the container will answer, or null because it was not asked for or because
+   * Railway refused to mint it.
+   *
+   * Deliberately NOT a member of `outcome` below, and that asymmetry is the point. Every
+   * value of `outcome` means the user has an un-deployed service to go and clean up; a
+   * container that is running without an address needs no cleanup and is not broken. It is
+   * a working container missing one convenience, and the row's own domain control is the
+   * remedy — so a refusal here degrades the sentence the user is shown rather than turning
+   * a successful spin-up into a failed one.
+   */
+  url: string | null;
   /**
    * What happened after `serviceCreate` returned.
    *
@@ -484,7 +505,7 @@ export async function createContainer(
         mount_path: volume.mountPath,
         error,
       });
-      return { serviceId, deploymentId: null, outcome: "volume_failed" };
+      return { serviceId, deploymentId: null, url: null, outcome: "volume_failed" };
     }
   }
 
@@ -538,7 +559,12 @@ export async function createContainer(
         variable_count: Object.keys(params.variables).length,
         error,
       });
-      return { serviceId, deploymentId: null, outcome: "variables_failed" };
+      return {
+        serviceId,
+        deploymentId: null,
+        url: null,
+        outcome: "variables_failed",
+      };
     }
   }
 
@@ -562,10 +588,100 @@ export async function createContainer(
     );
   } catch (error) {
     log.warn("railway.deploy_failed", { service_id: serviceId, error });
-    return { serviceId, deploymentId: null, outcome: "deploy_failed" };
+    return { serviceId, deploymentId: null, url: null, outcome: "deploy_failed" };
   }
 
-  return { serviceId, deploymentId, outcome: "deployed" };
+  /*
+   * The domain LAST, and after the deploy rather than before it.
+   *
+   * Every other call in this function runs before the deploy, and each has a reason the
+   * container would be wrong without it — an empty volume mounted over an initialised
+   * database, a postgres with no password crash-looping. A domain has no such reason: it
+   * routes to a container that is already coming up, and Railway's edge starts answering
+   * when the service does whether the domain was minted a second earlier or a second later.
+   *
+   * Placed before the deploy, a refusal here would have to choose between deploying anyway
+   * — leaving a failed call in the middle of the sequence — and not deploying, which would
+   * cost the user a running container in exchange for a hostname. Placed here, the worst
+   * case is the container they asked for, running, with no address; and unlike every branch
+   * above, that state has a remedy inside the app.
+   *
+   * Only when a port was asked for. `serviceDomainCreate` accepts a null `targetPort` and
+   * infers one from the deployment, and this path deliberately does not use that: the
+   * catalog knows the port for every image it offers and the form carries it for every image
+   * it does not, so an absent port here means the user asked for no domain rather than that
+   * the port is unknown.
+   */
+  let url: string | null = null;
+  if (params.targetPort !== undefined) {
+    try {
+      url = await createServiceDomain(
+        accessToken,
+        {
+          environmentId: params.environmentId,
+          serviceId,
+          targetPort: params.targetPort,
+        },
+        signal,
+      );
+    } catch (error) {
+      /*
+       * Warn and carry on, which no other branch in this function does.
+       *
+       * The port is in the record because it is the field most likely to be the cause: an
+       * image that serves nothing on the port the catalog claims, or a number a person
+       * typed for a custom image. It is a bounded integer from `spinUpSchema` rather than
+       * free text, so it is safe to log — unlike the variable names two branches up.
+       */
+      log.warn("railway.domain_failed", {
+        service_id: serviceId,
+        target_port: params.targetPort,
+        error,
+      });
+    }
+  }
+
+  return { serviceId, deploymentId, url, outcome: "deployed" };
+}
+
+/**
+ * Put a service on the public internet, and hand back the address.
+ *
+ * Two callers, and the difference between them is where the port comes from rather than
+ * anything about the call: `createContainer` above sends the port the catalog or the form
+ * supplied, and the row's domain action sends the catalog's port when it knows the image and
+ * omits it otherwise, letting Railway infer one from the running deployment.
+ *
+ * Returns the URL with its scheme, so that the one place `https://` is decided is the
+ * mapper's `toPublicUrl` and this — the two paths a URL can reach a row by.
+ *
+ * Uncaught, unlike the call inside `createContainer`: this one is the whole of what its
+ * action does, so there is no partial success to describe and nothing to report but the
+ * failure itself.
+ */
+export async function createServiceDomain(
+  accessToken: string,
+  params: { environmentId: string; serviceId: string; targetPort?: number },
+  signal?: AbortSignal,
+): Promise<string> {
+  const created = await gql(
+    SERVICE_DOMAIN_CREATE_MUTATION,
+    {
+      input: {
+        environmentId: params.environmentId,
+        serviceId: params.serviceId,
+        /*
+         * Omitted rather than sent as null when the caller has no port. The schema accepts
+         * both, and they mean the same thing to Railway — but an explicit null reads as a
+         * decision the caller made, and this one is an absence of information.
+         */
+        ...(params.targetPort === undefined ? {} : { targetPort: params.targetPort }),
+      },
+    },
+    { accessToken, operationName: "ServiceDomainCreate", signal },
+  );
+
+  return `https://${created.serviceDomainCreate.domain}`;
 }
 
 /**

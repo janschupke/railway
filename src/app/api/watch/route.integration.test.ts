@@ -38,6 +38,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   createdAt: null,
   updatedAt: null,
   deployedAt: null,
+  url: null,
   managed: true,
   ...over,
 });

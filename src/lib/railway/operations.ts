@@ -47,6 +47,8 @@ import type {
   ServiceCreateMutationVariables,
   ServiceDeleteMutation,
   ServiceDeleteMutationVariables,
+  ServiceDomainCreateMutation,
+  ServiceDomainCreateMutationVariables,
   ServiceInstanceDeployV2Mutation,
   ServiceInstanceDeployV2MutationVariables,
   ServiceInstanceUpdateMutation,
@@ -165,6 +167,33 @@ export const PROJECTS_WORKSPACE_QUERY: TypedDocument<
   }
 `;
 
+/**
+ * The dashboard's own read: one project, its environments, and every service in it.
+ *
+ * `domains { serviceDomains { domain } }` is the one selection here that had to argue for
+ * itself, because this is the document PROJECT_METRICS_QUERY below exists in order to stay
+ * out of. It is polled every WATCH_POLL_MS for the life of every open watcher and it is
+ * sent through `gql` rather than `gqlPartial`, so a field withdrawn from it is a rejection
+ * on *every* tick rather than a missing readout.
+ *
+ * It is accepted here and refused there because the alternatives are worse rather than
+ * because the risk is smaller:
+ *
+ *   - `Query.domains(projectId, environmentId, serviceId)` answers the same thing per
+ *     service, which is a request per row on a list — exactly the third polling source
+ *     ADR-10's budget cannot absorb.
+ *   - A URL read anywhere other than the row's own read does not survive
+ *     `router.refresh()`, and the refresh after a spin-up is precisely when the URL first
+ *     exists.
+ *
+ * What bounds the risk: `ServiceInstance.domains` is `AllDomains!` and `serviceDomains` is
+ * `[ServiceDomain!]!` — both non-null, neither deprecated, and `pnpm verify:schema` reports
+ * any of that changing.
+ *
+ * `customDomains` is deliberately not selected. This app cannot place a DNS record it does
+ * not own, so it can neither create one nor say whether one is working; a domain it did not
+ * make and cannot verify is not a link it should present as this container's address.
+ */
 export const PROJECT_QUERY: TypedDocument<ProjectQuery, ProjectQueryVariables> =
   /* GraphQL */ `
     query Project($id: String!) {
@@ -193,6 +222,11 @@ export const PROJECT_QUERY: TypedDocument<ProjectQuery, ProjectQueryVariables> =
                     source {
                       image
                       repo
+                    }
+                    domains {
+                      serviceDomains {
+                        domain
+                      }
                     }
                     latestDeployment {
                       id
@@ -439,6 +473,50 @@ export const SERVICE_DELETE_MUTATION: TypedDocument<
 > = /* GraphQL */ `
   mutation ServiceDelete($id: String!) {
     serviceDelete(id: $id)
+  }
+`;
+
+/**
+ * Give a service an address on the public internet.
+ *
+ * Railway mints the hostname itself — `spun-cache-production.up.railway.app` — so there is
+ * nothing to name and nothing to check for availability. `serviceDomainAvailable` exists
+ * and is not used: it answers about a hostname the caller proposes, and this app proposes
+ * none.
+ *
+ * `targetPort` is the port *inside* the container that the edge routes to, and it is
+ * optional on the input. Sending it is not the same as omitting it: omitted, Railway infers
+ * a port from the running deployment, which needs a deployment to exist and is documented
+ * nowhere. The catalog knows the port for every image it offers (`Preset.httpPort`), so the
+ * spin-up path always sends one and only the row control — reached for an image the catalog
+ * has never heard of — falls back to the inference.
+ *
+ * `domain` is what the row renders. `id` and `targetPort` are selected because a mutation
+ * that answers only with a string it also could have been asked for is a mutation whose
+ * result cannot be told apart from an echo — and `id` is what `serviceDomainDelete` would
+ * need if this app ever offered taking a domain away.
+ *
+ * Two neighbouring mutations are deliberately absent:
+ *
+ *   - `customDomainCreate(input)` attaches a hostname the user owns, which needs a CNAME
+ *     this app cannot place and a certificate issue it cannot observe. It would be a
+ *     control that succeeds and then appears broken for reasons living in someone's DNS.
+ *   - `tcpProxyCreate(input)` is how redis and postgres would become reachable, and it is
+ *     `@deprecated` on the live schema — "use staged changes and apply them", plus a
+ *     redeploy the caller has to perform itself before the proxy is active. Shipping the
+ *     database presets' reachability on a retiring mutation is a worse trade than leaving
+ *     them private, which is what Railway's own private networking already makes them.
+ */
+export const SERVICE_DOMAIN_CREATE_MUTATION: TypedDocument<
+  ServiceDomainCreateMutation,
+  ServiceDomainCreateMutationVariables
+> = /* GraphQL */ `
+  mutation ServiceDomainCreate($input: ServiceDomainCreateInput!) {
+    serviceDomainCreate(input: $input) {
+      id
+      domain
+      targetPort
+    }
   }
 `;
 
@@ -931,6 +1009,21 @@ export const OPTIONAL_FIELDS: Array<{
     root: "Mutation",
     field: "volumeInstanceUpdate",
     note: "a volume's mount path is fixed at creation and the edit form cannot offer it",
+  },
+  /*
+   * The two ways of being reachable that T-485 looked at and did not take. Listed rather
+   * than merely argued in SERVICE_DOMAIN_CREATE_MUTATION's docblock, because the report is
+   * where the next person asking "why can I not reach my postgres" will look.
+   */
+  {
+    root: "Mutation",
+    field: "customDomainCreate",
+    note: "a container is reachable only at the hostname Railway mints; a domain the user owns needs a DNS record this app cannot place",
+  },
+  {
+    root: "Mutation",
+    field: "tcpProxyCreate",
+    note: "deprecated upstream in favour of staged changes, so the database and cache presets stay on Railway's private network",
   },
 ];
 

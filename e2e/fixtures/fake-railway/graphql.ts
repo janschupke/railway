@@ -132,6 +132,9 @@ export function execute(
                       id: `si_${service.id}`,
                       environmentId: service.environmentId,
                       source: { image: service.image, repo: service.repo },
+                      domains: {
+                        serviceDomains: service.domains.map((domain) => ({ domain })),
+                      },
                       latestDeployment: deployment
                         ? {
                             id: deployment.id,
@@ -334,6 +337,38 @@ export function execute(
         return { errors: [{ message: "Service not found" }] };
       }
       return { data: { serviceInstanceDeployV2: store.addDeployment(serviceId).id } };
+    }
+
+    case "ServiceDomainCreate": {
+      const input = variables.input as {
+        serviceId: string;
+        environmentId: string;
+        targetPort?: number;
+      };
+      if (store.faults.domainFails) {
+        return {
+          errors: [
+            {
+              message: "Not Authorized",
+              path: ["serviceDomainCreate"],
+              extensions: { code: "INTERNAL_SERVER_ERROR" },
+            },
+          ],
+        };
+      }
+      const domain = store.addServiceDomain(input.serviceId, input.environmentId);
+      if (!domain) return { errors: [{ message: "Service not found" }] };
+      return {
+        data: {
+          serviceDomainCreate: {
+            id: `dom_${input.serviceId}`,
+            domain,
+            // Echoed rather than defaulted: the app omits this member entirely when it has
+            // no port, and null here is what says so.
+            targetPort: input.targetPort ?? null,
+          },
+        },
+      };
     }
 
     case "DeploymentStop": {

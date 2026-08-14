@@ -19,6 +19,7 @@ import {
   DEFAULT_IMAGE,
   PRESETS,
   presetFor,
+  httpPortFor,
   presetVariableDefaults,
   presetVolumeFor,
 } from "@/lib/presets";
@@ -57,6 +58,19 @@ function seedRows(image: string): VariableRow[] {
     touched: false,
   }));
 }
+
+/**
+ * The port field's seeded value for an image, as the input holds it.
+ *
+ * A string because that is what an `<input>` value is, and the empty string is the whole of
+ * "this image gets no public URL" — for a preset the catalog knows serves nothing, and for
+ * an image it has never heard of. Those two are the same blank field on purpose: in both
+ * cases the app has no port to offer, and the person is the one who knows.
+ */
+const portFor = (image: string): string => {
+  const known = httpPortFor(image);
+  return known === undefined ? "" : String(known);
+};
 
 const isVariableField = (field: string | undefined) =>
   field === "variableKey" || field === "variableValue";
@@ -121,6 +135,14 @@ export function SpinUpForm({
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
   const [rows, setRows] = useState<VariableRow[]>(() => seedRows(DEFAULT_IMAGE));
   /*
+   * Controlled, unlike the name field beside it, because the catalog writes to it: picking
+   * nginx has to be able to put 80 there. An uncontrolled input with a `defaultValue` would
+   * only take the seed on mount, which is every image change after the first.
+   */
+  const [port, setPort] = useState<string>(() => portFor(DEFAULT_IMAGE));
+  /** Whether a person has edited the port since the catalog last seeded it. */
+  const [portTouched, setPortTouched] = useState(false);
+  /*
    * Names this submission, so the server can recognise a repeat of it.
    *
    * Minted once and re-minted only on success, which is the whole rule. A submission that
@@ -158,6 +180,17 @@ export function SpinUpForm({
     setImage(next);
     imageRef.current = next;
     setRows((current) => reseed(current, next));
+    /*
+     * The port follows the catalog on the same rule the variable rows do: what a person
+     * typed survives an image change, what the catalog seeded is replaced.
+     *
+     * The empty string is a value someone chose, not an absence — clearing the 80 that
+     * nginx seeded is how a person says "do not expose this" — so `portTouched` is what
+     * separates it from the untouched blank a database preset leaves behind. Without that
+     * flag, switching from nginx to redis and back would helpfully re-add the 80 that was
+     * just deleted.
+     */
+    setPort((current) => (portTouched ? current : portFor(next)));
   };
 
   /**
@@ -238,6 +271,15 @@ export function SpinUpForm({
        * spin-up's environment is still armed.
        */
       setRows(seedRows(imageRef.current));
+      /*
+       * Back to the catalog's answer for the image still in the form, and untouched again.
+       *
+       * The same argument the variable rows make one line up, and it is stronger here: a
+       * port left armed from the last spin-up would put the *next* container on the public
+       * internet without anything on screen having said so.
+       */
+      setPort(portFor(imageRef.current));
+      setPortTouched(false);
       // The submission this key named is over. Anything typed next is a different
       // container, and must not be answered with this one's result.
       setSubmissionKey(newIdempotencyKey());
@@ -326,7 +368,7 @@ export function SpinUpForm({
     return presetFor(image) ? null : { mountPath: null };
   })();
 
-  const fieldError = (field: "name" | "image") => {
+  const fieldError = (field: "name" | "image" | "port") => {
     // The local check first: it is the more recent statement about this field, and it is
     // the only one when nothing was submitted.
     if (field === "name" && duplicate) return duplicate;
@@ -426,6 +468,47 @@ export function SpinUpForm({
                   placeholder={t("namePlaceholder")}
                   autoComplete="off"
                   required
+                />
+              )}
+            </Field>
+          </div>
+
+          {/*
+            Last, and narrow, because it is the only optional field on this form.
+
+            After the name in DOM order for the reason the editor below is: the keyboard
+            spec pins Image → Tab → Name, so this had to go on the far side of that pair
+            rather than between them.
+
+            `basis-32` against the name's 48 and the image's 64: the widest value it can
+            hold is five digits, and a field sized to its content is part of what says this
+            one is optional without a sentence having to.
+          */}
+          <div className="min-w-0 grow basis-32">
+            <Field
+              label={t("portLabel")}
+              hint={t("portHint")}
+              error={fieldError("port")}
+            >
+              {(field) => (
+                <Input
+                  {...field}
+                  name="port"
+                  value={port}
+                  onChange={(event) => {
+                    setPort(event.target.value);
+                    setPortTouched(true);
+                  }}
+                  /*
+                   * `inputMode` rather than `type="number"`, which brings a spinner nobody
+                   * wants on a port, silently drops non-numeric input the server's own rule
+                   * should be refusing, and reports `valueAsNumber: NaN` for text this form
+                   * needs to send through untouched so `validation.portInvalid` is what the
+                   * user reads. The phone keypad is the half worth having.
+                   */
+                  inputMode="numeric"
+                  placeholder={t("portPlaceholder")}
+                  autoComplete="off"
                 />
               )}
             </Field>

@@ -66,6 +66,23 @@ export type Preset = {
    * statement into a guess.
    */
   volume?: PresetVolume;
+  /**
+   * The port this image serves HTTP on, and therefore whether it gets a public address.
+   *
+   * Absent means the image serves no HTTP and a spin-up mints no domain for it — redis
+   * speaks its own wire protocol, and a hostname in front of it would be a link that
+   * answers a browser with nothing.
+   *
+   * A field of its own rather than `groupKey === "web"`, and rabbitmq is why: it is a
+   * message queue whose image ships a management UI on 15672, so the group says one thing
+   * and the port says another. Reading reachability off the group would have got exactly
+   * one entry in this catalog wrong, which is the kind of rule that looks correct until
+   * the catalog grows.
+   *
+   * The number is the port INSIDE the container, not the one the edge listens on — Railway
+   * always answers 443 — and it is what `ServiceDomainCreateInput.targetPort` takes.
+   */
+  httpPort?: number;
 };
 
 /**
@@ -96,10 +113,13 @@ export const PRESETS: readonly Preset[] = [
   // No volume, and that is the image: memcached holds everything in memory by design.
   { value: "memcached:1-alpine", labelKey: "memcached", groupKey: "cache" },
 
-  { value: "nginx:alpine", labelKey: "nginx", groupKey: "web" },
-  { value: "httpd:alpine", labelKey: "apache", groupKey: "web" },
-  { value: "caddy:2-alpine", labelKey: "caddy", groupKey: "web" },
-  { value: "traefik/whoami", labelKey: "whoami", groupKey: "web" },
+  // All four serve on 80 out of the box, which is the reason these are the presets: an
+  // image needing a port argument to listen anywhere is an image this app cannot configure
+  // (ADR-6 — image and environment, no command override).
+  { value: "nginx:alpine", labelKey: "nginx", groupKey: "web", httpPort: 80 },
+  { value: "httpd:alpine", labelKey: "apache", groupKey: "web", httpPort: 80 },
+  { value: "caddy:2-alpine", labelKey: "caddy", groupKey: "web", httpPort: 80 },
+  { value: "traefik/whoami", labelKey: "whoami", groupKey: "web", httpPort: 80 },
 
   {
     value: "postgres:16-alpine",
@@ -167,6 +187,16 @@ export const PRESETS: readonly Preset[] = [
      * failure than an empty database because nothing about it looks broken.
      */
     volume: { mountPath: "/var/lib/rabbitmq" },
+    /*
+     * The management UI, not the broker.
+     *
+     * 5672 is where AMQP clients connect and it is deliberately NOT what this points at: a
+     * public hostname in front of the broker port would be a link a browser cannot use and
+     * an unauthenticated queue endpoint on the open internet. 15672 is the HTTP console the
+     * `-management` tag exists to add, it is a page, and it asks for the credentials this
+     * preset already generates.
+     */
+    httpPort: 15672,
   },
   // Core NATS is in-memory; JetStream would need a volume, and enabling it needs an
   // argument this app cannot pass (ADR-6: image and environment, no command override).
@@ -219,6 +249,25 @@ export function presetFor(image: string): Preset | undefined {
  */
 export function presetVolumeFor(image: string): PresetVolume | undefined {
   return presetFor(image)?.volume;
+}
+
+/**
+ * The port this image serves HTTP on, or undefined.
+ *
+ * Undefined answers two questions the same way, exactly as `presetVolumeFor` does: the
+ * catalog knows this image serves no HTTP (redis), or it has never heard of the image at
+ * all (`ghcr.io/owner/api`). The two callers want different things from that, which is why
+ * this returns the port rather than a boolean:
+ *
+ *   - The spin-up form seeds its port field with it, so a person spinning up nginx gets 80
+ *     without typing, and a person spinning up a custom image gets a blank field to fill in.
+ *   - The row's domain control passes it through when it exists and omits `targetPort`
+ *     otherwise, letting Railway infer from the running deployment.
+ *
+ * Repository-matched like everything else here, so `nginx:1.27` resolves as `nginx:alpine`.
+ */
+export function httpPortFor(image: string): number | undefined {
+  return presetFor(image)?.httpPort;
 }
 
 /** A catalog default, in the shape the environment editor holds a row in. */

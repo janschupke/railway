@@ -145,6 +145,24 @@ export type Container = {
    * all this app creates (ADR-6). Stated in README Limitations rather than rounded away.
    */
   deployedAt: string | null;
+  /**
+   * Where this container answers on the public internet, or null if nowhere.
+   *
+   * On `Container` rather than keyed beside the list, which is the opposite of the choice
+   * `ContainerMetrics` and `ContainerVolume` below make — and it is the same test that
+   * decides both. `fingerprint()` hashes a `Container[]`, so what must stay out is anything
+   * that MOVES: a CPU float, a byte counter. A service domain is minted once and then reads
+   * the same on every poll for the life of the service, so it costs the watcher nothing and
+   * belongs where the row already has it.
+   *
+   * It is also the field that most needs to be here. The URL first exists during the
+   * `router.refresh()` after a spin-up, and a value the refresh does not carry is a value
+   * the row cannot show until the next full navigation.
+   *
+   * Includes the scheme. Railway serves its own domains over TLS and issues the certificate
+   * itself, so this is always `https://…` — see `toContainer`.
+   */
+  url: string | null;
   /** Whether this app created the service, and may therefore destroy it. */
   managed: boolean;
 };

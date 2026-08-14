@@ -248,6 +248,14 @@ const eslintConfig = defineConfig([
               "position",
               "swipeDirection",
               "autoComplete",
+              /*
+               * Same class as `autoComplete` above, and for the same reason: a closed set
+               * the HTML spec defines — "numeric", "tel", "decimal" — read by the browser
+               * to choose a soft keyboard and rendered nowhere. The spin-up form's port
+               * field is the first attribute of its kind in this codebase; a translator
+               * has nothing to do with "numeric".
+               */
+              "inputMode",
               "labelKey",
               /*
                * KeyValueEditor's FormData field names. Same class as `name` above — they

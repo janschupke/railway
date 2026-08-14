@@ -104,6 +104,12 @@ export type ServiceCreateInput = {
   variables?: Record<string, string> | null | undefined;
 };
 
+export type ServiceDomainCreateInput = {
+  environmentId: string;
+  serviceId: string;
+  targetPort?: number | null | undefined;
+};
+
 export type ServiceInstanceUpdateInput = {
   buildCommand?: string | null | undefined;
   builder?: Builder | null | undefined;
@@ -238,6 +244,7 @@ export type ProjectQuery = {
                 id: string;
                 environmentId: string;
                 source: { image: string | null; repo: string | null } | null;
+                domains: { serviceDomains: Array<{ domain: string }> };
                 latestDeployment: {
                   id: string;
                   status: DeploymentStatus;
@@ -331,6 +338,14 @@ export type ServiceDeleteMutationVariables = Exact<{
 }>;
 
 export type ServiceDeleteMutation = { serviceDelete: boolean };
+
+export type ServiceDomainCreateMutationVariables = Exact<{
+  input: ServiceDomainCreateInput;
+}>;
+
+export type ServiceDomainCreateMutation = {
+  serviceDomainCreate: { id: string; domain: string; targetPort: number | null };
+};
 
 export type VolumeCreateMutationVariables = Exact<{
   input: VolumeCreateInput;

@@ -188,6 +188,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       count?: number;
       /** Parks each deployment at this status; see Store.addService. */
       status?: string;
+      /** Hostnames the service already answers on, for the row that must not offer more. */
+      domains?: string[];
     };
 
     const make = (name: string) =>
@@ -198,6 +200,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         image: input.image ?? "redis:7-alpine",
         deployed: true,
         ...(input.status ? { status: input.status } : {}),
+        ...(input.domains ? { domains: input.domains } : {}),
       });
 
     if (input.count && input.count > 1) {

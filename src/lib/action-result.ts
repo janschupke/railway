@@ -7,6 +7,7 @@ import type { MessageDescriptor } from "@/lib/messages";
 export type ActionField =
   | "name"
   | "image"
+  | "port"
   | "variableKey"
   | "variableValue"
   | "projectName"
@@ -75,6 +76,7 @@ export function describeActionError(error: unknown): MessageDescriptor {
 const FIELDS: ReadonlySet<string> = new Set([
   "name",
   "image",
+  "port",
   "variableKey",
   "variableValue",
   "projectName",

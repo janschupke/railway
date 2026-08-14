@@ -28,6 +28,13 @@ export type ServiceNode = {
     id: string;
     environmentId: string;
     source: { image: string | null; repo: string | null } | null;
+    /**
+     * Nullable here though the schema calls it `AllDomains!`, for the reason every other
+     * member of this shape is: these types describe what a *response* may hold, not what
+     * the schema promises, and a partial or malformed body is exactly when a mapper runs
+     * against a field that is not there.
+     */
+    domains?: { serviceDomains: Array<{ domain: string }> } | null;
     latestDeployment: {
       id: string;
       status: string | null;
@@ -88,6 +95,31 @@ export function toProjects(viewer: ViewerNode): RailwayProject[] {
 }
 
 /**
+ * The address a service answers on, or null if it has none.
+ *
+ * Sorted before choosing, and that is the whole reason this is a function rather than a
+ * `[0]`. A service may carry several domains — Railway mints one per target port, and the
+ * user may have added more in its own dashboard — and Railway documents no ordering for
+ * the list. Reading whichever end the response happened to put first means two polls of an
+ * unchanged service can disagree, which flips `fingerprint()` and wakes every open tab on
+ * a change that did not happen.
+ *
+ * `https://` because Railway terminates TLS at its edge for the domains it mints and issues
+ * the certificate itself; `ServiceDomain.domain` is the bare host, so the scheme is added
+ * exactly here and nowhere downstream.
+ */
+function toPublicUrl(
+  domains: { serviceDomains: Array<{ domain: string }> } | null | undefined,
+): string | null {
+  const hosts = (domains?.serviceDomains ?? [])
+    .map((entry) => entry.domain)
+    .filter((domain) => domain.length > 0)
+    .sort();
+  const first = hosts[0];
+  return first ? `https://${first}` : null;
+}
+
+/**
  * A service as it appears in one environment, or null if it does not exist there.
  *
  * `managed` is the ownership decision the whole destructive path depends on — it is
@@ -117,6 +149,7 @@ export function toContainer(
     // The deployment's own creation, not the service's — uptime is measured from the
     // current deployment, and a service redeployed this morning is a month old.
     deployedAt: deployment?.createdAt ?? null,
+    url: toPublicUrl(instance.domains),
     managed: isManagedName(service.name),
   };
 }

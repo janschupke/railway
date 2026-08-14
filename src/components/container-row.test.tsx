@@ -10,6 +10,10 @@ vi.mock("@/app/dashboard/actions", () => ({
   stopContainer: vi.fn(async () => ({ ok: true, message: "Stopped" })),
   restartContainer: vi.fn(async () => ({ ok: true, message: "Restarting" })),
   redeployContainer: vi.fn(async () => ({ ok: true, message: "Redeploying" })),
+  generateDomain: vi.fn(async () => ({
+    ok: true,
+    message: "cache is now at https://x",
+  })),
 }));
 
 const streamState = {
@@ -43,6 +47,7 @@ const container = (over: Partial<Container> = {}): Container => ({
   createdAt: "2026-08-01T00:00:00Z",
   updatedAt: "2026-08-01T00:00:00Z",
   deployedAt: "2026-08-01T00:00:00Z",
+  url: null,
   managed: true,
   ...over,
 });
@@ -321,6 +326,37 @@ describe("ContainerRow", () => {
     );
     expect(link).toHaveAttribute("rel", "noreferrer");
     expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("shows a container's own address under its source", () => {
+    /*
+     * In the name block rather than the action cluster, which by this point holds Edit, two
+     * lifecycle verbs and Destroy. The address belongs to the container's identity — what it
+     * is called, what it runs, where it answers — not beside the buttons that stop it.
+     */
+    renderRow({ url: "https://spun-cache-production.up.railway.app" });
+
+    const link = screen.getByRole("link", {
+      name: /Open cache at spun-cache-production\.up\.railway\.app/,
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://spun-cache-production.up.railway.app",
+    );
+  });
+
+  it("offers the same slot as a control when a managed container has no address", () => {
+    renderRow({ url: null, managed: true });
+    expect(
+      screen.getByRole("button", { name: "Add a public URL" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers nothing about addresses on a container this app did not create", () => {
+    renderRow({ url: null, managed: false });
+    expect(
+      screen.queryByRole("button", { name: "Add a public URL" }),
+    ).not.toBeInTheDocument();
   });
 
   it("points a failed deployment at the page that has the reason", async () => {

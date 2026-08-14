@@ -710,3 +710,145 @@ describe("what the image does with data", () => {
     expect(screen.queryByText(/does not know where/i)).not.toBeInTheDocument();
   });
 });
+
+describe("the public port", () => {
+  /*
+   * Its own setup rather than the outer block's. This describe is a sibling of
+   * `SpinUpForm`, so nothing above it runs here — and without the reset every case would
+   * inherit the previous one's call count and its resolved result, which is exactly the
+   * state these assertions are about.
+   */
+  beforeEach(() => {
+    spinUp.mockReset();
+    spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
+    routerMock.refresh.mockClear();
+    fetchMock.mockReset();
+    imageCheckAnswers("available");
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const port = () => screen.getByLabelText("Public port");
+
+  it("seeds the catalog's port for an image that serves HTTP", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "nginx:alpine");
+
+    expect(port()).toHaveValue("80");
+  });
+
+  /*
+   * Blank is the answer for both of the catalog's undefineds — a preset that serves nothing,
+   * and an image it has never heard of — because in both cases the app has no port to offer
+   * and the person is the one who knows.
+   */
+  it("leaves it blank for an image with nothing to expose", () => {
+    renderForm();
+    expect(port()).toHaveValue("");
+  });
+
+  it("leaves it blank for an image the catalog has never heard of", async () => {
+    const user = userEvent.setup();
+    imageCheckAnswers("unknown");
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "ghcr.io/owner/api:1");
+
+    expect(port()).toHaveValue("");
+  });
+
+  it("follows the image while nobody has touched it", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "nginx:alpine");
+    expect(port()).toHaveValue("80");
+
+    await user.clear(image());
+    await user.type(image(), "redis:7-alpine");
+    expect(port()).toHaveValue("");
+  });
+
+  it("keeps a port the person typed, whatever the image becomes", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(port(), "8080");
+    await user.clear(image());
+    await user.type(image(), "nginx:alpine");
+
+    expect(port()).toHaveValue("8080");
+  });
+
+  /*
+   * Clearing the seeded 80 is how a person says "do not expose this", so it has to count as
+   * touched. Without that, switching away from nginx and back would helpfully re-add the
+   * port that was just deleted.
+   */
+  it("treats a cleared port as a decision, not as an untouched blank", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "nginx:alpine");
+    await user.clear(port());
+
+    await user.clear(image());
+    await user.type(image(), "caddy:2-alpine");
+
+    expect(port()).toHaveValue("");
+  });
+
+  it("submits the port alongside the image", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.clear(image());
+    await user.type(image(), "nginx:alpine");
+    await user.type(screen.getByLabelText("Name"), "web");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
+    expect(spinUp.mock.calls[0]?.[1].get("port")).toBe("80");
+  });
+
+  /*
+   * The same argument the variable rows make: a port left armed from the last spin-up would
+   * put the NEXT container on the public internet with nothing on screen having said so.
+   */
+  it("returns to the catalog's answer after a success", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(port(), "9000");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(port()).toHaveValue(""));
+  });
+
+  it("renders a refused port next to the field rather than as a toast", async () => {
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "Give a port between 1 and 65,535, or leave it blank",
+      field: "port",
+    });
+    renderForm();
+
+    await user.type(port(), "70000");
+    await user.type(screen.getByLabelText("Name"), "web");
+    await user.click(submitButton());
+
+    expect(
+      await screen.findByText("Give a port between 1 and 65,535, or leave it blank"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not spin up")).not.toBeInTheDocument();
+  });
+});

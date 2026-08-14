@@ -5,6 +5,7 @@ import { LIMITS } from "./constants";
 import {
   DEFAULT_IMAGE,
   PRESETS,
+  httpPortFor,
   presetFor,
   presetVariableDefaults,
   presetVolumeFor,
@@ -233,5 +234,66 @@ describe("presetVolumeFor", () => {
     expect(pgdata && "value" in pgdata ? pgdata.value : "").toMatch(
       new RegExp(`^${mountPath}/.+`),
     );
+  });
+});
+
+describe("httpPortFor", () => {
+  it("answers the catalog's port for a web preset", () => {
+    expect(httpPortFor("nginx:alpine")).toBe(80);
+    expect(httpPortFor("caddy:2-alpine")).toBe(80);
+  });
+
+  it("matches on the repository, so a different tag still resolves", () => {
+    expect(httpPortFor("nginx:1.27")).toBe(80);
+  });
+
+  /*
+   * The two undefineds, side by side for the same reason presetVolumeFor pins them: the
+   * spin-up form seeds a blank port for both, and the row control omits `targetPort` for
+   * the second. `presetFor` is what separates "serves nothing" from "never heard of it".
+   */
+  it("is undefined both for a preset that serves no HTTP and for an unknown image", () => {
+    expect(httpPortFor("redis:7-alpine")).toBeUndefined();
+    expect(presetFor("redis:7-alpine")).toBeDefined();
+
+    expect(httpPortFor("ghcr.io/owner/api:1")).toBeUndefined();
+    expect(presetFor("ghcr.io/owner/api:1")).toBeUndefined();
+  });
+
+  /*
+   * The rule the field exists for. Every web preset is reachable, because a web server the
+   * user cannot open is the defect T-485 was raised about — and rabbitmq is reachable while
+   * NOT being in that group, which is why the port is its own field rather than read off
+   * `groupKey`.
+   */
+  it("gives every web preset a port, and is not the same thing as the web group", () => {
+    for (const preset of PRESETS.filter((p) => p.groupKey === "web")) {
+      expect(preset.httpPort, preset.value).toBeDefined();
+    }
+
+    const rabbit = presetFor("rabbitmq:3-management");
+    expect(rabbit?.groupKey).toBe("queue");
+    // The management console the `-management` tag adds, never 5672: a public hostname in
+    // front of the broker port would be an unauthenticated AMQP endpoint on the internet.
+    expect(rabbit?.httpPort).toBe(15672);
+  });
+
+  /*
+   * A port the catalog seeds is a port the form then submits, so every one of them has to
+   * survive the rule that bounds the field it lands in.
+   */
+  it("only declares ports the spin-up schema accepts", () => {
+    for (const preset of PRESETS) {
+      if (preset.httpPort === undefined) continue;
+      const parsed = spinUpSchema.safeParse({
+        projectId: "11111111-1111-4111-8111-111111111111",
+        environmentId: "22222222-2222-4222-8222-222222222222",
+        name: "web",
+        image: preset.value,
+        port: String(preset.httpPort),
+        idempotencyKey: "a".repeat(16),
+      });
+      expect(parsed.success, preset.value).toBe(true);
+    }
   });
 });

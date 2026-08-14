@@ -30,6 +30,7 @@ export async function injectFaults(
     failureField: FailureFieldFault;
     deploymentEventsFail: boolean;
     variablesFail: boolean;
+    domainFails: boolean;
     volumeCreateFail: boolean;
     volumesFail: boolean;
     metricsFail: boolean;
@@ -177,7 +178,14 @@ export function disclosure(page: Page, name: string) {
 
 /** A row's link out to Railway's own page for the service — the container name. */
 export function railwayLink(page: Page, name: string) {
-  return onlyVisible(row(page, name).getByRole("link", { name }));
+  /*
+   * `exact`, because a row can hold two links now. Since T-485 a container with a public
+   * address renders it beside its source, and that link is named "Open cache at
+   * spun-cache-production.up.railway.app" — which contains the container's name, so a
+   * substring match resolves to both and fails strict mode. This helper means the name
+   * link, whose accessible name is the container's name and nothing else.
+   */
+  return onlyVisible(row(page, name).getByRole("link", { name, exact: true }));
 }
 
 /**
@@ -413,20 +421,34 @@ export async function setTabVisibility(page: Page, state: "hidden" | "visible") 
  */
 export async function seedServices(
   page: Page,
-  options: { name: string; count?: number; status?: string },
+  options: {
+    name: string;
+    count?: number;
+    status?: string;
+    /** Seeds a service that already answers somewhere, so its row offers no second address. */
+    domains?: string[];
+  },
 ) {
   await page.request.post(`${FIXTURE_URL}/__test/services`, { data: options });
 }
 
 /** Service records from the fixture, including the environment each was created with. */
-export async function fixtureServices(
-  page: Page,
-): Promise<
-  Array<{ name: string; image: string | null; variables: Record<string, string> }>
+export async function fixtureServices(page: Page): Promise<
+  Array<{
+    name: string;
+    image: string | null;
+    variables: Record<string, string>;
+    domains: string[];
+  }>
 > {
   const response = await page.request.get(`${FIXTURE_URL}/__test/services`);
   return response.json() as Promise<
-    Array<{ name: string; image: string | null; variables: Record<string, string> }>
+    Array<{
+      name: string;
+      image: string | null;
+      variables: Record<string, string>;
+      domains: string[];
+    }>
   >;
 }
 

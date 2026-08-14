@@ -26,7 +26,7 @@ upstream call.
 
 ### Input surfaces
 
-Five things cross from a browser into a Railway mutation. None is trusted; each is
+Six things cross from a browser into a Railway mutation. None is trusted; each is
 bounded.
 
 | Input                 | Bound                                                                                                                              | Where                                                    |
@@ -36,15 +36,30 @@ bounded.
 | Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix | `src/lib/validation.ts`                                  |
 | Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
 | Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                               | `src/lib/validation.ts`                                  |
+| Public port           | decimal digits only, 1–65 535; blank means no domain is minted at all                                                              | `src/lib/validation.ts`                                  |
 
-A sixth input crosses from the browser and reaches no mutation at all: the spin-up form's
+The port is the newest of these and the narrowest. It reaches exactly one place —
+`ServiceDomainCreateInput.targetPort` — on a service the requester's own grant already
+covers, and it can do nothing but decide which port inside that container a Railway
+hostname routes to. It is refused unless it is plainly decimal, which is stricter than
+either obvious coercion: `parseInt` reads `80abc` as 80 and `Number` reads `0x50` as 80,
+and both turn a typo into a working port aimed somewhere nobody chose.
+
+**The row's own domain control takes no port from the browser at all.** It posts the same
+three ids every lifecycle action posts, and derives the port from `Preset.httpPort` keyed on
+the image Railway itself reported for that service — the same rule credential generation
+follows, where the catalog grants and the request does not ask. So the one surface that can
+aim a domain at an arbitrary port is the create form, where the container being aimed at is
+the one being created.
+
+A seventh input crosses from the browser and reaches no mutation at all: the spin-up form's
 idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation.ts`. Both ends of
 that are deliberate. The floor is unguessability — a guessed key is answered with somebody
 else's result instead of the container they asked for — and the ceiling is memory, since
 the value becomes half of a key in a map that lives as long as the process. The charset is
 the one every Railway identifier here uses, which keeps it greppable in a log line.
 
-**A seventh reaches no Railway mutation either, and is the first that reaches anything
+**An eighth reaches no Railway mutation either, and is the first that reaches anything
 outside this app at all**: `?ref=` on `/api/image-check`, the reference the spin-up form
 asks a registry about. It is bounded five ways before a byte leaves — a session is
 required, `IMAGE_PATTERN` and 255 characters apply as they do on submit, the host must
@@ -52,7 +67,7 @@ resolve to one of three allowlisted registries, the user holds at most two probe
 and a shared answer cache with a per-registry cool-off bounds the rate. See the outbound
 hosts section below for why the allowlist is the control that matters.
 
-**An eighth is the first that reads a secret rather than writing one**: the three ids on
+**A ninth is the first that reads a secret rather than writing one**: the three ids on
 `/api/service-variables`, which the edit dialog sends to find out which variables a service
 already has. All three are held to `RAILWAY_ID_PATTERN` before the session is read, and none
 of them is logged at any level.
@@ -65,7 +80,7 @@ on any path**, which is what lets the edit form show an existing variable as a n
 empty cell, and what keeps the e2e assertion that a minted credential never appears in page
 content true after this feature as it was before it.
 
-**A ninth reaches no Railway call at all and decides what this app says about itself**: the
+**A tenth reaches no Railway call at all and decides what this app says about itself**: the
 `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` headers, from which `src/lib/origin.ts`
 derives the origin this request is served at. It is bounded three ways before anything reads
 it — the parse must round-trip to exactly the host it was given, with no path, credentials

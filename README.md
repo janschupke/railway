@@ -171,6 +171,31 @@ SSE route multiplexes deployment status and log output into the open tab.
   them to install it — a real feature, not a line of code.
 - **Private registries are not supported.** `serviceCreate` would need credentials this
   app does not collect.
+- **A public address is a Railway hostname on one port, and nothing else.** A spin-up whose
+  port field is filled in gets a `serviceDomain` — `spun-web-production.up.railway.app` —
+  and a container that has none can be given one from its row. Three things that are not
+  offered, each for its own reason:
+
+  **Custom domains.** `customDomainCreate` exists, and using it would mean asking someone to
+  place a CNAME this app cannot place, then reporting on a certificate issue it cannot
+  observe. The control would succeed and the domain would appear broken for reasons living
+  in someone else's DNS.
+
+  **TCP proxies.** This is why redis, postgres and the rest are reachable from the project
+  and nowhere else. `tcpProxyCreate` is the mutation, and it is `@deprecated` on the live
+  schema — "use staged changes and apply them", plus a redeploy the caller has to perform
+  itself before the proxy is active. Shipping the database presets' reachability on a
+  retiring mutation is a worse trade than leaving them on Railway's private network, which
+  is where a database usually belongs anyway.
+
+  **A port for an image the catalog does not know, from the row.** `Preset.httpPort` carries
+  the port for every image on the spin-up form, and the form's own field carries it for
+  everything else — but the row control posts three ids and no port, deliberately, so that
+  a request cannot aim a domain at a port of its choosing. For an unrecognised image it
+  therefore omits `targetPort` and lets Railway infer one from the running deployment. That
+  inference is undocumented. If it picks wrong, the fix is to destroy the container and spin
+  it up again with the port filled in.
+
 - **Editing a container is a name, an image and its variables — nothing else.**
   `ServiceInstanceUpdateInput` carries twenty-odd other members: region, replicas, healthcheck,
   start command, restart policy. Sending only `source` is what leaves every one of them alone,

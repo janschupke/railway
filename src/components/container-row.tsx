@@ -22,6 +22,7 @@ import { useVolumeSize } from "@/hooks/use-volume-size";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
 import { ContainerMetricsReadout } from "./container-metrics";
+import { ContainerUrl } from "./container-url";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
@@ -300,6 +301,26 @@ export function ContainerRow({
             <Text variant="mono" tone="subtle" className="block truncate">
               {container.image ?? container.repo ?? t("noSource")}
             </Text>
+            {/*
+              Under the source, not out in the action cluster.
+
+              This is the container's address, and the block above it is already the
+              container's identity — what it is called and what it runs. A URL belongs to
+              that sentence rather than beside the buttons that stop and destroy it, and the
+              cluster is at four controls on a running managed row before anything else is
+              added to it.
+
+              The same slot holds the offer when there is no address yet, so the place a
+              reader looks for a URL either has one or explains how to get one.
+            */}
+            <ContainerUrl
+              url={container.url}
+              serviceId={container.serviceId}
+              displayName={container.displayName}
+              projectId={projectId}
+              environmentId={environmentId}
+              managed={container.managed}
+            />
           </span>
         </div>
 
