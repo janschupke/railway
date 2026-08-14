@@ -68,18 +68,24 @@ export function relativeTime(
  * timer after the caller had already gone. `signal` is optional so the client uses the
  * same function rather than keeping its own second definition, and an
  * already-aborted signal resolves immediately instead of waiting out the full delay.
+ *
+ * The listener is removed on the normal path as well as the aborted one. `{ once: true }`
+ * only detaches a listener that has *fired*, so a poll loop sleeping on one long-lived
+ * signal accumulated a listener per iteration — and Node warns at eleven, which is a
+ * MaxListenersExceededWarning naming this file for a leak that is only ever a few
+ * closures wide, on the signal that is about to be discarded anyway.
  */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
     if (signal?.aborted) return resolve();
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

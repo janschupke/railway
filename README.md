@@ -136,6 +136,14 @@ upgrades in a route handler, and the data only flows one way. No custom server n
 deployment-status subscription, so status is polled — bounded to one deployment, only
 while it is transitioning, with the whole stream closing at a terminal state.
 
+One poll at a time, and the gap between them is not fixed: 2.5s while the deployment is
+moving, stretching towards `STREAM.MAX_POLL_MS` for every four polls that report the same
+state, and doubling to `STREAM.MAX_BACKOFF_MS` after a failure. A flat 2.5s was 360
+requests per fifteen-minute stream and 1,440 an hour for the four a user may hold, against
+Hobby's 1,000 — the status poll alone over the quota, before the watcher or a single
+render. A deployment that is actually progressing still polls at the base rate throughout,
+because every state change resets the ladder.
+
 The dashboard as a whole is polled too, and deliberately: see ADR-10, which covers the
 cost of that and why it is paid on the server rather than in the browser.
 
@@ -248,8 +256,9 @@ were wanted.
 
 **The subscription path is not Apollo-shaped.** App Router route handlers cannot accept
 WebSocket upgrades, so logs arrive over `graphql-ws` upstream and leave over SSE
-downstream, merged with a 2.5s status poll because Railway exposes no deployment-status
-subscription. A link chain does not cross that boundary.
+downstream, merged with a status poll — starting at 2.5s and stretching as a deployment
+sits still — because Railway exposes no deployment-status subscription. A link chain does
+not cross that boundary.
 
 **What `client.ts` buys that `RetryLink` does not** is Railway-specific: a 200 response
 carrying `errors[]` is a failure; `UNAUTHENTICATED`/`FORBIDDEN` in `extensions` is an
@@ -293,7 +302,7 @@ so those handlers mint their own and say so at the call site.
 monitor → api → client — and the monitor outlives the request that created it, so an
 argument would have to survive a handoff no argument survives. It works because
 `new ReadableStream({ start })` runs `start` synchronously during construction, inside
-the handler's scope, so the 2.5s status poll created there stays correlated for the full
+the handler's scope, so the status poll loop created there stays correlated for the full
 fifteen minutes. That is a real invariant with a real test, not a happy accident.
 
 **The error serializer never reads `cause`.** This is the same finding the security
@@ -897,9 +906,9 @@ Plus `eslint-plugin-jsx-a11y` at strict, with CI failing on any warning.
   up; when both are empty — the usual shape for a failed image pull — the row says so and
   links straight to the service on Railway, which does have the reason. Surfacing it here
   would mean selecting a field nobody has proved exists, and the deployment query is polled
-  every 2.5s for the life of every open stream: a withdrawn or refused field there would
-  turn each of those polls into a schema rejection the monitor treats as transient, failing
-  in silence for the full duration ceiling. That needs a probe against a real failed
+  for the life of every open stream: a withdrawn or refused field there would turn each of
+  those polls into a schema rejection the monitor treats as transient — and now backs off
+  from, so the silence would last the full duration ceiling and be quieter than before. That needs a probe against a real failed
   deployment and a separate best-effort document, not a guess in the hot path.
 - **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
   API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been

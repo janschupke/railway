@@ -95,7 +95,7 @@ export function sseResponse(
    * times (the route params, requireSession, getTranslations). A browser that gave up
    * during those awaits arrived here with an already-dead signal, nothing listening, and
    * therefore no teardown until maxDurationMs: fifteen minutes holding a stream slot, an
-   * upstream Railway socket and a 2.5s status poll for a tab that had closed. Four of
+   * upstream Railway socket and a status poll for a tab that had closed. Four of
    * those and the user cannot open a log pane at all.
    *
    * Returning early rather than constructing the stream keeps `produce` from ever running,

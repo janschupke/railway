@@ -32,8 +32,8 @@ export async function GET(
   /*
    * The scope wraps the whole handler, not just the auth prelude, and that is
    * load-bearing rather than tidy. `new ReadableStream({ start })` runs `start`
-   * synchronously during construction — so the monitor's generator, its 2.5s status
-   * poll and its drain timer are all created inside this scope, and AsyncLocalStorage
+   * synchronously during construction — so the monitor's generator, its status poll
+   * loop and its drain timer are all created inside this scope, and AsyncLocalStorage
    * captures the store when an async resource is created rather than when it runs. A
    * poll firing fourteen minutes after this function returned still carries the id.
    */

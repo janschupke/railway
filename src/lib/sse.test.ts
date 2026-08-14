@@ -210,7 +210,7 @@ describe("sseResponse", () => {
        * awaits three times before it gets here — params, requireSession, getTranslations.
        * A browser that gave up during those arrived with a dead signal and nothing
        * listening, so the only remaining teardown was maxDurationMs: fifteen minutes
-       * holding a slot, an upstream socket and a 2.5s poll for a tab that had closed.
+       * holding a slot, an upstream socket and a status poll for a tab that had closed.
        */
       const client = new AbortController();
       client.abort();

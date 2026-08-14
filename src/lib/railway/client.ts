@@ -222,7 +222,7 @@ async function execute<T>(
     /*
      * `debug`, not `info`, and the level is the whole decision: this is the only place
      * every Railway call passes through, so latency lives here — but a dashboard render
-     * issues several calls and the stream monitor polls every 2.5 seconds, which at
+     * issues several calls and the stream monitor polls every few seconds, which at
      * `info` would make this line the dominant volume in the system by an order of
      * magnitude. Available when a latency question is being asked, silent otherwise.
      */

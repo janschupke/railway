@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STREAM } from "@/lib/constants";
+import { sleep } from "@/lib/utils";
+import { logRecords } from "@/test/log-capture";
 import {
   monitorDeployment,
   type MonitorDeps,
   type MonitorEvent,
 } from "./deployment-monitor";
 import { RailwayApiError } from "./errors";
-import type { LogLine } from "./types";
+import type { LogLine, LogPhase } from "./types";
 
 const line = (message: string): LogLine => ({
   timestamp: "2026-08-12T10:00:00Z",
@@ -151,16 +153,19 @@ describe("monitorDeployment", () => {
       message: { key: "errors.deploymentNotFound" },
     });
     // drain() only resolves once the generator completes, so reaching this line is
-    // itself the proof that stop() cleared the interval.
+    // itself the proof that stop() ended the poll loop.
+    //
+    // Stated in the base interval on purpose: a null carries no state, so this is the one
+    // path the escalation ladder never stretches.
   });
 
   it("gives up on a status it cannot map, instead of polling for 15 minutes", async () => {
     /*
      * Railway can add a DeploymentStatus member at any time, and an unmapped one is
      * neither terminal nor transitioning — so there was no condition under which this
-     * stream ever ended. It polled every 2.5s and held an upstream socket for the full
-     * ceiling, then closed with no frame at all, which the browser answers by redialling:
-     * a silent fifteen-minute cycle, repeating.
+     * stream ever ended. It polled and held an upstream socket for the full ceiling, then
+     * closed with no frame at all, which the browser answers by redialling: a silent
+     * fifteen-minute cycle, repeating.
      *
      * `unknown` is still not treated as settled — closing on a status we do not
      * understand would be a guess. It is bounded by poll count instead.
@@ -177,8 +182,10 @@ describe("monitorDeployment", () => {
         }),
       ),
       async () => {
+        // A state that never changes escalates, so the window is stated in the ceiling:
+        // no two polls can be further apart than that, however the ladder is tuned.
         await vi.advanceTimersByTimeAsync(
-          STREAM.STATUS_POLL_MS * (STREAM.UNSETTLED_POLLS_BEFORE_STOP + 1),
+          STREAM.MAX_POLL_MS * (STREAM.UNSETTLED_POLLS_BEFORE_STOP + 1),
         );
       },
     );
@@ -240,14 +247,240 @@ describe("monitorDeployment", () => {
     const events = await drain(
       monitorDeployment(params(), deps({ getDeployment })),
       async () => {
+        // The first failure doubles the interval, so the retry that recovers lands at
+        // twice the base rather than at it.
         await vi.advanceTimersByTimeAsync(
-          STREAM.STATUS_POLL_MS + STREAM.DRAIN_MS + 100,
+          STREAM.STATUS_POLL_MS * 2 + STREAM.DRAIN_MS + 100,
         );
       },
     );
 
     expect(getDeployment.mock.calls.length).toBeGreaterThan(1);
     expect(events.some((e) => e.type === "status")).toBe(true);
+  });
+
+  it("never has two polls in flight, however slow Railway is", async () => {
+    /*
+     * setInterval fired on wall-clock time whether or not the poll it started last time
+     * had returned, so a Railway that took longer than the interval received overlapping
+     * requests exactly when it wanted fewer — and missingPolls, unsettledPolls and
+     * consecutiveFailures were counters two calls could interleave on.
+     */
+    let inFlight = 0;
+    let overlapped = false;
+    const getDeployment = vi.fn(async () => {
+      inFlight += 1;
+      overlapped ||= inFlight > 1;
+      // Deliberately longer than the interval that would have started the next one.
+      await sleep(STREAM.STATUS_POLL_MS * 2);
+      inFlight -= 1;
+      return { id: "dep_1", status: "BUILDING", updatedAt: null };
+    });
+
+    const controller = new AbortController();
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({ getDeployment }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS * 10);
+        controller.abort();
+      },
+    );
+
+    expect(overlapped).toBe(false);
+    expect(getDeployment.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("stops polling before it awaits the failure fallback", async () => {
+    /*
+     * The case a `settling` flag used to patch: the terminal branch awaits, and under a
+     * fixed interval further polls fired into that await and re-entered the same branch,
+     * fetching and emitting the same fallback twice. Serial polls retire the flag.
+     */
+    const getLogs = vi.fn(async (_token: string, _id: string, kind: LogPhase) => {
+      if (kind === "build") await sleep(STREAM.STATUS_POLL_MS * 3);
+      return [];
+    });
+    const getDeployment = vi.fn(async () => ({
+      id: "dep_1",
+      status: "FAILED",
+      updatedAt: null,
+    }));
+
+    const events = await drain(
+      monitorDeployment(params(), deps({ getLogs, getDeployment })),
+      async () => {
+        await vi.advanceTimersByTimeAsync(
+          STREAM.STATUS_POLL_MS * 3 + STREAM.DRAIN_MS + 100,
+        );
+      },
+    );
+
+    expect(getDeployment).toHaveBeenCalledTimes(1);
+    expect(getLogs.mock.calls.map((c) => c[2])).toEqual(["deploy", "build"]);
+    expect(events.at(-1)).toMatchObject({ type: "done", state: "failed" });
+  });
+
+  it("stretches the interval while a deployment sits in one state", async () => {
+    // Four concurrent streams at a flat 2.5s were 1440 requests an hour against Hobby's
+    // 1000. The output of a long build arrives over the log subscription regardless; the
+    // poll is only there to notice the state change at the end of it.
+    const at: number[] = [];
+    const controller = new AbortController();
+
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({
+          getDeployment: vi.fn(async () => {
+            at.push(Date.now());
+            return { id: "dep_1", status: "BUILDING", updatedAt: null };
+          }),
+        }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.MAX_POLL_MS * 12);
+        controller.abort();
+      },
+    );
+
+    const base = STREAM.STATUS_POLL_MS;
+    const rung = STREAM.POLLS_BEFORE_ESCALATION;
+    const gaps = at.slice(1).map((t, i) => t - at[i]!);
+
+    expect(gaps.slice(0, rung * 3)).toEqual([
+      ...Array<number>(rung).fill(base),
+      ...Array<number>(rung).fill(base * 2),
+      ...Array<number>(rung).fill(base * 4),
+    ]);
+    // base * 8 would be 20s; the ceiling is the point.
+    expect(Math.max(...gaps)).toBe(STREAM.MAX_POLL_MS);
+  });
+
+  it("returns to the base interval when the deployment actually moves", async () => {
+    const at: number[] = [];
+    let calls = 0;
+    const controller = new AbortController();
+
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({
+          getDeployment: vi.fn(async () => {
+            at.push(Date.now());
+            calls += 1;
+            // Long enough in one state to climb a rung, then a real transition.
+            const status =
+              calls <= STREAM.POLLS_BEFORE_ESCALATION + 1 ? "BUILDING" : "DEPLOYING";
+            return { id: "dep_1", status, updatedAt: null };
+          }),
+        }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.MAX_POLL_MS * 4);
+        controller.abort();
+      },
+    );
+
+    const gaps = at.slice(1).map((t, i) => t - at[i]!);
+    const rung = STREAM.POLLS_BEFORE_ESCALATION;
+    expect(gaps[rung]).toBe(STREAM.STATUS_POLL_MS * 2);
+    expect(gaps[rung + 1]).toBe(STREAM.STATUS_POLL_MS);
+  });
+
+  it("backs off a failing poll instead of retrying at the base interval", async () => {
+    /*
+     * Each poll is itself worth up to NETWORK.MAX_ATTEMPTS requests inside the client, so
+     * a flat cadence through a 429 storm was this app's largest single source of load at
+     * exactly the moment Railway was asking for less of it.
+     */
+    const getDeployment = vi.fn(async () => {
+      throw new RailwayApiError("blip", { kind: "server" });
+    });
+    const controller = new AbortController();
+
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({ getDeployment }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(getDeployment).toHaveBeenCalledTimes(1);
+
+        // A whole base interval passes and nothing is sent: the first failure doubled it.
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS);
+        expect(getDeployment).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS);
+        expect(getDeployment).toHaveBeenCalledTimes(2);
+
+        // 2.5s, 5s, 10s, 20s, 40s, then the minute ceiling: single figures where the flat
+        // interval spent 360 polls of up to three requests each.
+        await vi.advanceTimersByTimeAsync(STREAM.MAX_DURATION_MS);
+        expect(getDeployment.mock.calls.length).toBeLessThan(25);
+        controller.abort();
+      },
+    );
+
+    const failed = logRecords().filter(
+      (r) => r.msg === "railway.deployment.poll_failed",
+    );
+    expect(failed.filter((r) => r.level === "warn")).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ backoff_ms: STREAM.STATUS_POLL_MS * 2 });
+  });
+
+  it("waits out Railway's own Retry-After rather than guessing at one", async () => {
+    // The client has already waited this out once per attempt and given up; polling again
+    // before the window closes spends another MAX_ATTEMPTS to be told the same thing.
+    const retryAfterSeconds = 30;
+    const getDeployment = vi.fn(async () => {
+      throw new RailwayApiError("slow down", {
+        kind: "rate_limit",
+        status: 429,
+        retryAfterSeconds,
+      });
+    });
+    const controller = new AbortController();
+
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({ getDeployment }),
+      ),
+      async () => {
+        // A plain transient failure would have retried twice inside this window.
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS * 4);
+        expect(getDeployment).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(retryAfterSeconds * 1_000);
+        expect(getDeployment).toHaveBeenCalledTimes(2);
+        controller.abort();
+      },
+    );
+  });
+
+  it("falls back to doubling for a 429 that named no window", async () => {
+    // Railway does not always send Retry-After, and an absent header is not a licence to
+    // keep the base cadence against a quota that has just been refused.
+    const getDeployment = vi.fn(async () => {
+      throw new RailwayApiError("slow down", { kind: "rate_limit", status: 429 });
+    });
+    const controller = new AbortController();
+
+    await drain(
+      monitorDeployment(
+        { ...params(), signal: controller.signal },
+        deps({ getDeployment }),
+      ),
+      async () => {
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS);
+        expect(getDeployment).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(STREAM.STATUS_POLL_MS);
+        expect(getDeployment).toHaveBeenCalledTimes(2);
+        controller.abort();
+      },
+    );
   });
 
   describe("when a failure produced no output", () => {

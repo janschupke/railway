@@ -4,6 +4,7 @@ import { AsyncQueue } from "@/lib/async-queue";
 import { STREAM } from "@/lib/constants";
 import { log } from "@/lib/logger";
 import { reportError } from "@/lib/report-error";
+import { sleep } from "@/lib/utils";
 import { getDeployment, getLogs } from "./api";
 import { RailwayApiError } from "./errors";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
@@ -93,15 +94,29 @@ export async function* monitorDeployment(
   const { accessToken, deploymentId, phase, signal } = params;
   const queue = new AsyncQueue<MonitorEvent>(STREAM.MAX_QUEUED_EVENTS);
 
-  // One holder so `stop` can clear timers that are created further down.
-  const timers: {
-    status?: ReturnType<typeof setInterval>;
-    drain?: ReturnType<typeof setTimeout>;
-  } = {};
+  /*
+   * The poll loop's own stop signal, composed with the caller's.
+   *
+   * Polling ends for two different reasons and only one of them is the reader's: a terminal
+   * status, a status this app cannot map, and an id that never resolves all mean this
+   * stream has finished asking Railway while the connection — and, for a terminal status,
+   * the drain window — is still very much open. Aborting this controller is what clearing
+   * the status interval used to do.
+   *
+   * Composed rather than checked alongside `signal`, because AbortSignal.any is already
+   * aborted when a member is: a caller that hands in a dead signal never fires `abort`, so
+   * the listener below never runs and the loop would poll for a reader that had gone.
+   */
+  const polling = new AbortController();
+  const pollSignal = AbortSignal.any([signal, polling.signal]);
+
+  // Armed once, on a terminal status. No holder object any more: the status timer it used
+  // to share this scope with is a loop.
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
 
   const stop = () => {
-    if (timers.status) clearInterval(timers.status);
-    if (timers.drain) clearTimeout(timers.drain);
+    polling.abort();
+    if (drainTimer) clearTimeout(drainTimer);
     queue.end();
   };
   signal.addEventListener("abort", stop, { once: true });
@@ -138,15 +153,55 @@ export async function* monitorDeployment(
   let missingPolls = 0;
   let unsettledPolls = 0;
   let consecutiveFailures = 0;
+
   /*
-   * Set synchronously the moment a terminal status is first seen.
+   * The gap before the next poll, and the two things that move it.
    *
-   * `timers.drain` was a sufficient guard while the terminal branch ran start to finish in
-   * one tick. It no longer does: the fallback below awaits, and the status interval does
-   * not wait for the previous call to return, so two polls could both pass a check on a
-   * timer that neither had assigned yet and fetch — and emit — the same fallback twice.
+   * A flat 2.5s was 360 requests per fifteen-minute stream and 1,440 an hour for the four
+   * streams MAX_CONCURRENT_PER_USER allows, against a Hobby quota of 1,000 — the status
+   * poll alone could exhaust the plan this app is meant to run on, before the project
+   * watcher or a dashboard render had asked for anything.
+   *
+   * `sameStatePolls` counts polls that reported what the one before them did. A deployment
+   * that is genuinely moving resets it at every transition and keeps the base cadence from
+   * end to end; one that sits in BUILDING for four minutes does not need asking twenty-four
+   * times a minute, because its output is arriving over the log subscription anyway and the
+   * poll is only there to notice the state change at the end of it.
    */
-  let settling = false;
+  let lastState: ContainerState | undefined;
+  let sameStatePolls = 0;
+  let interval: number = STREAM.STATUS_POLL_MS;
+
+  /*
+   * Derived from the counter rather than doubled in place, so recovering from a failure
+   * backoff lands on the rung this deployment's own progress had earned rather than on
+   * whatever the last error left behind.
+   */
+  const healthyInterval = () =>
+    Math.min(
+      STREAM.STATUS_POLL_MS *
+        2 ** Math.floor(sameStatePolls / STREAM.POLLS_BEFORE_ESCALATION),
+      STREAM.MAX_POLL_MS,
+    );
+
+  /*
+   * The same doubling the project watcher uses (api/watch/[projectId]/route.ts), kept local
+   * rather than shared: the two loops have different ceilings and different reset
+   * conditions, and what they have in common is three lines of arithmetic.
+   *
+   * A 429 carries the only informed number in this system. The client has already waited
+   * Railway's Retry-After out once per attempt and given up, so polling again before that
+   * window closes spends another NETWORK.MAX_ATTEMPTS requests to be told the same thing.
+   * Clamped anyway — a Retry-After is a hint from a system under load, not a mandate to
+   * hold a stream open doing nothing.
+   */
+  const backoffFor = (error: unknown): number => {
+    const retryAfterMs =
+      error instanceof RailwayApiError && error.kind === "rate_limit"
+        ? (error.retryAfterSeconds ?? 0) * 1000
+        : 0;
+    return Math.min(Math.max(interval * 2, retryAfterMs), STREAM.MAX_BACKOFF_MS);
+  };
 
   /**
    * Last resort for a failure that showed the reader nothing.
@@ -197,7 +252,11 @@ export async function* monitorDeployment(
 
   const pollStatus = async () => {
     try {
-      const deployment = await deps.getDeployment(accessToken, deploymentId, signal);
+      const deployment = await deps.getDeployment(
+        accessToken,
+        deploymentId,
+        pollSignal,
+      );
       if (!deployment) {
         /*
          * A null on the first poll or two is normal — Railway is eventually consistent
@@ -234,9 +293,27 @@ export async function* monitorDeployment(
         updatedAt: deployment.updatedAt,
       });
 
-      if (isTerminal(state) && !settling) {
-        settling = true;
-        if (timers.status) clearInterval(timers.status);
+      /*
+       * Progress resets the cadence; standing still stretches it. Before the branches
+       * below rather than after, so a poll that returns early still leaves the right delay
+       * behind it — and after the push, so what the reader was told is what "changed" is
+       * measured against.
+       */
+      if (state === lastState) sameStatePolls += 1;
+      else {
+        lastState = state;
+        sameStatePolls = 0;
+      }
+      interval = healthyInterval();
+
+      if (isTerminal(state)) {
+        /*
+         * Stops the poll loop without ending the queue — `stop()` would discard the drain
+         * window, which is the whole reason this branch is not simply `stop()`. It is also
+         * what retired the `settling` flag: polls are serial now, so nothing can be in
+         * flight to reach this branch a second time while the fallback below is awaited.
+         */
+        polling.abort();
 
         /*
          * Before the drain window is armed, not inside it. `stop()` ends the queue and
@@ -246,9 +323,10 @@ export async function* monitorDeployment(
          * subscription routinely arrive after the status flips.
          */
         if (state === "failed") await explainFailure();
+        // The caller's signal, deliberately: `pollSignal` was aborted three lines up.
         if (signal.aborted) return;
 
-        timers.drain = setTimeout(() => {
+        drainTimer = setTimeout(() => {
           queue.push({ type: "done", deploymentId, state });
           stop();
         }, STREAM.DRAIN_MS);
@@ -301,23 +379,30 @@ export async function* monitorDeployment(
        * Without this, closing a tab produced an AbortError at `warn` on every stream
        * that happened to be mid-poll, which is precisely the false positive that teaches
        * people to ignore warnings.
+       *
+       * `pollSignal`, not `signal`: this stream now cancels its own request when it stops
+       * polling, and a stop it decided on itself is not news about Railway either.
        */
-      if (signal.aborted) return;
+      if (pollSignal.aborted) return;
 
       /*
-       * Transient failures: the next tick retries — and until now that comment was the
-       * only evidence they had happened at all. A deployment could poll-fail for the
-       * full fifteen-minute ceiling in silence.
+       * Transient failures: the loop retries, after doubling the gap. It used to retry at
+       * the flat base interval straight through a 429 storm, and each of those attempts
+       * was itself worth up to NETWORK.MAX_ATTEMPTS requests inside the client.
        *
-       * Logged on the transition rather than per tick, because a naive line here is 360
-       * records per wedged stream (2.5s × 15 min) and Railway charges for retained
-       * stdout. First failure and recovery are `warn`; the steady state is `debug`, so a
-       * fifteen-minute outage costs two lines and the detail is still there on request.
+       * Logged on the transition rather than per attempt, because a naive line here is one
+       * record per poll and Railway charges for retained stdout. First failure and recovery
+       * are `warn`; the steady state is `debug`, so a fifteen-minute outage costs two lines
+       * and the detail is still there on request. `backoff_ms` rides along for the reason
+       * the client puts it on railway.request.retry: a backoff nobody can observe is
+       * indistinguishable from one that is not happening.
        */
       consecutiveFailures += 1;
+      interval = backoffFor(error);
       const fields = {
         deployment_id: deploymentId,
         consecutive: consecutiveFailures,
+        backoff_ms: interval,
         error,
       };
       if (consecutiveFailures === 1) log.warn("railway.deployment.poll_failed", fields);
@@ -325,8 +410,29 @@ export async function* monitorDeployment(
     }
   };
 
-  timers.status = setInterval(() => void pollStatus(), STREAM.STATUS_POLL_MS);
-  void pollStatus();
+  /*
+   * One poll at a time, with the next gap chosen after the previous one has come back.
+   *
+   * `setInterval` fired on wall-clock time whether or not the poll it had started last time
+   * had returned, so a slow or failing Railway received *more* concurrent requests exactly
+   * when it wanted fewer, and missingPolls, unsettledPolls and consecutiveFailures were
+   * counters two overlapping calls could both read and write. It also needed a flag to stop
+   * two polls from both seeing a terminal status and both fetching the failure fallback;
+   * running them in series retires the flag rather than guarding it.
+   *
+   * `while` over a re-armed setTimeout because `sleep` already observes a signal and clears
+   * its own timer — a timeout handle would have to be held and cleared by `stop()`, which
+   * is the bookkeeping this replaces. It is also the shape the project watcher's poll loop
+   * already uses.
+   *
+   * Nothing awaits this promise; see the note at the end of this generator.
+   */
+  const polls = (async () => {
+    while (!pollSignal.aborted) {
+      await pollStatus();
+      await sleep(interval, pollSignal);
+    }
+  })();
 
   const document =
     phase === "build" ? BUILD_LOGS_SUBSCRIPTION : DEPLOYMENT_LOGS_SUBSCRIPTION;
@@ -391,7 +497,13 @@ export async function* monitorDeployment(
      * behaving — which is the precise failure the SSE transport keeps onClose out of a
      * producer `finally` to avoid, and which deadlocked a test whose fake ignores the
      * signal. Teardown must not be able to hang on the thing it is tearing down.
+     *
+     * The poll loop looks safer than the subscription, because `stop()` above aborts the
+     * signal it sleeps on. It is not: the request it may be sitting in is a `deps`
+     * function, and a fake — or a fetch that never observes its signal — does not return
+     * because this side asked. The same rule applies to whichever of the two it is.
      */
+    void polls.catch(() => {});
     void logs.catch(() => {});
   }
 }

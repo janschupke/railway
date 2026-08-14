@@ -20,8 +20,59 @@ export const NETWORK = {
 export const STREAM = {
   /** Comment frames stop proxies idling the connection out during a long build. */
   KEEPALIVE_MS: 15_000,
-  /** Railway has no deployment-status subscription, so status is polled. */
+  /**
+   * Railway has no deployment-status subscription, so status is polled.
+   *
+   * Where a poll *starts*, not where it stays: every reported state change resets to this
+   * value, so a deployment that is actually moving is watched at this cadence from end to
+   * end. One that is not stretches towards MAX_POLL_MS — see POLLS_BEFORE_ESCALATION.
+   */
   STATUS_POLL_MS: 2_500,
+  /**
+   * Status polls at one interval before it doubles, while the reported state does not
+   * change.
+   *
+   * Four keeps full resolution for the first ten seconds, which is the window that
+   * matters: a just-created deployment is still resolving there — MISSING_POLLS_BEFORE_STOP
+   * spends all three of its polls inside it — and a small image pull can finish inside it.
+   * Doubling from the first repeat instead would put a thirty-second deploy at the ceiling
+   * after 7.5s, which is a lot of staleness bought for eleven requests.
+   *
+   * The ladder is 2.5s ×4, 5s ×4, 10s ×4, then MAX_POLL_MS: twelve polls covering the
+   * first seventy seconds of any one state, and the ceiling from there.
+   */
+  POLLS_BEFORE_ESCALATION: 4,
+  /**
+   * Ceiling on the status poll interval while Railway is answering normally.
+   *
+   * At a flat 2.5s a fifteen-minute stream was 360 requests, and the four streams
+   * MAX_CONCURRENT_PER_USER allows were 1,440 an hour against Hobby's documented 1,000 —
+   * the status poll alone over budget, before the watcher's 240 (ADR-10) and every
+   * dashboard render. With the ladder above, a stream that never changes state at all
+   * costs 12 + (900 − 70) / 15 ≈ 67 requests, so the same four are ~270 an hour.
+   *
+   * Fifteen seconds rather than more because this is the worst case for how stale the
+   * badge can be when a deployment finishes, and it is only ever reached by a deployment
+   * that has sat in one state for over a minute — QUEUED → BUILDING → DEPLOYING → SUCCESS
+   * resets at every step and never leaves the base rung for long.
+   */
+  MAX_POLL_MS: 15_000,
+  /**
+   * Ceiling on the status poll interval after a *failure*, which is a different question
+   * and gets a different number.
+   *
+   * A healthy stream trades staleness for quota, and fifteen seconds is the most staleness
+   * a working deployment should carry. A failing one has no fresh status to be stale about,
+   * and each of its polls costs up to NETWORK.MAX_ATTEMPTS requests inside the client — so
+   * the flat cadence was really up to 1,080 requests per wedged stream. Doubling from the
+   * base reaches this ceiling after five failures and 77.5s.
+   *
+   * Also the clamp on Railway's own Retry-After, which against a 1,000/hour quota is
+   * routinely tens of seconds. Not WATCH.MAX_POLL_MS's two minutes, because a log stream
+   * lives at most MAX_DURATION_MS: a two-minute backoff is an eighth of its whole life, and
+   * a deployment that recovered would show a stale badge until the connection closed.
+   */
+  MAX_BACKOFF_MS: 60_000,
   /** Grace period for trailing log frames after a terminal status. */
   DRAIN_MS: 2_000,
   /** Ceiling so a wedged build cannot pin a connection forever. */
@@ -69,7 +120,11 @@ export const STREAM = {
    * Polls tolerated in a state that is neither terminal nor transitioning before the
    * stream gives up. `unknown` is the only such state, and it means Railway added an
    * enum member this app does not map — which must not pin a connection, an upstream
-   * socket and a 2.5s poll for the full duration ceiling.
+   * socket and a poll for the full duration ceiling.
+   *
+   * A count rather than a deadline, deliberately: the interval escalates while the state
+   * does not change, so eight polls is about half a minute here and the bound holds
+   * whatever that ladder is tuned to.
    */
   UNSETTLED_POLLS_BEFORE_STOP: 8,
 } as const;

@@ -105,6 +105,27 @@ describe("sleep", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("does not accumulate listeners on a signal it sleeps on repeatedly", async () => {
+    /*
+     * `{ once: true }` detaches a listener that has fired, and on the normal path this one
+     * never does. A poll loop sleeping on one long-lived signal therefore added a listener
+     * per iteration, and Node warns at eleven — a MaxListenersExceededWarning pointing at
+     * this file, for a signal that is about to be discarded anyway.
+     */
+    const controller = new AbortController();
+    const added = vi.spyOn(controller.signal, "addEventListener");
+    const removed = vi.spyOn(controller.signal, "removeEventListener");
+
+    for (let i = 0; i < 20; i++) {
+      const slept = sleep(1_000, controller.signal);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await slept;
+    }
+
+    expect(added).toHaveBeenCalledTimes(20);
+    expect(removed).toHaveBeenCalledTimes(20);
+  });
+
   it("resolves immediately for a signal that has already aborted", async () => {
     // addEventListener never fires for one of these — the same trap the SSE transport
     // hit — so without the up-front check this would wait out the whole delay.
