@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION } from "@/lib/constants";
+import { __resetEnv } from "@/env";
+import { UnknownOriginError } from "@/lib/origin";
 import { sealSession, SESSION_COOKIE, type RailwaySession } from "./session";
 
 const store = new Map<string, string>();
@@ -17,7 +19,20 @@ const jar = {
   // src/cookie-removal.test.ts bans; a mock without it turns a re-introduction into a
   // TypeError here as well as an offender there.
 };
-vi.mock("next/headers", () => ({ cookies: async () => jar }));
+/**
+ * The request headers this render was handed, which now decide the cookie's name.
+ *
+ * Mutable rather than fixed, because the origin is no longer a constant of the process:
+ * these functions read it per request, so a test that wants the deployed shape says so by
+ * setting a forwarded host here.
+ */
+let inbound = new Map<string, string>();
+const head = { get: (name: string) => inbound.get(name.toLowerCase()) ?? null };
+
+vi.mock("next/headers", () => ({
+  cookies: async () => jar,
+  headers: async () => head,
+}));
 
 // ./refresh is deliberately not mocked: nothing in server.ts calls the grant any more.
 // The proxy is the only refresh writer — see requireSession's doc comment.
@@ -40,6 +55,9 @@ const session = (over: Partial<RailwaySession> = {}): RailwaySession => ({
 beforeEach(() => {
   store.clear();
   jar.set.mockClear();
+  // No host at all, which is what a bare `new Request(url)` carries and what makes these
+  // cases fall back to APP_URL — http://localhost:3000 under test.
+  inbound = new Map();
 });
 
 describe("getSession", () => {
@@ -91,10 +109,64 @@ describe("persistSession", () => {
   });
 
   it("marks the cookie secure only on https origins", async () => {
-    // APP_URL is http://localhost:3000 under test, where Secure would break sign-in.
+    // These requests carry no host, so they fall back to APP_URL — http://localhost:3000
+    // under test, where Secure would break sign-in.
     await persistSession(session());
     const [, , options] = jar.set.mock.calls[0]!;
     expect(options).toMatchObject({ secure: false });
+  });
+});
+
+describe("the origin the render was served at", () => {
+  it("names and secures the cookie from the domain the request arrived on", async () => {
+    /*
+     * The deployed shape, and the reason these functions read headers at all: a render on
+     * trains.schupke.io must look for the same cookie the callback wrote there, under the
+     * `__Host-` name that origin implies. Reading a configured origin instead meant a
+     * second domain looked for a cookie nobody had set on it.
+     */
+    inbound.set("x-forwarded-host", "trains.schupke.io");
+    inbound.set("x-forwarded-proto", "https");
+
+    await persistSession(session());
+
+    const [name, , options] = jar.set.mock.calls[0]!;
+    expect(name).toBe(`__Host-${SESSION_COOKIE}`);
+    expect(options).toMatchObject({ secure: true });
+
+    expect(await getSession()).toMatchObject({ accessToken: "access" });
+  });
+
+  it("does not read a cookie written for another domain", async () => {
+    // `__Host-` is host-scoped, so a session on one domain is not a session on another.
+    // The browser enforces that; this asserts the app does not paper over it.
+    store.set(SESSION_COOKIE, await sealSession(session(), SECRET));
+    inbound.set("x-forwarded-host", "trains.schupke.io");
+    inbound.set("x-forwarded-proto", "https");
+
+    expect(await getSession()).toBeNull();
+  });
+
+  it("throws when the request named an origin it will not serve", async () => {
+    /*
+     * A Server Component has no Response to return, so this is a throw rather than a 400.
+     * It is an invariant, not a branch: every path that reaches here is covered by the
+     * proxy matcher, and the proxy has already refused the same request.
+     */
+    inbound.set("x-forwarded-host", "trains.schupke.io");
+    inbound.set("x-forwarded-proto", "http");
+
+    // A cleartext public host is refused, and with no APP_URL there is nothing to fall
+    // back to. Restored in the finally so the memoised env is not left rewritten.
+    const configured = process.env.APP_URL;
+    delete process.env.APP_URL;
+    __resetEnv();
+    try {
+      await expect(getSession()).rejects.toBeInstanceOf(UnknownOriginError);
+    } finally {
+      process.env.APP_URL = configured;
+      __resetEnv();
+    }
   });
 });
 

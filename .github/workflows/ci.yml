@@ -281,7 +281,7 @@ jobs:
         run: |
           docker run --detach --name smoke --publish 3000:3000 \
             --env RAILWAY_CLIENT_ID --env RAILWAY_CLIENT_SECRET \
-            --env SESSION_SECRET --env APP_URL \
+            --env SESSION_SECRET \
             railway-freight-loader:ci
           ready=0
           for _ in $(seq 1 30); do

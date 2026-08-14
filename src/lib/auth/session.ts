@@ -1,5 +1,6 @@
 import { EncryptJWT, jwtDecrypt } from "jose";
 import { SESSION } from "@/lib/constants";
+import { isSecureOrigin, type AppOrigin } from "@/lib/origin";
 
 export const SESSION_COOKIE = "rc_session";
 export const PKCE_COOKIE = "rc_pkce";
@@ -24,9 +25,15 @@ export const CONSENT_PARAM = "consent";
  * than depend on how each browser resolves that contradiction, the name follows the
  * origin: dev, the E2E fixture on http://localhost:3100 and Lighthouse keep the
  * unprefixed names and behave exactly as before.
+ *
+ * `AppOrigin` rather than `string`, throughout this file, because the origin now comes
+ * from a request header. A plain string parameter accepted the raw header and answered
+ * "not https" for it, which drops this prefix and clears `secure` below — a session
+ * downgraded in silence, with the compiler and both http-based test tiers agreeing it was
+ * fine. Only lib/origin.ts mints the branded type, and only after validating it.
  */
-function hostCookieName(base: string, appUrl: string): string {
-  return appUrl.startsWith("https://") ? `__Host-${base}` : base;
+function hostCookieName(base: string, origin: AppOrigin): string {
+  return isSecureOrigin(origin) ? `__Host-${base}` : base;
 }
 
 /**
@@ -36,8 +43,8 @@ function hostCookieName(base: string, appUrl: string): string {
  * prevents it: state and PKCE guard only the callback, and this path skips the callback
  * entirely.
  */
-export function sessionCookieName(appUrl: string): string {
-  return hostCookieName(SESSION_COOKIE, appUrl);
+export function sessionCookieName(origin: AppOrigin): string {
+  return hostCookieName(SESSION_COOKIE, origin);
 }
 
 /**
@@ -51,11 +58,11 @@ export function sessionCookieName(appUrl: string): string {
  * the public suffix list blunts it on railway.app itself, but neither is a reason for
  * the two halves of one flow to be protected differently.
  */
-export function transientCookieNames(appUrl: string) {
+export function transientCookieNames(origin: AppOrigin) {
   return {
-    pkce: hostCookieName(PKCE_COOKIE, appUrl),
-    state: hostCookieName(STATE_COOKIE, appUrl),
-    consent: hostCookieName(CONSENT_COOKIE, appUrl),
+    pkce: hostCookieName(PKCE_COOKIE, origin),
+    state: hostCookieName(STATE_COOKIE, origin),
+    consent: hostCookieName(CONSENT_COOKIE, origin),
   };
 }
 
@@ -164,10 +171,10 @@ export function isExpiring(
  * requires — see sessionCookieName. Adding a `domain` here would make the browser
  * silently reject the cookie in production, which presents as an endless sign-in loop.
  */
-export function cookieOptions(appUrl: string) {
+export function cookieOptions(origin: AppOrigin) {
   return {
     httpOnly: true,
-    secure: appUrl.startsWith("https://"),
+    secure: isSecureOrigin(origin),
     sameSite: "lax" as const,
     path: "/",
   };
@@ -199,6 +206,6 @@ type CookieJar = {
  * Expressed as a `set` with the same options the cookie was written with, which is the
  * only form that cannot drift from them.
  */
-export function clearCookie(jar: CookieJar, name: string, appUrl: string): void {
-  jar.set(name, "", { ...cookieOptions(appUrl), maxAge: 0 });
+export function clearCookie(jar: CookieJar, name: string, origin: AppOrigin): void {
+  jar.set(name, "", { ...cookieOptions(origin), maxAge: 0 });
 }

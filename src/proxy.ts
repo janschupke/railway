@@ -10,6 +10,7 @@ import {
   sessionCookieName,
 } from "@/lib/auth/session";
 import { refreshSession } from "@/lib/auth/refresh";
+import { isSecureOrigin, resolveOrigin } from "@/lib/origin";
 import { contentSecurityPolicy, generateNonce } from "@/lib/security-headers";
 import { log } from "@/lib/logger";
 import { newRequestId } from "@/lib/log/context";
@@ -58,8 +59,44 @@ export async function proxy(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
 
-  const { SESSION_SECRET, APP_URL } = readEnv();
-  const cookieName = sessionCookieName(APP_URL);
+  const config = readEnv();
+  const { SESSION_SECRET } = config;
+
+  /*
+   * Minted here, never adopted from the request.
+   *
+   * The proxy and the render are separate invocations — Next prescribes headers as the
+   * channel between them, which is the same mechanism the nonce already rides. Taking a
+   * client-supplied value instead would put attacker-chosen bytes into a field operators
+   * grep, give Loki an unbounded label, and let a caller stitch its requests onto someone
+   * else's chain. `headers.set` below overwrites any inbound value unconditionally.
+   */
+  const requestId = newRequestId();
+
+  /*
+   * The origin this request arrived at, which every cookie and CSP decision below reads.
+   *
+   * Not `request.url`: behind Railway's proxy that is the container's own address, which
+   * is measured and documented in app/redirect-origin.test.ts. The headers carry the real
+   * one; lib/origin.ts is what decides whether to believe them.
+   *
+   * The record names a bounded reason and never the host. The host is whatever the caller
+   * wrote, so logging it would let anyone who can provoke this line choose the value an
+   * operator greps — the same rule the rejected deploymentId already follows. `absent` is
+   * a caller that sent no Host at all, which is not a browser and not worth a warning.
+   */
+  const { origin, refused } = resolveOrigin(request.headers, config);
+  if (refused) {
+    log[refused === "absent" ? "debug" : "warn"]("request.origin_rejected", {
+      request_id: requestId,
+      reason: refused,
+      path: pathname,
+      fell_back: origin !== null,
+    });
+  }
+  if (!origin) return new NextResponse("Bad Request", { status: 400 });
+
+  const cookieName = sessionCookieName(origin);
 
   /*
    * The nonce has to reach two places: Next's own injected inline scripts, and the
@@ -77,20 +114,9 @@ export async function proxy(request: NextRequest) {
    */
   const nonce = generateNonce();
   const csp = contentSecurityPolicy(nonce, {
-    https: APP_URL.startsWith("https://"),
+    https: isSecureOrigin(origin),
     dev: process.env.NODE_ENV !== "production",
   });
-
-  /*
-   * Minted here, never adopted from the request.
-   *
-   * The proxy and the render are separate invocations — Next prescribes headers as the
-   * channel between them, which is the same mechanism the nonce already rides. Taking a
-   * client-supplied value instead would put attacker-chosen bytes into a field operators
-   * grep, give Loki an unbounded label, and let a caller stitch its requests onto someone
-   * else's chain. `headers.set` below overwrites any inbound value unconditionally.
-   */
-  const requestId = newRequestId();
 
   /*
    * Snapshotted at call time, not once up front: the refresh branch mutates
@@ -151,7 +177,7 @@ export async function proxy(request: NextRequest) {
     const response = proceed();
     // ...and on the response so the browser keeps it.
     response.cookies.set(cookieName, sealed, {
-      ...cookieOptions(APP_URL),
+      ...cookieOptions(origin),
       maxAge: SESSION.MAX_AGE_SECONDS,
     });
     return withCsp(response);
@@ -211,7 +237,7 @@ export async function proxy(request: NextRequest) {
       ? new URL("/?error=session_expired", request.url)
       : request.url;
     const response = isProtected ? NextResponse.redirect(target) : proceed();
-    clearCookie(response.cookies, cookieName, APP_URL);
+    clearCookie(response.cookies, cookieName, origin);
     return withCsp(response);
   }
 }

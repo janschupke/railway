@@ -22,13 +22,34 @@ const SECRET = process.env.SESSION_SECRET!;
 function request(
   query: string,
   cookies: Record<string, string> = { [PKCE_COOKIE]: "verifier", [STATE_COOKIE]: "st" },
+  headers?: Record<string, string>,
 ) {
   const req = new NextRequest(
     new URL(`/api/auth/callback${query}`, "http://localhost:3000"),
+    headers ? { headers } : undefined,
   );
   for (const [name, value] of Object.entries(cookies)) req.cookies.set(name, value);
   return req;
 }
+
+/**
+ * What Railway's edge puts in front of a request to the deployed app.
+ *
+ * A bare `new Request(url)` carries no Host, so every case that omits these exercises the
+ * APP_URL fallback — http://localhost:3000 under test — rather than the path a browser
+ * takes. The cases that set it must seed the transient cookies under their `__Host-`
+ * names, because that is what the handler looks for on an https origin. That coupling is
+ * the behaviour, not an inconvenience: it is what stops a callback landing on one domain
+ * from completing a flow started on another.
+ */
+const deployed = {
+  "x-forwarded-host": "trains.schupke.io",
+  "x-forwarded-proto": "https",
+};
+const prefixedTransients = {
+  [`__Host-${PKCE_COOKIE}`]: "verifier",
+  [`__Host-${STATE_COOKIE}`]: "st",
+};
 
 const tokens = (over: Record<string, unknown> = {}) => ({
   access_token: "access",
@@ -87,9 +108,12 @@ describe("GET /api/auth/callback", () => {
     );
   });
 
-  it("rebuilds the callback URL from APP_URL, not the proxied request host", async () => {
-    // Behind Railway's proxy the incoming URL carries an internal host, which would
-    // not match the registered redirect_uri.
+  it("rebuilds the callback URL from the origin, not from the proxied request URL", async () => {
+    /*
+     * Behind Railway's proxy `request.url` carries the container's internal host, which
+     * would not match the redirect_uri the login route sent. This request names no host,
+     * so the origin is the APP_URL fallback.
+     */
     await GET(request("?code=abc&state=st"));
 
     const currentUrl = authorizationCodeGrant.mock.calls[0]?.[1] as URL;
@@ -284,5 +308,92 @@ describe("GET /api/auth/callback", () => {
     const now = Math.floor(Date.now() / 1000);
     expect(session!.expiresAt).toBeGreaterThan(now + 3500);
     expect(session!.expiresAt).toBeLessThanOrEqual(now + 3600);
+  });
+});
+
+describe("the domain the callback arrived on", () => {
+  it("completes the flow on that domain, cookies and all", async () => {
+    const response = await GET(
+      request("?code=abc&state=st", prefixedTransients, deployed),
+    );
+
+    // The exchange is verified against the same redirect_uri the login route sent, which
+    // is what openid-client compares and what Railway has registered.
+    const currentUrl = authorizationCodeGrant.mock.calls[0]?.[1] as URL;
+    expect(currentUrl.href).toBe(
+      "https://trains.schupke.io/api/auth/callback?code=abc&state=st",
+    );
+
+    // …and the browser lands on the domain it started from, holding a cookie scoped to it.
+    expect(response.headers.get("location")).toBe(
+      "https://trains.schupke.io/dashboard",
+    );
+    const cookie = response.cookies.get(`__Host-${SESSION_COOKIE}`);
+    expect(cookie?.secure).toBe(true);
+    expect(await openSession(cookie?.value, SECRET)).toMatchObject({
+      accessToken: "access",
+    });
+  });
+
+  it("sends a failure back to the same domain", async () => {
+    // Every exit from this handler, not just the happy one: a redirect to `/?error=` on
+    // the wrong origin is the same bug wearing a different status.
+    const response = await GET(
+      request("?error=access_denied&state=st", prefixedTransients, deployed),
+    );
+
+    expect(new URL(response.headers.get("location")!).origin).toBe(
+      "https://trains.schupke.io",
+    );
+  });
+
+  it("retries consent on the same domain", async () => {
+    authorizationCodeGrant.mockResolvedValue(tokens({ refresh_token: undefined }));
+
+    const response = await GET(
+      request("?code=abc&state=st", prefixedTransients, deployed),
+    );
+
+    // This is the redirect that shipped `https://localhost:8080/api/auth/login?consent=1`
+    // to a real browser, which is what started all of this.
+    expect(response.headers.get("location")).toBe(
+      "https://trains.schupke.io/api/auth/login?consent=1",
+    );
+  });
+
+  it("prefers x-forwarded-host over host", async () => {
+    const response = await GET(
+      request("?code=abc&state=st", prefixedTransients, {
+        host: "container.railway.internal",
+        ...deployed,
+      }),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://trains.schupke.io/dashboard",
+    );
+  });
+
+  it("falls back rather than honouring a cleartext scheme on a public host", async () => {
+    /*
+     * One header would otherwise strip Secure off the session cookie and drop the
+     * `__Host-` prefix. Refusing means this request is served as the fallback origin —
+     * where the unprefixed transients are the ones it looks for, so it does not even get
+     * as far as the exchange.
+     */
+    const response = await GET(
+      request("?code=abc&state=st", prefixedTransients, {
+        "x-forwarded-host": "trains.schupke.io",
+        "x-forwarded-proto": "http",
+      }),
+    );
+
+    expect(new URL(response.headers.get("location")!).origin).toBe(
+      "http://localhost:3000",
+    );
+    expect(errorParam(response)).toBe("missing_pkce_state");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({ msg: "auth.origin_rejected", reason: "insecure" }),
+    );
   });
 });

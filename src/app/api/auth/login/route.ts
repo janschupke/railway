@@ -1,6 +1,7 @@
 import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
-import { callbackUrl, env } from "@/env";
+import { callbackUrl } from "@/lib/origin";
+import { badOrigin, requestOrigin } from "@/lib/auth/request-origin";
 import { SCOPES, oidcConfig } from "@/lib/auth/oidc";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
@@ -28,7 +29,15 @@ export async function GET(request: NextRequest) {
 }
 
 async function start(request: NextRequest) {
-  const { APP_URL } = env();
+  /*
+   * The origin this request arrived at, which is the one the whole flow is conducted
+   * against: the redirect_uri sent to Railway, the cookies that guard the callback, and
+   * the callback's own address. It must be registered on the Railway OAuth app, so a
+   * domain nobody registered fails at the provider rather than here.
+   */
+  const origin = requestOrigin(request);
+  if (!origin) return badOrigin();
+
   const forceConsent = request.nextUrl.searchParams.get(CONSENT_PARAM) === "1";
 
   const codeVerifier = client.randomPKCECodeVerifier();
@@ -36,7 +45,7 @@ async function start(request: NextRequest) {
   const state = client.randomState();
 
   const authorizationUrl = client.buildAuthorizationUrl(oidcConfig(), {
-    redirect_uri: callbackUrl(),
+    redirect_uri: callbackUrl(origin),
     scope: SCOPES.join(" "),
     state,
     code_challenge: codeChallenge,
@@ -52,16 +61,16 @@ async function start(request: NextRequest) {
 
   const response = NextResponse.redirect(authorizationUrl.href);
   const opts = {
-    ...cookieOptions(APP_URL),
+    ...cookieOptions(origin),
     maxAge: SESSION.TRANSIENT_MAX_AGE_SECONDS,
   };
-  const names = transientCookieNames(APP_URL);
+  const names = transientCookieNames(origin);
   response.cookies.set(names.pkce, codeVerifier, opts);
   response.cookies.set(names.state, state, opts);
 
   // Records which kind of attempt this is, so the callback's retry cannot become a loop.
   if (forceConsent) response.cookies.set(names.consent, "1", opts);
-  else clearCookie(response.cookies, names.consent, APP_URL);
+  else clearCookie(response.cookies, names.consent, origin);
 
   // debug: no identity is known yet and it is one redirect. It earns its place only as
   // the denominator for an abandoned-sign-in rate, which is not an every-deploy question.

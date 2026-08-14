@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION } from "@/lib/constants";
+import { logRecords, rawLogLines } from "@/test/log-capture";
 import {
   openSession,
   sealSession,
@@ -29,13 +30,32 @@ const session = (over: Partial<RailwaySession> = {}): RailwaySession => ({
   ...over,
 });
 
-async function request(path: string, sessionValue?: RailwaySession) {
-  const req = new NextRequest(new URL(path, "http://localhost:3000"));
+async function request(
+  path: string,
+  sessionValue?: RailwaySession,
+  headers?: Record<string, string>,
+) {
+  const req = new NextRequest(
+    new URL(path, "http://localhost:3000"),
+    headers ? { headers } : undefined,
+  );
   if (sessionValue) {
     req.cookies.set(SESSION_COOKIE, await sealSession(sessionValue, SECRET));
   }
   return req;
 }
+
+/**
+ * What Railway's edge puts in front of a request to the deployed app.
+ *
+ * A bare `new Request(url)` carries no Host, so every case that omits these is served as
+ * the APP_URL fallback — http://localhost:3000 under test, where the cookie names are
+ * unprefixed and `secure` is off.
+ */
+const deployed = {
+  "x-forwarded-host": "trains.schupke.io",
+  "x-forwarded-proto": "https",
+};
 
 // Braces matter: mockReset() returns the mock, and a beforeEach hook that returns a
 // function has that function invoked as teardown — calling the mock a second time.
@@ -167,6 +187,69 @@ describe("proxy", () => {
 
     expect(response.status).toBe(307);
     expect(refreshSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("the origin the request arrived at", () => {
+  it("reads and writes the cookie the served domain implies", async () => {
+    /*
+     * The proxy is the only refresh writer, so if it names the cookie from a configured
+     * origin rather than the served one it looks for a session nobody set and rewrites it
+     * under a name the browser will reject. Both halves are here: the sealed cookie is
+     * presented under the `__Host-` name, and the refreshed one goes back under it.
+     */
+    const req = await request("/dashboard", undefined, deployed);
+    req.cookies.set(
+      `__Host-${SESSION_COOKIE}`,
+      await sealSession(session({ expiresAt: now() + 10 }), SECRET),
+    );
+    refreshSession.mockResolvedValue(session({ accessToken: "fresh" }));
+
+    const response = await proxy(req);
+
+    const written = response.cookies.get(`__Host-${SESSION_COOKIE}`);
+    expect(written?.secure).toBe(true);
+    expect(await openSession(written?.value, SECRET)).toMatchObject({
+      accessToken: "fresh",
+    });
+  });
+
+  it("upgrades the policy on an https origin and not on a loopback one", async () => {
+    // Derived from the request's own scheme now, which makes the directive a second,
+    // independent readout of what origin this response was built for.
+    const secure = await proxy(await request("/", session(), deployed));
+    expect(secure.headers.get("content-security-policy")).toContain(
+      "upgrade-insecure-requests",
+    );
+
+    const local = await proxy(await request("/", session()));
+    expect(local.headers.get("content-security-policy")).not.toContain(
+      "upgrade-insecure-requests",
+    );
+  });
+
+  it("refuses a cleartext scheme on a public host, and names no host in the record", async () => {
+    /*
+     * Falls back to APP_URL here, because the test environment declares one. The 400 path
+     * is the deployment that declares none — see routes.integration.test.ts, where the
+     * auth routes take the same refusal.
+     */
+    const response = await proxy(
+      await request("/", session(), {
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "http",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(rawLogLines().join("")).not.toContain("evil.example");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "request.origin_rejected",
+        reason: "insecure",
+        fell_back: true,
+      }),
+    );
   });
 });
 

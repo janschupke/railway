@@ -65,6 +65,15 @@ on any path**, which is what lets the edit form show an existing variable as a n
 empty cell, and what keeps the e2e assertion that a minted credential never appears in page
 content true after this feature as it was before it.
 
+**A ninth reaches no Railway call at all and decides what this app says about itself**: the
+`Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` headers, from which `src/lib/origin.ts`
+derives the origin this request is served at. It is bounded three ways before anything reads
+it — the parse must round-trip to exactly the host it was given, with no path, credentials
+or query attached; the resulting origin must be https unless the host is loopback; and
+`APP_ORIGINS`, when set, must name it. Anything refused falls back to `APP_URL`, or is
+answered 400 when nothing declares one. The accepted-risks section states why the default is
+to believe an otherwise-valid host.
+
 Two lesser consequences of the same read, both deliberate. Shared environment variables are
 filtered out, because a service cannot delete one and offering the row would promise
 otherwise. And ownership is _not_ re-derived on this route, unlike every mutation: the
@@ -412,6 +421,28 @@ far narrower than the name check they replaced — which was not a lock at all. 
 reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm lighthouse`.
 `pnpm audit --prod` is clean, and that is what CI gates on. Reviewed 2026-08-12.
 
+**The app trusts the host its proxy reports.** The origin it serves — the OIDC
+`redirect_uri`, every redirect, the cookie name and `secure` flag, the logout CSRF
+comparison, the CSP — is derived per request from `x-forwarded-host` else `host`
+(`src/lib/origin.ts`). Anyone who can reach the container directly can write those headers.
+Four things make that acceptable here, each checkable:
+
+- **A spoofed origin cannot receive an authorization code.** Railway's OAuth app enforces
+  its registered `redirect_uri`s, so an unregistered one is refused at the provider.
+- **A spoofed host plants a cookie only in the spoofer's own browser.** The cookies carry
+  the `__Host-` prefix, which is host-scoped by definition.
+- **There is no shared cache** in front of this app for a poisoned absolute URL to persist
+  in.
+- **There is no email, magic-link or notification path** that could carry a spoofed origin
+  to somebody else. The only flow is the OAuth round trip.
+
+Two rules bound it further: an origin must be https unless the host is loopback, so a
+forwarded `http` scheme is refused rather than allowed to strip `Secure`; and `APP_ORIGINS`,
+when set, is an allowlist that refuses anything not on it. The default is open because that
+is what lets a new custom domain work with no configuration — see ADR-13. A refusal records
+a bounded reason and never the host, for the same reason the rejected `deploymentId` is
+kept out of the log; the configured allowlist is on the `boot` line instead.
+
 **Unfixed CVEs in the deployment image are not gated.** Trivy runs with
 `--ignore-unfixed`, so an advisory against the Alpine base with no patched version
 available does not fail the build. The reasoning is the one `--prod` makes about
@@ -425,10 +456,17 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
 - **Deploying the `__Host-` cookie change invalidates every existing production session
   once.** That is deliberate — accepting the old unprefixed name as a fallback would
   defeat the point of the prefix. Users sign in again; nothing else is affected.
-- **`APP_URL` must be https** anywhere but loopback, and the app now refuses to start
-  otherwise. That single variable decides `secure` on the session cookie _and_ whether
-  the `__Host-` prefix applies, so an http value silently downgraded the session to a
-  cleartext cookie.
+- **The served origin must be https** anywhere but loopback. It decides `secure` on the
+  session cookie _and_ whether the `__Host-` prefix applies, so an http origin silently
+  downgrades the session to a cleartext, unprefixed cookie. `APP_URL` is refused at boot if
+  it says otherwise, and a forwarded `x-forwarded-proto: http` on a public host is refused
+  per request.
+- **Sessions are per domain.** `__Host-` binds a cookie to one origin, so a user signing in
+  on `trains.schupke.io` is not signed in on the generated `*.up.railway.app` domain. That
+  is the prefix working, not a defect.
+- **Every domain the app is reached on needs its own `/api/auth/callback`** registered on
+  the Railway OAuth app. Sign-in follows the domain the request arrived at, so an
+  unregistered one is rejected by Railway with its own error rather than by this app.
 - **Incident ids** are 8 hex characters and appear in the UI as "Reference abc12345".
   They are now a first-class `incident` field, so `jq 'select(.incident=="abc12345")'`
   works as well as `grep`.

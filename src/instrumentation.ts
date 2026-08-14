@@ -59,8 +59,16 @@ export function register(): void {
     hostname: process.env.HOSTNAME ?? "0.0.0.0",
   };
 
+  let allowedOrigins: readonly string[];
   try {
-    env();
+    /*
+     * The allowlist is on this line because the refusal path cannot carry it: a rejected
+     * host is caller input and is never logged, so `request.origin_rejected` says
+     * `not_allowlisted` and nothing else. This is where the other half of that question is
+     * answered. Operator-supplied and bounded, so it is configuration rather than input.
+     * Empty is the default and means any host the edge reports.
+     */
+    allowedOrigins = env().APP_ORIGINS;
   } catch (error) {
     /*
      * The issue list names every variable that is missing or malformed — the same detail
@@ -74,7 +82,12 @@ export function register(): void {
     return;
   }
 
-  log.info("boot", listening);
+  // Joined rather than nested, because a log field is a scalar — see LogFields. `any` is
+  // the unset case spelled out: this app answers whatever host the edge reports.
+  log.info("boot", {
+    ...listening,
+    allowed_origins: allowedOrigins.length > 0 ? allowedOrigins.join(",") : "any",
+  });
 }
 
 /**

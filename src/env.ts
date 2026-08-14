@@ -1,27 +1,22 @@
 import { z } from "zod";
+import { isLoopbackHost, isSecureOrLocal } from "@/lib/origin";
 
 /**
- * Railway injects RAILWAY_PUBLIC_DOMAIN into every deployment, so the app can
- * derive its own origin in production and only needs APP_URL set locally.
+ * The origin to use when a request did not carry a usable one.
+ *
+ * Not the app's origin — that comes from the request now, see src/lib/origin.ts. This is
+ * the operator's explicit override and the floor under a caller that sent no Host at all.
+ * Railway injects RAILWAY_PUBLIC_DOMAIN once a service has a public domain, which makes it
+ * a serviceable fallback, but it names the *generated* domain even on a service that also
+ * has a custom one — which is exactly why it is no longer what the app derives its origin
+ * from.
  */
-function inferredAppUrl(): string | undefined {
+function fallbackOrigin(): string | undefined {
   if (process.env.APP_URL) return process.env.APP_URL;
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
     return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
   }
   return undefined;
-}
-
-/** Loopback is the only origin allowed to serve this app over plain http. */
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
-
-function isSecureOrLocal(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || LOCAL_HOSTS.has(url.hostname);
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -35,7 +30,7 @@ function isSecureOrLocal(value: string): boolean {
 function isWebSocketSecureOrLocal(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "wss:" || LOCAL_HOSTS.has(url.hostname);
+    return url.protocol === "wss:" || isLoopbackHost(url.hostname);
   } catch {
     return false;
   }
@@ -60,32 +55,53 @@ export const schema = z.object({
   /** Any high-entropy string; the AES key is derived from it via HKDF. */
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 chars"),
   /**
-   * https, unless it is loopback.
+   * Optional. The app serves whatever domain the request arrived on — see lib/origin.ts.
    *
-   * Every cookie decision reads this string: `secure` is derived from it, and so is
-   * whether the session cookie carries the `__Host-` prefix. So an APP_URL that says
-   * http silently downgrades the session to a cleartext, unprefixed cookie — one
-   * variable away from shipping Railway tokens in the clear, with nothing to warn you.
+   * Set it only to override that, and it is what a request carrying no usable Host falls
+   * back to. It used to be required, and the long error it carried named
+   * RAILWAY_PUBLIC_DOMAIN and told the operator to generate a public domain, because a
+   * service without one could not parse its environment and answered its healthcheck with
+   * 503. That failure no longer exists — a service with no domain now boots and serves —
+   * and the message is deleted rather than reworded, so nothing invites it back.
    *
-   * Gated on the host rather than NODE_ENV on purpose: Playwright and serve-e2e both
-   * run NODE_ENV=production against http://localhost:3100.
-   */
-  /*
-   * The message names RAILWAY_PUBLIC_DOMAIN because APP_URL is the one field nobody sets
-   * directly in production — inferredAppUrl derives it — so "APP_URL must be an absolute
-   * URL" sent an operator looking for a variable they were right not to have set. Railway
-   * injects RAILWAY_PUBLIC_DOMAIN only once the service has a public domain, which a new
-   * service does not until someone generates one, and until then this is the whole reason
-   * a correctly-built deployment fails its healthcheck.
+   * Still https unless it is loopback, for the reason lib/origin.ts gives at
+   * isSecureOrLocal: every cookie decision reads the origin, so an http one silently
+   * downgrades the session to a cleartext, unprefixed cookie.
    */
   APP_URL: z
-    .url(
-      "APP_URL is not set and could not be derived. On Railway it comes from " +
-        "RAILWAY_PUBLIC_DOMAIN, which is injected only once the service has a public " +
-        "domain: generate one under Settings > Networking, or set APP_URL explicitly " +
-        "to the origin this app is reached at.",
+    .url("APP_URL must be an absolute URL, e.g. https://trains.schupke.io")
+    .refine(isSecureOrLocal, "APP_URL must use https unless it points at localhost")
+    .optional(),
+  /**
+   * Origins the app will answer as, comma-separated. Unset means any host the edge reports.
+   *
+   * The default is open because that is what makes a new custom domain need no
+   * configuration at all: point it at the service, register its callback on the Railway
+   * OAuth app, done. lib/origin.ts records why that is defensible — a spoofed host cannot
+   * receive an authorization code, cannot plant a cookie anywhere but the spoofer's own
+   * browser, and has no cache or mail path to ride out of.
+   *
+   * Setting it does NOT implicitly allow APP_URL or RAILWAY_PUBLIC_DOMAIN. An allowlist
+   * with a hidden extra entry is not an allowlist; list the generated `*.up.railway.app`
+   * domain too if you want it to keep working.
+   *
+   * Entries are normalised through URL.origin so a trailing slash, an explicit `:443` or a
+   * capitalised host cannot make a correctly-configured domain miss.
+   */
+  APP_ORIGINS: z
+    .string()
+    .default("")
+    .transform((raw) =>
+      raw
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
     )
-    .refine(isSecureOrLocal, "APP_URL must use https unless it points at localhost"),
+    .refine(
+      (origins) => origins.every(isSecureOrLocal),
+      "APP_ORIGINS entries must be absolute origins, https unless they point at localhost",
+    )
+    .transform((origins) => origins.map((origin) => new URL(origin).origin)),
   /**
    * Services this app creates are named `<prefix><name>`. The prefix is the
    * ownership marker that gates destructive actions — see lib/railway/managed.ts.
@@ -203,9 +219,9 @@ export function env(): Env {
     ...Object.fromEntries(
       Object.keys(schema.shape).map((key) => [key, process.env[key]]),
     ),
-    // The one field not read from a variable of its own name: in production the origin
-    // comes from Railway's injected RAILWAY_PUBLIC_DOMAIN instead. See inferredAppUrl.
-    APP_URL: inferredAppUrl(),
+    // The one field not read from a variable of its own name: with APP_URL unset the
+    // fallback comes from Railway's injected RAILWAY_PUBLIC_DOMAIN. See fallbackOrigin.
+    APP_URL: fallbackOrigin(),
   });
 
   if (!parsed.success) {
@@ -217,11 +233,6 @@ export function env(): Env {
 
   cached = parsed.data;
   return cached;
-}
-
-/** Absolute callback URL. Must exactly match a redirect URI registered on the Railway OAuth app. */
-export function callbackUrl(): string {
-  return new URL("/api/auth/callback", env().APP_URL).toString();
 }
 
 /** Reset the memoised env. Tests only. */

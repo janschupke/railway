@@ -1,7 +1,8 @@
 import "server-only";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { env } from "@/env";
+import { requireOrigin } from "@/lib/origin";
 import { setSubjectId } from "@/lib/log/context";
 import { SESSION } from "@/lib/constants";
 import {
@@ -14,6 +15,22 @@ import {
 import { SessionExpiredError } from "./refresh";
 
 /**
+ * The origin this render is being served at, which decides the cookie's name.
+ *
+ * `headers()` costs nothing that is not already being paid: it opts a route into dynamic
+ * rendering exactly as the `cookies()` call beside it already does, so nothing here
+ * becomes uncacheable that was cacheable before.
+ *
+ * `requireOrigin` throws rather than returning null, and this is the one place that is the
+ * right shape: a Server Component has no Response to hand back. It is an invariant rather
+ * than a branch — every caller sits on a path the proxy matcher covers, and the proxy has
+ * already answered 400 for a request whose origin could not be resolved.
+ */
+async function servedOrigin() {
+  return requireOrigin(await headers(), env());
+}
+
+/**
  * Read the session as-is. Safe in Server Components.
  *
  * This deliberately does NOT refresh: Server Components cannot write cookies, so a
@@ -21,9 +38,9 @@ import { SessionExpiredError } from "./refresh";
  * proxy (see src/proxy.ts); this is the read side of that contract.
  */
 export async function getSession(): Promise<RailwaySession | null> {
-  const jar = await cookies();
-  const { APP_URL, SESSION_SECRET } = env();
-  return openSession(jar.get(sessionCookieName(APP_URL))?.value, SESSION_SECRET);
+  const [jar, origin] = await Promise.all([cookies(), servedOrigin()]);
+  const { SESSION_SECRET } = env();
+  return openSession(jar.get(sessionCookieName(origin))?.value, SESSION_SECRET);
 }
 
 /**
@@ -35,10 +52,10 @@ export async function getSession(): Promise<RailwaySession | null> {
  * for `sealSession` and the cookie name itself.
  */
 export async function persistSession(session: RailwaySession): Promise<void> {
-  const jar = await cookies();
-  const { APP_URL, SESSION_SECRET } = env();
-  jar.set(sessionCookieName(APP_URL), await sealSession(session, SESSION_SECRET), {
-    ...cookieOptions(APP_URL),
+  const [jar, origin] = await Promise.all([cookies(), servedOrigin()]);
+  const { SESSION_SECRET } = env();
+  jar.set(sessionCookieName(origin), await sealSession(session, SESSION_SECRET), {
+    ...cookieOptions(origin),
     maxAge: SESSION.MAX_AGE_SECONDS,
   });
 }

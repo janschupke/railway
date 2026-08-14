@@ -88,6 +88,16 @@ export default defineConfig({
         PORT: String(APP_PORT),
         HOSTNAME: "::",
         APP_URL,
+        /*
+         * Both loopback spellings of the same listener, which is what makes
+         * multi-domain.spec.ts a real test rather than a shape: 127.0.0.1 is a second
+         * origin to the browser and to this app, and listing it means the spoof case there
+         * is refused by the allowlist rather than merely unregistered somewhere.
+         *
+         * Production leaves this unset — any host the edge reports — which is covered at
+         * the unit tier in src/lib/origin.test.ts.
+         */
+        APP_ORIGINS: `${APP_URL},http://127.0.0.1:${APP_PORT}`,
         RAILWAY_CLIENT_ID: "e2e-client",
         RAILWAY_CLIENT_SECRET: "e2e-secret",
         SESSION_SECRET: "e2e-session-secret-at-least-32-characters",

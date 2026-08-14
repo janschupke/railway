@@ -201,6 +201,14 @@ export type LogEvent =
   | "boot"
   | "boot.env_invalid"
   | "auth.logout.rejected"
+  /*
+   * The two halves of one rule, kept as separate names because they answer different
+   * questions: `auth.` is a request to a route the proxy matcher excludes, so a burst of
+   * those is somebody probing the sign-in flow, while `request.` is every other path.
+   * Neither ever carries the host it refused — see lib/origin.ts.
+   */
+  | "auth.origin_rejected"
+  | "request.origin_rejected"
   | "auth.redirect.anonymous"
   | "auth.session.cleared"
   | "auth.session.created"

@@ -191,15 +191,16 @@ defaults to empty, so a local `docker build` is unaffected.
 The service needs three variables: `RAILWAY_CLIENT_ID`, `RAILWAY_CLIENT_SECRET`, and a
 `SESSION_SECRET` of at least 32 characters.
 
-**And a public domain.** `APP_URL` is the fourth required field and nobody sets it in
-production — it is derived from `RAILWAY_PUBLIC_DOMAIN`, which Railway injects only once
-the service _has_ a domain, not on every deployment. A new service has neither, so `env()`
-fails, `/api/health` answers 503 by design, and the platform reports **"Healthcheck
-failure"** with nothing about a missing variable in it. Generate a domain under Settings →
-Networking, or set `APP_URL` explicitly. The schema message names `RAILWAY_PUBLIC_DOMAIN`
-for this reason, and `boot.env_invalid` puts it in the deploy log before the first request.
+**Three, and no fourth.** A public domain is what makes the service reachable, not what
+makes it boot: the app serves whatever domain each request arrived on, so there is no
+origin to configure and a service without a domain comes up and answers its healthcheck.
+It used to be otherwise — `APP_URL` was required, derived from `RAILWAY_PUBLIC_DOMAIN`,
+which Railway injects only once the service _has_ a domain — and the symptom was a
+correctly-built deploy reported as **"Healthcheck failure"** with nothing about a missing
+variable in it. Generate a domain under Settings → Networking to reach the app; register
+its `/api/auth/callback` on the OAuth app to sign in on it. See ADR-13.
 
-The build sets a placeholder for those four inline on the `pnpm build` command, so nothing
+The build sets a placeholder for those three inline on the `pnpm build` command, so nothing
 outside can override them and no image layer records them — the same rule `ci.yml` states,
 enforced rather than restated.
 
@@ -225,7 +226,9 @@ else.
 The Dockerfile is not chosen for control alone. It can be built and run on a laptop, so a
 deployment change is testable before it is a deployment: `docker build -t rw . && docker
 run --rm -p 3000:3000 -e SESSION_SECRET=… -e RAILWAY_CLIENT_ID=… -e
-RAILWAY_CLIENT_SECRET=… -e RAILWAY_PUBLIC_DOMAIN=… rw`. Two guesses at builder
+RAILWAY_CLIENT_SECRET=… rw`. It needs no origin variable, and a `curl -H 'Host: …' -H
+'X-Forwarded-Proto: https'` against `/api/auth/login` reads the origin it derived straight
+out of the `redirect_uri`. Two guesses at builder
 configuration went out untested before this one did not. That property is why the CI
 scanners are `docker run` commands rather than actions — every gate on this file can be
 reproduced locally, byte for byte.
@@ -258,8 +261,7 @@ docker run --rm -i ghcr.io/hadolint/hadolint@sha256:a1d49ae1… \
   hadolint --failure-threshold info --ignore DL3059 --ignore DL3066 - < Dockerfile
 docker build -t rw . && docker run --rm -d --name rw -p 3000:3000 \
   -e RAILWAY_CLIENT_ID=x -e RAILWAY_CLIENT_SECRET=y \
-  -e SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  -e APP_URL=http://localhost:3000 rw
+  -e SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa rw
 docker save rw -o /tmp/rw.tar && docker run --rm -v /tmp:/w -w /w \
   ghcr.io/aquasecurity/trivy@sha256:7cced7ca… image --input rw.tar \
   --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1

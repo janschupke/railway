@@ -37,6 +37,17 @@ const url = (path: string) => new URL(path, "http://localhost:3000");
 const request = (path: string, headers?: Record<string, string>) =>
   new NextRequest(url(path), headers ? { headers } : undefined);
 
+/**
+ * What Railway's edge puts in front of a request to the deployed app.
+ *
+ * A bare `new Request(url)` carries no Host at all, so every case that omits these is
+ * exercising the APP_URL fallback rather than the path a browser takes.
+ */
+const deployed = {
+  "x-forwarded-host": "trains.schupke.io",
+  "x-forwarded-proto": "https",
+};
+
 beforeEach(() => {
   requireSession.mockReset().mockResolvedValue(session);
   monitorDeployment.mockReset();
@@ -137,10 +148,66 @@ describe("GET /api/auth/login", () => {
   });
 
   it("points the redirect_uri at this app's callback", async () => {
+    // A bare Request carries no Host, so this is the APP_URL fallback — the same shape a
+    // deployment takes when nothing forwards a host. The forwarded case is below.
     const response = await login(request("/api/auth/login"));
     expect(
       new URL(response.headers.get("location")!).searchParams.get("redirect_uri"),
     ).toBe("http://localhost:3000/api/auth/callback");
+  });
+
+  it("follows the domain the request arrived on", async () => {
+    /*
+     * The bug this whole mechanism exists for. With one configured origin, a sign-in
+     * started on a custom domain sent the browser to the generated *.up.railway.app one
+     * and the flow ended somewhere the user had not been.
+     */
+    const response = await login(request("/api/auth/login", deployed));
+
+    expect(
+      new URL(response.headers.get("location")!).searchParams.get("redirect_uri"),
+    ).toBe("https://trains.schupke.io/api/auth/callback");
+  });
+
+  it("prefixes and secures the sign-in cookies on an https origin", async () => {
+    // The cookie names follow the same origin the redirect_uri does, which is what makes
+    // the callback able to find them again on that domain and nowhere else.
+    const response = await login(request("/api/auth/login", deployed));
+
+    expect(response.cookies.get(`__Host-${PKCE_COOKIE}`)?.secure).toBe(true);
+    expect(response.cookies.get(`__Host-${STATE_COOKIE}`)?.value).toBeTruthy();
+    expect(response.cookies.get(PKCE_COOKIE)).toBeUndefined();
+  });
+
+  it("refuses a domain the allowlist does not name", async () => {
+    /*
+     * The lockdown path: with APP_ORIGINS set and no APP_URL to fall back to, a host
+     * nobody configured gets a 400 rather than a sign-in conducted against it.
+     */
+    vi.stubEnv("APP_ORIGINS", "https://trains.schupke.io");
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("RAILWAY_PUBLIC_DOMAIN", "");
+    __resetEnv();
+
+    const response = await login(
+      request("/api/auth/login", {
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    // Bounded reason, and never the host: it is whatever the caller wrote.
+    expect(rawLogLines().join("")).not.toContain("evil.example");
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        msg: "auth.origin_rejected",
+        reason: "not_allowlisted",
+        fell_back: false,
+      }),
+    );
+
+    __resetEnv();
   });
 });
 
@@ -186,6 +253,43 @@ describe("POST /api/auth/logout", () => {
 
   it("refuses a request that identifies itself with neither header", async () => {
     expect((await logout(request("/api/auth/logout"))).status).toBe(403);
+  });
+
+  it("accepts a sign-out on a second domain, and sends it home to that one", async () => {
+    /*
+     * This used to be a 403. The CSRF check compared Origin against the one configured
+     * APP_URL, so a legitimate sign-out on any other domain the app served was rejected as
+     * cross-site. It is now compared against the origin the request arrived at, which is a
+     * different value per request and cannot be set by a cross-site form.
+     */
+    const response = await logout(
+      request("/api/auth/logout", {
+        ...deployed,
+        origin: "https://trains.schupke.io",
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://trains.schupke.io/?signed_out=1",
+    );
+    // The name the browser actually holds on an https origin, cleared with Secure so the
+    // removal is not discarded — see cookie-removal.test.ts.
+    expect(response.headers.get("set-cookie")).toContain(`__Host-${SESSION_COOKIE}=;`);
+  });
+
+  it("still refuses a POST from one served domain to another", async () => {
+    // Two domains this app answers on are still two origins. Serving both is not a reason
+    // to let one act on the other's session.
+    const response = await logout(
+      request("/api/auth/logout", {
+        ...deployed,
+        origin: "https://console.up.railway.app",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("records the rejection without echoing what the caller sent", async () => {

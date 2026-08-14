@@ -1,6 +1,8 @@
 import * as client from "openid-client";
 import { NextResponse, type NextRequest } from "next/server";
-import { callbackUrl, env } from "@/env";
+import { env } from "@/env";
+import { callbackUrl, type AppOrigin } from "@/lib/origin";
+import { badOrigin, requestOrigin } from "@/lib/auth/request-origin";
 import { oidcConfig } from "@/lib/auth/oidc";
 import { classifyProviderError, describeOidcFailure } from "@/lib/auth/redact";
 import { log } from "@/lib/logger";
@@ -16,10 +18,10 @@ import {
   type RailwaySession,
 } from "@/lib/auth/session";
 
-function clearTransients<T extends NextResponse>(response: T, appUrl: string): T {
-  const names = transientCookieNames(appUrl);
+function clearTransients<T extends NextResponse>(response: T, origin: AppOrigin): T {
+  const names = transientCookieNames(origin);
   for (const name of [names.pkce, names.state, names.consent]) {
-    clearCookie(response.cookies, name, appUrl);
+    clearCookie(response.cookies, name, origin);
   }
   return response;
 }
@@ -30,16 +32,16 @@ function clearTransients<T extends NextResponse>(response: T, appUrl: string): T
  * failed exchange, a response with no `sub`, and a grant that withheld a refresh token —
  * were all silent, and one line closes all five without any chance of drifting apart.
  *
- * `appUrl` is the base, not `request.url`, for the reason given at the exchange below and
+ * `origin` is the base, not `request.url`, for the reason given at the exchange below and
  * measured on the deployed image: in a route handler `request.url` is the *internal*
- * origin, `http://localhost:<PORT>`, and the real Host and X-Forwarded-Host headers do not
- * reach it. A route handler's redirect goes out as the absolute URL it was given, so that
- * origin lands in the browser's address bar.
+ * origin, `http://localhost:<PORT>`, because Next's standalone server builds it from its
+ * own bind address. A route handler's redirect goes out as the absolute URL it was given,
+ * so that origin lands in the browser's address bar.
  */
-function fail(appUrl: string, reason: string) {
+function fail(origin: AppOrigin, reason: string) {
   log.warn("auth.callback.failed", { reason });
-  const url = new URL(`/?error=${encodeURIComponent(reason)}`, appUrl);
-  return clearTransients(NextResponse.redirect(url), appUrl);
+  const url = new URL(`/?error=${encodeURIComponent(reason)}`, origin);
+  return clearTransients(NextResponse.redirect(url), origin);
 }
 
 /**
@@ -70,13 +72,23 @@ export async function GET(request: NextRequest) {
 }
 
 async function complete(request: NextRequest) {
-  const { APP_URL, SESSION_SECRET } = env();
+  const { SESSION_SECRET } = env();
 
-  const names = transientCookieNames(APP_URL);
+  /*
+   * The same origin the login route conducted its half of the flow against — Railway sent
+   * the browser here by way of the redirect_uri that named it, and the transient cookies
+   * below were set on it. Nothing has to be carried across the round trip for that to
+   * hold: a callback arriving on some other domain finds no PKCE verifier there, because
+   * `__Host-` scopes those cookies to exactly one origin, and fails on the next line.
+   */
+  const origin = requestOrigin(request);
+  if (!origin) return badOrigin();
+
+  const names = transientCookieNames(origin);
   const codeVerifier = request.cookies.get(names.pkce)?.value;
   const expectedState = request.cookies.get(names.state)?.value;
   if (!codeVerifier || !expectedState) {
-    return fail(APP_URL, "missing_pkce_state");
+    return fail(origin, "missing_pkce_state");
   }
 
   /*
@@ -89,14 +101,15 @@ async function complete(request: NextRequest) {
    * not recognise as the same sentence, so nothing the user sees changes.
    */
   const error = request.nextUrl.searchParams.get("error");
-  if (error) return fail(APP_URL, classifyProviderError(error));
+  if (error) return fail(origin, classifyProviderError(error));
 
   /*
-   * Rebuild the callback URL from APP_URL rather than trusting request.url: behind
-   * Railway's proxy the incoming URL carries the internal host, and openid-client
-   * compares it against the registered redirect_uri.
+   * Rebuild the callback URL from the resolved origin rather than trusting request.url:
+   * behind Railway's proxy the incoming URL carries the container's internal host, and
+   * openid-client compares this against the redirect_uri the login route sent. Those two
+   * agree because both are derived from the request's own headers.
    */
-  const currentUrl = new URL(callbackUrl());
+  const currentUrl = new URL(callbackUrl(origin));
   currentUrl.search = request.nextUrl.search;
 
   const tokens = await client
@@ -109,10 +122,10 @@ async function complete(request: NextRequest) {
       return null;
     });
 
-  if (!tokens) return fail(APP_URL, "token_exchange_failed");
+  if (!tokens) return fail(origin, "token_exchange_failed");
 
   const claims = tokens.claims();
-  if (!claims?.sub) return fail(APP_URL, "missing_id_token");
+  if (!claims?.sub) return fail(origin, "missing_id_token");
 
   if (!tokens.refresh_token) {
     /*
@@ -129,14 +142,14 @@ async function complete(request: NextRequest) {
      * there is nothing left to try.
      */
     if (request.cookies.get(names.consent)?.value === "1") {
-      return fail(APP_URL, "no_refresh_token");
+      return fail(origin, "no_refresh_token");
     }
-    // APP_URL, not request.url. This is the redirect that shipped the internal origin to
-    // a real browser: a grant with no refresh token sent the user to
+    // The resolved origin, not request.url. This is the redirect that shipped the internal
+    // origin to a real browser: a grant with no refresh token sent the user to
     // https://localhost:<PORT>/api/auth/login?consent=1, which is a dead address anywhere
     // but inside the container.
-    const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, APP_URL);
-    return clearTransients(NextResponse.redirect(retry), APP_URL);
+    const retry = new URL(`/api/auth/login?${CONSENT_PARAM}=1`, origin);
+    return clearTransients(NextResponse.redirect(retry), origin);
   }
 
   const session: RailwaySession = {
@@ -165,11 +178,11 @@ async function complete(request: NextRequest) {
   });
 
   // Same base as every other exit here, for the same reason.
-  const response = NextResponse.redirect(new URL("/dashboard", APP_URL));
+  const response = NextResponse.redirect(new URL("/dashboard", origin));
   response.cookies.set(
-    sessionCookieName(APP_URL),
+    sessionCookieName(origin),
     await sealSession(session, SESSION_SECRET),
-    { ...cookieOptions(APP_URL), maxAge: SESSION.MAX_AGE_SECONDS },
+    { ...cookieOptions(origin), maxAge: SESSION.MAX_AGE_SECONDS },
   );
-  return clearTransients(response, APP_URL);
+  return clearTransients(response, origin);
 }

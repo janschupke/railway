@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SESSION } from "@/lib/constants";
+import { originFromUrl } from "@/lib/origin";
 import {
   cookieOptions,
   isExpiring,
@@ -11,6 +12,14 @@ import {
 } from "./session";
 
 const SECRET = "a-secret-that-is-at-least-32-characters";
+
+/**
+ * These functions take a validated origin, not a string, and lib/origin.ts is the only
+ * thing that mints one. Going through it here rather than casting is the point: a test
+ * that can fabricate an origin the app would have refused is not exercising the guarantee
+ * the type exists to make.
+ */
+const servedAt = (url: string) => originFromUrl(url)!;
 
 const session: RailwaySession = {
   user: { id: "user_1", name: "Ada", email: "ada@example.com" },
@@ -81,7 +90,7 @@ describe("sessionCookieName", () => {
      * plants their own session and the victim acts inside the attacker's account —
      * skipping the OIDC flow entirely, since state and PKCE only guard the callback.
      */
-    expect(sessionCookieName("https://console.up.railway.app")).toBe(
+    expect(sessionCookieName(servedAt("https://console.up.railway.app"))).toBe(
       "__Host-rc_session",
     );
   });
@@ -89,7 +98,7 @@ describe("sessionCookieName", () => {
   it("keeps the plain name on localhost, where Secure is impossible", () => {
     // The prefix requires Secure. Rather than depend on how each browser resolves that
     // over http://localhost, dev and the e2e fixture keep the unprefixed name.
-    expect(sessionCookieName("http://localhost:3100")).toBe("rc_session");
+    expect(sessionCookieName(servedAt("http://localhost:3100"))).toBe("rc_session");
   });
 });
 
@@ -136,7 +145,7 @@ describe("transientCookieNames", () => {
      * there. Smaller blast radius than a planted session, but not a reason for the two
      * halves of one flow to be protected differently.
      */
-    expect(transientCookieNames("https://console.up.railway.app")).toEqual({
+    expect(transientCookieNames(servedAt("https://console.up.railway.app"))).toEqual({
       pkce: "__Host-rc_pkce",
       state: "__Host-rc_state",
       consent: "__Host-rc_consent",
@@ -144,7 +153,7 @@ describe("transientCookieNames", () => {
   });
 
   it("keeps the plain names on localhost, exactly as the session cookie does", () => {
-    expect(transientCookieNames("http://localhost:3100")).toEqual({
+    expect(transientCookieNames(servedAt("http://localhost:3100"))).toEqual({
       pkce: "rc_pkce",
       state: "rc_state",
       consent: "rc_consent",
@@ -154,7 +163,7 @@ describe("transientCookieNames", () => {
 
 describe("cookieOptions", () => {
   it("meets every __Host- requirement on an https origin", () => {
-    const options = cookieOptions("https://console.up.railway.app");
+    const options = cookieOptions(servedAt("https://console.up.railway.app"));
 
     expect(options.secure).toBe(true);
     expect(options.path).toBe("/");
@@ -164,6 +173,6 @@ describe("cookieOptions", () => {
   });
 
   it("drops Secure on http, so the local session still works", () => {
-    expect(cookieOptions("http://localhost:3000").secure).toBe(false);
+    expect(cookieOptions(servedAt("http://localhost:3000")).secure).toBe(false);
   });
 });

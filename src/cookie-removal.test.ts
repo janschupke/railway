@@ -2,6 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { clearCookie, cookieOptions } from "@/lib/auth/session";
+import { originFromUrl } from "@/lib/origin";
+
+/** A validated origin, minted the only way there is. See session.test.ts for why. */
+const servedAt = (url: string) => originFromUrl(url)!;
 
 /**
  * Nothing may remove a cookie the browser will keep, in any jar.
@@ -78,7 +82,7 @@ describe("cookie removal", () => {
     clearCookie(
       { set: (name, value, options) => void written.push({ name, value, options }) },
       "__Host-rc_session",
-      "https://example.up.railway.app",
+      servedAt("https://example.up.railway.app"),
     );
 
     expect(written).toEqual([
@@ -86,7 +90,10 @@ describe("cookie removal", () => {
         name: "__Host-rc_session",
         value: "",
         // Every attribute the prefix requires, plus the expiry that does the removing.
-        options: { ...cookieOptions("https://example.up.railway.app"), maxAge: 0 },
+        options: {
+          ...cookieOptions(servedAt("https://example.up.railway.app")),
+          maxAge: 0,
+        },
       },
     ]);
     expect((written[0] as { options: { secure: boolean } }).options.secure).toBe(true);
@@ -97,7 +104,7 @@ describe("cookie removal", () => {
     clearCookie(
       { set: (_n, _v, options) => void written.push(options) },
       "rc_session",
-      "http://localhost:3100",
+      servedAt("http://localhost:3100"),
     );
 
     expect(written[0]!.secure).toBe(false);

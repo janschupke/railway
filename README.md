@@ -17,7 +17,7 @@ or destroy them — with live build and deploy logs streamed while it happens.
 [Limitations](#limitations) · [What I would do next](#what-i-would-do-next) ·
 [Verifying it works](#verifying-it-works)
 
-**Reference** — [Decisions (11 ADRs)](#decisions) · [Tests](#tests) ·
+**Reference** — [Decisions (13 ADRs)](#decisions) · [Tests](#tests) ·
 [Design system](#design-system) · [Internationalisation](#internationalisation) ·
 [Performance](#performance) · [Accessibility](#accessibility) · [Logs](#logs) ·
 [Typed documents](#typed-documents-and-schema-verification) · [Security](SECURITY.md) ·
@@ -33,16 +33,17 @@ cp .env.example .env           # then fill in the values
 pnpm dev
 ```
 
-Register the OAuth app under your Railway workspace's **Developer settings**, with both
-redirect URIs (they must match exactly):
+Register the OAuth app under your Railway workspace's **Developer settings**, with one
+redirect URI per domain the app is reached on (they must match exactly):
 
 ```
 http://localhost:3000/api/auth/callback
 https://<your-deployment>.up.railway.app/api/auth/callback
 ```
 
-The deployed instance registers `https://trains.schupke.io/api/auth/callback`;
-substitute your own domain.
+The deployed instance also registers `https://trains.schupke.io/api/auth/callback`.
+Sign-in follows the domain the request arrived on, so a domain whose callback is not
+registered is refused by Railway rather than by this app.
 
 `SESSION_SECRET` can be anything with enough entropy: `openssl rand -base64 32`.
 
@@ -51,8 +52,23 @@ substitute your own domain.
 Connect the repo to Railway; `railway.json` points it at the `Dockerfile` and sets the
 `/api/health` healthcheck. There is no start command there — the image carries its own, and
 the runtime stage has no package manager to run one with. Set `RAILWAY_CLIENT_ID`,
-`RAILWAY_CLIENT_SECRET` and `SESSION_SECRET` as service variables — `APP_URL` is derived
-from Railway's injected `RAILWAY_PUBLIC_DOMAIN`.
+`RAILWAY_CLIENT_SECRET` and `SESSION_SECRET` as service variables. There is no origin to
+configure: the app serves whatever domain the request arrived on.
+
+#### Custom domains
+
+Point the domain at the service and register its `/api/auth/callback` on the OAuth app.
+That is the whole procedure — no variable to set, and any number of domains work at once.
+Two consequences worth knowing:
+
+- **Sessions are per domain.** The session cookie carries the `__Host-` prefix, which
+  binds it to exactly one origin, so signing in on one domain does not sign you in on
+  another.
+- **`APP_ORIGINS` locks it down** if you would rather the app answered only for domains you
+  have listed. Unset, it answers for any host Railway's edge reports —
+  [ADR-13](docs/adr/0013-the-origin-is-the-request-not-a-variable.md) argues why that is
+  safe here. Setting it does not implicitly include the generated `*.up.railway.app`
+  domain; list every domain you serve.
 
 The `Dockerfile` pins its base image by sha256 digest as well as by tag, on both `FROM`
 lines, and the runtime stage strips npm, corepack and yarn — none of which the app calls
@@ -423,23 +439,24 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 
 ## Decisions
 
-Twelve decisions, argued in full in [`docs/adr/`](docs/adr/README.md). The short
+Thirteen decisions, argued in full in [`docs/adr/`](docs/adr/README.md). The short
 version of each:
 
-| #                                                                     | Decision                                                                  | Why it matters                                                                                                                                                                                                 |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ADR-1](docs/adr/0001-railway-oidc-directly-not-an-auth-vendor.md)    | Railway OIDC directly, not an auth vendor                                 | The app acts on **the visitor's** Railway account, not on a token I own — that makes auth a capability-delegation problem, not a login problem, and Railway is itself a compliant OIDC provider                |
-| [ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)       | Token refresh runs in the proxy layer                                     | Access tokens live one hour and refresh tokens rotate on every use; Server Components can read cookies but not write them, so refresh runs in `src/proxy.ts` before the render                                 |
-| [ADR-3](docs/adr/0003-sse-downstream-websocket-upstream.md)           | SSE downstream, WebSocket upstream                                        | Railway genuinely pushes log lines over GraphQL subscriptions, but App Router route handlers cannot accept WebSocket upgrades and the data only flows one way                                                  |
-| [ADR-4](docs/adr/0004-no-database.md)                                 | No database                                                               | Railway holds the state; mirroring it would only create drift                                                                                                                                                  |
-| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)       | The app only destroys what it created                                     | This tool changes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every destroy, stop, restart and redeploy            |
-| [ADR-6](docs/adr/0006-docker-images-only.md)                          | Docker images only; GitHub sources are a stated limitation                | Repo sources silently require _the signed-in user's_ Railway account to have the GitHub app installed with access to that repo — something this app cannot provision on their behalf                           |
-| [ADR-7](docs/adr/0007-the-url-is-the-state.md)                        | The URL is the state; there is no client store                            | Project, environment and filters are search params, so the dashboard is linkable and the server does the fetching; there is no client fetch, so there is no client cache to reconcile                          |
-| [ADR-8](docs/adr/0008-a-hand-rolled-graphql-client-not-apollo.md)     | A hand-rolled GraphQL client, not Apollo                                  | All of `src/lib/railway/` is server-only, so Apollo's normalized cache and browser hooks have nothing to attach to — and a cache would be actively wrong for a live view of infrastructure                     |
-| [ADR-9](docs/adr/0009-structured-logs-on-stdout.md)                   | Structured logs on stdout, with the OTel seam cut but not used            | The whole server used to log through one `console.error` that flattened everything a query would want — kind, status, operation, incident id — into a template string only `grep` could read                   |
-| [ADR-10](docs/adr/0010-the-dashboard-watches.md)                      | The dashboard watches; it does not poll from the browser                  | A container created or destroyed in Railway's own dashboard did not appear here until someone pressed Refresh, and Railway publishes no project subscription — so someone has to poll, and the server does     |
-| [ADR-11](docs/adr/0011-pnpm-stays.md)                                 | pnpm stays, and the migration was priced rather than assumed              | npm has no equivalent of `allowBuilds`, a per-package postinstall allowlist, and `pnpm audit --prod` re-evaluates reachability where an ignore-list of advisory ids decays                                     |
-| [ADR-12](docs/adr/0012-idempotency-keys-replay-rather-than-reject.md) | Idempotency keys on create, and a repeat is replayed rather than rejected | A name check is not a lock and cost a round trip before every create; a repeat now gets the first submission's answer, because "you already submitted this" is a false statement about a container that exists |
+| #                                                                     | Decision                                                                  | Why it matters                                                                                                                                                                                                            |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ADR-1](docs/adr/0001-railway-oidc-directly-not-an-auth-vendor.md)    | Railway OIDC directly, not an auth vendor                                 | The app acts on **the visitor's** Railway account, not on a token I own — that makes auth a capability-delegation problem, not a login problem, and Railway is itself a compliant OIDC provider                           |
+| [ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)       | Token refresh runs in the proxy layer                                     | Access tokens live one hour and refresh tokens rotate on every use; Server Components can read cookies but not write them, so refresh runs in `src/proxy.ts` before the render                                            |
+| [ADR-3](docs/adr/0003-sse-downstream-websocket-upstream.md)           | SSE downstream, WebSocket upstream                                        | Railway genuinely pushes log lines over GraphQL subscriptions, but App Router route handlers cannot accept WebSocket upgrades and the data only flows one way                                                             |
+| [ADR-4](docs/adr/0004-no-database.md)                                 | No database                                                               | Railway holds the state; mirroring it would only create drift                                                                                                                                                             |
+| [ADR-5](docs/adr/0005-the-app-only-destroys-what-it-created.md)       | The app only destroys what it created                                     | This tool changes infrastructure, so ownership is the load-bearing safety property — the `spun-` name prefix is the marker, re-derived server-side before every destroy, stop, restart and redeploy                       |
+| [ADR-6](docs/adr/0006-docker-images-only.md)                          | Docker images only; GitHub sources are a stated limitation                | Repo sources silently require _the signed-in user's_ Railway account to have the GitHub app installed with access to that repo — something this app cannot provision on their behalf                                      |
+| [ADR-7](docs/adr/0007-the-url-is-the-state.md)                        | The URL is the state; there is no client store                            | Project, environment and filters are search params, so the dashboard is linkable and the server does the fetching; there is no client fetch, so there is no client cache to reconcile                                     |
+| [ADR-8](docs/adr/0008-a-hand-rolled-graphql-client-not-apollo.md)     | A hand-rolled GraphQL client, not Apollo                                  | All of `src/lib/railway/` is server-only, so Apollo's normalized cache and browser hooks have nothing to attach to — and a cache would be actively wrong for a live view of infrastructure                                |
+| [ADR-9](docs/adr/0009-structured-logs-on-stdout.md)                   | Structured logs on stdout, with the OTel seam cut but not used            | The whole server used to log through one `console.error` that flattened everything a query would want — kind, status, operation, incident id — into a template string only `grep` could read                              |
+| [ADR-10](docs/adr/0010-the-dashboard-watches.md)                      | The dashboard watches; it does not poll from the browser                  | A container created or destroyed in Railway's own dashboard did not appear here until someone pressed Refresh, and Railway publishes no project subscription — so someone has to poll, and the server does                |
+| [ADR-11](docs/adr/0011-pnpm-stays.md)                                 | pnpm stays, and the migration was priced rather than assumed              | npm has no equivalent of `allowBuilds`, a per-package postinstall allowlist, and `pnpm audit --prod` re-evaluates reachability where an ignore-list of advisory ids decays                                                |
+| [ADR-12](docs/adr/0012-idempotency-keys-replay-rather-than-reject.md) | Idempotency keys on create, and a repeat is replayed rather than rejected | A name check is not a lock and cost a round trip before every create; a repeat now gets the first submission's answer, because "you already submitted this" is a false statement about a container that exists            |
+| [ADR-13](docs/adr/0013-the-origin-is-the-request-not-a-variable.md)   | The origin is the request, not a variable                                 | One configured origin meant one working domain: a custom domain sent sign-in to the generated `*.up.railway.app` one. The origin is now derived per request from the forwarded host, validated, and https unless loopback |
 
 ---
 

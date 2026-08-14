@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { env } from "@/env";
+import { badOrigin, requestOrigin } from "@/lib/auth/request-origin";
+import type { AppOrigin } from "@/lib/origin";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { clearCookie, sessionCookieName } from "@/lib/auth/session";
@@ -28,25 +29,29 @@ const fetchSite = (request: NextRequest): string => {
  *
  * Sign-out is a native form POST (see sign-out-button.tsx), and the fetch spec requires
  * a form submission to send `Origin`, so checking it costs nothing legitimate.
+ *
+ * Compared against the origin this request arrived at, not against a configured one. That
+ * is a fix rather than a relaxation: the old comparison was against APP_URL, so a
+ * legitimate sign-out on any other domain the app serves was rejected as cross-origin. It
+ * stays sound because the two sides come from different places — the served origin from
+ * the edge's forwarded host, `Origin` from the browser, which cannot set `X-Forwarded-Host`
+ * on a cross-site form post.
  */
-function sameOrigin(request: NextRequest): boolean {
+function sameOrigin(request: NextRequest, served: AppOrigin): boolean {
   if (request.headers.get("sec-fetch-site") === "same-origin") return true;
 
   const origin = request.headers.get("origin");
-  if (!origin) return false;
-
-  try {
-    return origin === new URL(env().APP_URL).origin;
-  } catch {
-    return false;
-  }
+  return origin !== null && origin === served;
 }
 
 export async function POST(request: NextRequest) {
   // The proxy matcher excludes api/auth, so an inbound x-request-id here is raw client
   // input and is not adopted.
   return withRequestScope("/api/auth/logout", { trustInboundId: false }, async () => {
-    if (!sameOrigin(request)) {
+    const served = requestOrigin(request);
+    if (!served) return badOrigin();
+
+    if (!sameOrigin(request, served)) {
       /*
        * A CSRF rejection, and until now a completely silent one.
        *
@@ -71,19 +76,19 @@ export async function POST(request: NextRequest) {
     log.info("auth.session.cleared");
 
     /*
-     * APP_URL, not request.url: in a route handler the latter is the container's own
-     * origin, and the redirect goes out absolute. See the callback route.
+     * The served origin, not request.url: in a route handler the latter is the container's
+     * own origin, and the redirect goes out absolute. See the callback route.
      *
      * `?signed_out` is what the landing page keys its notice off. Sign-out here ends the
      * session on this app and nothing at Railway — the authorization survives, and
      * Railway offers no endpoint that would end it — so the page the user lands on is
      * the only place that difference can be stated at the moment it matters.
      */
-    const response = NextResponse.redirect(new URL("/?signed_out=1", env().APP_URL), {
+    const response = NextResponse.redirect(new URL("/?signed_out=1", served), {
       // 303 so the browser follows with GET after the POST.
       status: 303,
     });
-    clearCookie(response.cookies, sessionCookieName(env().APP_URL), env().APP_URL);
+    clearCookie(response.cookies, sessionCookieName(served), served);
     return response;
   });
 }

@@ -64,9 +64,9 @@ COPY . .
 # a real secret now fails loudly at this line instead of quietly baking one into an image.
 #
 # Nothing about them survives into the runtime stage, which copies one directory and reads
-# its own environment at startup. APP_URL in particular is a placeholder and stays one: in
-# production it is derived from Railway's injected RAILWAY_PUBLIC_DOMAIN per request (see
-# inferredAppUrl in src/env.ts).
+# its own environment at startup. There is deliberately no origin among them: the app takes
+# the origin from each request's own headers (see src/lib/origin.ts), so the build needs
+# none and neither does the deployment.
 #
 # `pnpm build` also runs `postbuild` — scripts/pack-standalone.ts — which copies
 # .next/static into .next/standalone and refuses to finish if the message catalog was not
@@ -74,7 +74,6 @@ COPY . .
 RUN RAILWAY_CLIENT_ID=build-placeholder \
     RAILWAY_CLIENT_SECRET=build-placeholder \
     SESSION_SECRET=build-placeholder-at-least-32-characters \
-    APP_URL=http://localhost:3000 \
     pnpm build
 # The same gate the CI build job runs, in the place that produces the artefact being
 # measured. A route that grew past its budget should not reach a deployment.

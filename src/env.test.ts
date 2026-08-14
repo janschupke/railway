@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RAILWAY_DEFAULTS, __resetEnv, callbackUrl, env, schema } from "./env";
+import { RAILWAY_DEFAULTS, __resetEnv, env, schema } from "./env";
 
 const ORIGINAL = { ...process.env };
 
@@ -81,8 +81,10 @@ describe("env", () => {
     expect(env().RAILWAY_WS_URL).toBe("ws://127.0.0.1:4010/graphql/v2");
   });
 
-  it("derives APP_URL from Railway's injected domain in production", () => {
-    // Only APP_URL is unset; the deployment supplies RAILWAY_PUBLIC_DOMAIN itself.
+  it("falls back to Railway's injected domain when APP_URL is unset", () => {
+    // Only APP_URL is unset; the deployment supplies RAILWAY_PUBLIC_DOMAIN itself. This is
+    // the fallback for a request that carried no usable Host, not the app's origin — that
+    // comes from the request. See lib/origin.ts.
     setEnv({
       ...REQUIRED,
       APP_URL: undefined,
@@ -92,23 +94,48 @@ describe("env", () => {
     expect(env().APP_URL).toBe("https://console.up.railway.app");
   });
 
-  it("names RAILWAY_PUBLIC_DOMAIN when the origin cannot be derived", () => {
+  it("parses with no origin declared at all", () => {
     /*
-     * The healthcheck failure this message exists for. Three variables set, no public
-     * domain on the service yet, so Railway injects no RAILWAY_PUBLIC_DOMAIN, APP_URL
-     * cannot be derived and /api/health answers 503 — a correctly-built deployment
-     * reported as unhealthy. "APP_URL must be an absolute URL" sent the operator looking
-     * for a variable they were right not to have set.
+     * The inverse of the test that used to be here, and the clearest single statement of
+     * what changed. A service with no public domain injects no RAILWAY_PUBLIC_DOMAIN, so
+     * APP_URL could not be derived, so env() threw, so /api/health answered 503 and
+     * Railway reported a correctly-built deployment as a healthcheck failure. There is
+     * nothing left to derive: the origin comes from the request, and this parses.
      */
     setEnv({ ...REQUIRED, APP_URL: undefined, RAILWAY_PUBLIC_DOMAIN: undefined });
 
-    expect(() => env()).toThrow(/RAILWAY_PUBLIC_DOMAIN/);
-    expect(() => env()).toThrow(/generate one/i);
+    expect(env().APP_URL).toBeUndefined();
   });
 
   it("prefers an explicit APP_URL over the injected domain", () => {
     setEnv({ ...REQUIRED, RAILWAY_PUBLIC_DOMAIN: "console.up.railway.app" });
     expect(env().APP_URL).toBe("http://localhost:3000");
+  });
+
+  it("reads no allowlist by default, which serves any host the edge reports", () => {
+    expect(env().APP_ORIGINS).toEqual([]);
+  });
+
+  it("normalises allowlist entries, so a trailing slash cannot make a domain miss", () => {
+    setEnv({
+      ...REQUIRED,
+      APP_ORIGINS: "https://trains.schupke.io/ , HTTPS://Console.Up.Railway.App:443",
+    });
+
+    expect(env().APP_ORIGINS).toEqual([
+      "https://trains.schupke.io",
+      "https://console.up.railway.app",
+    ]);
+  });
+
+  it("refuses an allowlist entry that is neither https nor loopback", () => {
+    // The allowlist decides which origins the app will serve, and a cleartext one there
+    // would be an origin whose session cookie carries neither Secure nor __Host-.
+    setEnv({ ...REQUIRED, APP_ORIGINS: "http://trains.schupke.io" });
+    expect(() => env()).toThrow(/APP_ORIGINS/);
+
+    setEnv({ ...REQUIRED, APP_ORIGINS: "trains.schupke.io" });
+    expect(() => env()).toThrow(/APP_ORIGINS/);
   });
 
   it("defaults the ownership prefix", () => {
@@ -181,8 +208,8 @@ describe("env", () => {
     });
 
     expect(() => env()).toThrow(/RAILWAY_CLIENT_ID/);
+    expect(() => env()).toThrow(/RAILWAY_CLIENT_SECRET/);
     expect(() => env()).toThrow(/SESSION_SECRET/);
-    expect(() => env()).toThrow(/APP_URL/);
   });
 
   it("rejects a session secret with too little entropy", () => {
@@ -194,17 +221,6 @@ describe("env", () => {
     const first = env();
     process.env.MANAGED_PREFIX = "changed-";
     expect(env()).toBe(first);
-  });
-});
-
-describe("callbackUrl", () => {
-  it("builds the redirect URI that must match the OAuth app registration", () => {
-    expect(callbackUrl()).toBe("http://localhost:3000/api/auth/callback");
-  });
-
-  it("follows APP_URL to the deployed origin", () => {
-    setEnv({ ...REQUIRED, APP_URL: "https://console.up.railway.app" });
-    expect(callbackUrl()).toBe("https://console.up.railway.app/api/auth/callback");
   });
 });
 
@@ -223,9 +239,11 @@ describe("APP_URL transport", () => {
 
   it("refuses http on a real host", () => {
     /*
-     * This one variable decides `secure` on the session cookie and whether it carries
-     * the __Host- prefix, so an http APP_URL in production silently ships Railway
-     * tokens in the clear. Failing at boot is the only place that is cheap to notice.
+     * The override still decides `secure` on the session cookie and whether it carries the
+     * __Host- prefix for any request that falls back to it, so an http APP_URL in
+     * production silently ships Railway tokens in the clear. Failing at boot is the only
+     * place that is cheap to notice. lib/origin.ts applies the identical rule to the
+     * origin it derives from the request.
      */
     setEnv({ ...REQUIRED, APP_URL: "http://console.up.railway.app" });
     expect(() => env()).toThrow(/https/i);
@@ -276,24 +294,33 @@ describe("optional fields", () => {
    * worked and an override that was silently ignored for the field's entire life — the
    * one variable that existed to be tuned was the one that could not be.
    */
-  const OVERRIDES: Record<string, { set: string; expect: string | number }> = {
-    MANAGED_PREFIX: { set: "test-", expect: "test-" },
-    WATCH_POLL_MS: { set: "2500", expect: 2500 },
-    METRICS_POLL_MS: { set: "2000", expect: 2_000 },
-    RAILWAY_ISSUER: { set: "http://localhost:4010", expect: "http://localhost:4010" },
-    RAILWAY_API_URL: {
-      set: "http://localhost:4010/graphql/v2",
-      expect: "http://localhost:4010/graphql/v2",
-    },
-    RAILWAY_WS_URL: {
-      set: "ws://localhost:4010/graphql/v2",
-      expect: "ws://localhost:4010/graphql/v2",
-    },
-    REGISTRY_PROBE_URL: {
-      set: "http://localhost:4010",
-      expect: "http://localhost:4010",
-    },
-  };
+  const OVERRIDES: Record<string, { set: string; expect: string | number | string[] }> =
+    {
+      APP_URL: {
+        set: "https://trains.schupke.io",
+        expect: "https://trains.schupke.io",
+      },
+      APP_ORIGINS: {
+        set: "https://trains.schupke.io",
+        expect: ["https://trains.schupke.io"],
+      },
+      MANAGED_PREFIX: { set: "test-", expect: "test-" },
+      WATCH_POLL_MS: { set: "2500", expect: 2500 },
+      METRICS_POLL_MS: { set: "2000", expect: 2_000 },
+      RAILWAY_ISSUER: { set: "http://localhost:4010", expect: "http://localhost:4010" },
+      RAILWAY_API_URL: {
+        set: "http://localhost:4010/graphql/v2",
+        expect: "http://localhost:4010/graphql/v2",
+      },
+      RAILWAY_WS_URL: {
+        set: "ws://localhost:4010/graphql/v2",
+        expect: "ws://localhost:4010/graphql/v2",
+      },
+      REGISTRY_PROBE_URL: {
+        set: "http://localhost:4010",
+        expect: "http://localhost:4010",
+      },
+    };
 
   it("covers every field that has a default", () => {
     const defaulted = Object.entries(schema.shape)
@@ -304,8 +331,10 @@ describe("optional fields", () => {
     expect(Object.keys(OVERRIDES).sort()).toEqual(defaulted.sort());
   });
 
+  // toEqual rather than toBe, because APP_ORIGINS parses to an array. The primitive cases
+  // are unaffected: toEqual is toBe plus structural equality, never less.
   it.each(Object.entries(OVERRIDES))("honours an override of %s", (key, override) => {
     setEnv({ ...REQUIRED, [key]: override.set });
-    expect(env()[key as keyof ReturnType<typeof env>]).toBe(override.expect);
+    expect(env()[key as keyof ReturnType<typeof env>]).toEqual(override.expect);
   });
 });

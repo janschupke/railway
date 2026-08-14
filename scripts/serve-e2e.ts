@@ -80,6 +80,9 @@ start("node", [".next/standalone/server.js"], {
   PORT: String(APP_PORT),
   HOSTNAME: "::",
   APP_URL,
+  // Matches playwright.config.ts: both loopback spellings of this one listener, so a
+  // manually served app answers 127.0.0.1 exactly as the suite's does.
+  APP_ORIGINS: `${APP_URL},http://127.0.0.1:${APP_PORT}`,
   RAILWAY_CLIENT_ID: "e2e-client",
   RAILWAY_CLIENT_SECRET: "e2e-secret",
   SESSION_SECRET: "e2e-session-secret-at-least-32-characters",

@@ -8,6 +8,14 @@ export const dynamic = "force-dynamic";
  * healthcheck that depends on an upstream would cycle this deployment during an
  * unrelated Railway incident. It does touch env() so that a misconfigured deployment
  * fails the check rather than serving broken sign-in.
+ *
+ * "Misconfigured" is now a narrower claim than it was: a missing required secret, or an
+ * optional value that is present and malformed. It no longer covers a service with no
+ * public domain — the origin comes from the request, so such a service boots and serves,
+ * and that condition was the most common false healthcheck failure this endpoint reported.
+ *
+ * It deliberately does not report the origin it resolved. This endpoint is unauthenticated,
+ * and the resolved origin is derived from a header the caller wrote.
  */
 export function GET() {
   try {

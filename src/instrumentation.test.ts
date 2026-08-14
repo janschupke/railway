@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { logRecords, rawLogLines } from "@/test/log-capture";
+import { clearLogRecords, logRecords, rawLogLines } from "@/test/log-capture";
 import { __resetEnv } from "./env";
 import { onRequestError, register } from "./instrumentation";
 
@@ -109,6 +109,48 @@ describe("register", () => {
       port: "8080",
       hostname: "::",
     });
+  });
+
+  it("says which origins it will answer as, since a refusal cannot name a host", () => {
+    /*
+     * The other half of `request.origin_rejected`, which reports `not_allowlisted` and
+     * deliberately never the host it refused — that is caller input. This line is
+     * operator-supplied and bounded, so it is the one place the configured side can be
+     * written down. `any` is the default spelled out rather than an empty field.
+     */
+    validEnv();
+    register();
+    expect(logRecords().find((r) => r.msg === "boot")).toMatchObject({
+      allowed_origins: "any",
+    });
+
+    clearLogRecords();
+    process.env.APP_ORIGINS =
+      "https://trains.schupke.io,https://console.up.railway.app";
+    __resetEnv();
+    register();
+
+    expect(logRecords().find((r) => r.msg === "boot")).toMatchObject({
+      allowed_origins: "https://trains.schupke.io,https://console.up.railway.app",
+    });
+  });
+
+  it("boots a service that has no public domain yet", () => {
+    /*
+     * This used to be `boot.env_invalid`, and then a 503 from /api/health, and then a
+     * deploy Railway reported as a healthcheck failure — because APP_URL could not be
+     * derived on a service nobody had generated a domain for. The origin comes from the
+     * request now, so there is nothing left to derive and nothing left to fail.
+     */
+    validEnv();
+    delete process.env.APP_URL;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    __resetEnv();
+
+    register();
+
+    expect(logRecords().map((r) => r.msg)).toContain("boot");
+    expect(logRecords().map((r) => r.msg)).not.toContain("boot.env_invalid");
   });
 
   it("reports the address it fell back to, which is the one that cannot route", () => {

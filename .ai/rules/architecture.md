@@ -6,7 +6,7 @@ meta:
 # Architecture
 
 The reasoning behind each decision is argued at length in
-[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-11); the README carries a summary
+[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-13); the README carries a summary
 table under `## Decisions`. This file states what the decisions oblige you to do. When
 the two disagree, the ADR is the record and this file is stale — fix it.
 
@@ -261,15 +261,16 @@ says so at the `WATCH` and `METRICS` groups.
 ## Configuration goes through `src/env.ts`
 
 zod schema, memoised, `__resetEnv()` for tests. Required: `RAILWAY_CLIENT_ID`,
-`RAILWAY_CLIENT_SECRET`, `SESSION_SECRET` (≥32 chars), `APP_URL`. Optional with defaults:
-`MANAGED_PREFIX`, `WATCH_POLL_MS`, `METRICS_POLL_MS`, and the three `RAILWAY_*` endpoint
-overrides that exist
-so the e2e suite can point the whole app at `e2e/fixtures/fake-railway`.
+`RAILWAY_CLIENT_SECRET`, `SESSION_SECRET` (≥32 chars). Optional: `APP_URL`,
+`APP_ORIGINS`, `MANAGED_PREFIX`, `WATCH_POLL_MS`, `METRICS_POLL_MS`, and the three
+`RAILWAY_*` endpoint overrides that exist so the e2e suite can point the whole app at
+`e2e/fixtures/fake-railway`.
 
-`APP_URL` must be https unless it is loopback, because **every cookie decision reads it** —
-`secure` is derived from it, and so is whether the session cookie carries the `__Host-`
-prefix. An `APP_URL` that says http silently downgrades the session to a cleartext,
-unprefixed cookie.
+**The origin must be https unless it is loopback**, because every cookie decision reads it
+— `secure` is derived from it, and so is whether the session cookie carries the `__Host-`
+prefix. An origin that says http silently downgrades the session to a cleartext,
+unprefixed cookie. That rule now applies to the origin derived from each request, not to a
+variable; see the next section.
 
 A new variable means: a field on the schema **and** an entry in `.env.example`. Nothing
 else — the parse input is derived from `schema.shape`, so every field is read from the
@@ -279,8 +280,8 @@ It is derived because the hand-written literal it replaced drifted: `WATCH_POLL_
 declared in the schema and omitted from that literal for its whole life, and since it
 carries a default nothing failed. `env()` returned 15000 while `playwright.config.ts`,
 `scripts/serve-e2e.ts` and any deployment that set it were all ignored. **Do not reintroduce
-the literal.** `APP_URL` is the single explicit override, because in production its value
-comes from `RAILWAY_PUBLIC_DOMAIN` rather than a variable of its own name.
+the literal.** `APP_URL` is the single explicit override, because with it unset the value
+falls back to `RAILWAY_PUBLIC_DOMAIN` rather than to a variable of its own name.
 
 Give every optional field an override assertion in `src/env.test.ts`, not just a default
 assertion. A default test cannot tell a forwarded field from an ignored one — that is
@@ -288,6 +289,38 @@ exactly how the above went unnoticed.
 
 `LOG_LEVEL` is the single deliberate exception and reads `process.env` directly — see
 [errors-and-logging.md](errors-and-logging.md) for why.
+
+## The origin is the request, not a variable
+
+`src/lib/origin.ts` derives the origin this app is being reached at from the request's own
+headers — `x-forwarded-host` else `host`, scheme from `x-forwarded-proto` — validates it,
+and returns a branded `AppOrigin` that nothing else can mint. `APP_URL` is the fallback for
+a request carrying no usable Host, and `APP_ORIGINS` is an optional allowlist. ADR-13 has
+the reasoning; these are the obligations.
+
+**Three contexts read it, and each has its own way in.** `src/proxy.ts` calls
+`resolveOrigin` with `request.headers`; the three auth routes call `requestOrigin` from
+`lib/auth/request-origin.ts`, which also owns the refusal log and the 400; Server
+Components go through `lib/auth/server.ts`, which reads `headers()` from `next/headers`.
+
+**There is deliberately no `x-app-origin` header.** The proxy stamps the CSP nonce and
+`x-request-id` because it _mints_ them and they have no other channel. The origin is a pure
+function of headers the render already receives, so a stamped header would be a second
+source of truth that the proxy-excluded paths (`api/auth/*`, `api/health`) would not have,
+plus one more client-supplied header to remember to overwrite. Re-derive on both sides.
+
+**`src/lib/origin.ts` must never import `server-only` or `next/headers`,** because
+`src/proxy.ts` imports it, and must never import `@/env`, because `src/env.ts` imports
+`isSecureOrLocal` back out of it. Configuration reaches it as a parameter.
+
+**A route handler may name neither `request.url` nor `APP_URL`.** Behind Railway's proxy
+the first is the container's own address, and the second is one configured domain rather
+than the one this request arrived at. `src/app/redirect-origin.test.ts` enforces both over
+every `route.ts` and explains what each mistake looked like in production.
+
+**A refusal never logs the host it refused.** It is caller input, so the record carries a
+bounded reason (`absent`, `unparseable`, `insecure`, `not_allowlisted`); the configured
+allowlist goes on the `boot` line instead, which is where the answerable half lives.
 
 ## Conventions
 
