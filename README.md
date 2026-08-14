@@ -267,9 +267,19 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   `response_type=code` plus PKCE `S256`, since the code is bound to the verifier and the
   id_token is never accepted from a redirect, but it is a deviation from the OIDC core
   recommendation and worth stating rather than leaving to be discovered.
-- **Sign-out is local only.** It deletes the session cookie; it does not call an
-  `end_session_endpoint` or revoke the refresh token, so that grant stays live at
-  Railway until it expires or the user revokes the app.
+- **Sign-out is local only, because Railway offers nothing else.** It deletes the session
+  cookie, and the grant stays live at Railway until it expires or the user removes the
+  app. That is not a call this app declined to make: the discovery document publishes no
+  `revocation_endpoint` and no `end_session_endpoint`, and the paths a provider of this
+  shape would put them on — `/oauth/token/revocation`, `/oauth/revoke`,
+  `/oauth/revocation`, `/oauth/session/end`, `/oauth/logout` — all answer 404 to a POST
+  that `/oauth/token` answers with `invalid_request`. So the sign-out notice on the
+  landing page says both halves of what happened and points at Railway's account
+  settings, which is where the authorization is actually removed, and `verify:schema`
+  asserts both endpoints are still absent on every push — when one appears, CI goes red
+  and this entry is wrong. The standing cost is in `src/lib/auth/refresh.ts`: a
+  refresh token is abandoned rather than revoked on each sign-out, against a cap of 100
+  live tokens per authorization.
 - **A project switch announces once, at the start.** `useTransition`'s pending state now
   ends when the skeleton commits rather than when the containers arrive, so the polite
   "Loading containers…" fires as the wait begins and the skeleton carries the rest. A

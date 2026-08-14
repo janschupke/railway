@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
+import { LINKS } from "@/lib/constants";
 import { managedPrefix } from "@/lib/railway/managed";
 import { RailYard } from "@/features/rail-yard/rail-yard";
 import { SignInButton } from "@/components/sign-in-button";
@@ -32,15 +33,25 @@ const isKnownError = (value: string): value is SignInError =>
 export default async function LandingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; signed_out?: string }>;
 }) {
   if (await getSession()) redirect("/dashboard");
 
   const t = await getTranslations();
-  const { error } = await searchParams;
+  const { error, signed_out: signedOut } = await searchParams;
   const message = error
     ? t(isKnownError(error) ? `signIn.${error}` : "signIn.failed")
     : null;
+
+  /*
+   * The sign-out notice, and the error keeps precedence over it.
+   *
+   * Both at once cannot arise from this app's own redirects — the logout route sends
+   * `?signed_out` and nothing else — so the guard is against a hand-typed URL, where a
+   * failed sign-in is the more urgent of the two and a second banner would only push the
+   * card off centre.
+   */
+  const showSignedOut = signedOut !== undefined && !message;
 
   return (
     /*
@@ -67,6 +78,32 @@ export default async function LandingPage({
       */}
       <div className="relative w-full max-w-md space-y-4 p-6">
         {message && <Banner tone="error">{message}</Banner>}
+
+        {/*
+          `info`, which the primitive announces politely — the sign-out already happened
+          and the navigation itself is the confirmation, so interrupting to say so would
+          be the wrong register for the one thing here that is not news.
+
+          The anchor is a `t.rich` chunk rather than a sentence with a link stapled after
+          it: the settings page is what the sentence is *for*, and a translator has to be
+          able to move it. `landing.consentNote` above does the same with its <code>.
+        */}
+        {showSignedOut && (
+          <Banner tone="info">
+            {t.rich("landing.signedOut", {
+              link: (chunks) => (
+                <a
+                  className="focus-ring link hover:text-text"
+                  href={LINKS.RAILWAY_ACCOUNT}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </Banner>
+        )}
 
         {/* `raised`, not the default: the yard is moving behind this card, and at the
             flat elevation the two surfaces read as one. */}

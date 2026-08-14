@@ -147,12 +147,19 @@ describe("GET /api/auth/login", () => {
 describe("POST /api/auth/logout", () => {
   const sameSite = { "sec-fetch-site": "same-origin" };
 
-  it("clears the session and sends the browser home with a GET", async () => {
+  it("clears the session and sends the browser home carrying the notice", async () => {
     const response = await logout(request("/api/auth/logout", sameSite));
 
     // 303 so the browser follows with GET rather than re-POSTing.
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("http://localhost:3000/");
+    /*
+     * `?signed_out` and not a bare `/`. The landing page keys its notice off it, and the
+     * notice is the only place the user is told that clearing this cookie left their
+     * Railway authorization exactly where it was.
+     */
+    expect(response.headers.get("location")).toBe(
+      "http://localhost:3000/?signed_out=1",
+    );
     // Asserted on the wire rather than through NextResponse.cookies: the refusal path
     // returns a plain Response, and this is what the browser actually acts on.
     expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=;`);

@@ -27,7 +27,8 @@
   },
   "landing": {
     "intro": "Spin containers up and down in your own Railway projects. Sign in with Railway and pick which projects this app may touch.",
-    "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy the services it created — the ones it names <code>{prefix}…</code>. Everything else in your projects is read-only here."
+    "consentNote": "Railway’s consent screen lets you choose exactly which projects to share. This app can only destroy the services it created — the ones it names <code>{prefix}…</code>. Everything else in your projects is read-only here.",
+    "signedOut": "You are signed out here, and your Railway authorization is untouched. Railway publishes no endpoint an app can call to end its own grant, so this one stays authorized on your account until you remove it in your <link>Railway account settings</link>."
   },
   "notFound": {
     "title": "That page does not exist",

@@ -42,6 +42,11 @@ export function railwayMetadata(issuer: string): client.ServerMetadata {
      * Deliberately NOT pinned: `authorization_response_iss_parameter_supported`. Live
      * discovery declares it true, but setting it here makes an `iss` query parameter
      * mandatory on the callback, and that is unverifiable without a real sign-in.
+     *
+     * Absent rather than forgotten: `revocation_endpoint` and `end_session_endpoint`.
+     * Railway publishes neither, so there is no URL to pin and nothing for sign-out to
+     * call — see `ABSENT_ENDPOINTS` in scripts/verify-schema.ts, which asserts they are
+     * still missing on every push, and the accepted risk in SECURITY.md.
      */
     token_endpoint_auth_methods_supported: [
       "client_secret_basic",

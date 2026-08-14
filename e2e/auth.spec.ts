@@ -53,9 +53,29 @@ test.describe("authentication", () => {
     await signIn(page);
     await page.getByRole("button", { name: /sign out/i }).click();
 
-    await expect(page).toHaveURL("/");
+    await expect(page).toHaveURL("/?signed_out=1");
     await page.goto("/dashboard");
     await expect(page).toHaveURL("/");
+  });
+
+  test("says the Railway authorization outlived the sign-out", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: /sign out/i }).click();
+
+    /*
+     * The point of the notice: sign-out here ends nothing at Railway, and Railway
+     * publishes no endpoint that would let this app end it — so the only way out is a
+     * page on Railway, and the user has to be told which one.
+     *
+     * Located by the link rather than by `getByRole("status")`, which the toast helper
+     * in support.ts documents as a trap: Radix renders hidden `role="status"` copies of
+     * toast text, and this assertion would match one of those instead of the banner.
+     */
+    const settings = page.getByRole("link", { name: /railway account settings/i });
+    await expect(settings).toBeVisible();
+    await expect(settings).toHaveAttribute("href", "https://railway.com/account");
+    await expect(settings).toHaveAttribute("target", "_blank");
+    await expect(settings).toHaveAttribute("rel", "noreferrer");
   });
 
   test("refreshes an expiring access token without the user noticing", async ({

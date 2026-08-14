@@ -77,6 +77,23 @@ const REQUIRED_MEMBERS: Record<string, string> = {
   token_endpoint_auth_methods_supported: "client_secret_basic",
 };
 
+/**
+ * Endpoints Railway does not offer, asserted rather than assumed.
+ *
+ * There is no `revocation_endpoint` and no `end_session_endpoint` in the live document,
+ * and the paths a provider of this shape would put them on — `/oauth/token/revocation`,
+ * `/oauth/revoke`, `/oauth/revocation`, `/oauth/session/end`, `/oauth/logout` — all
+ * answer 404 to a POST that `/oauth/token` answers with `invalid_request`. So the
+ * omission is a configuration choice and not an incomplete document, and sign-out is
+ * local because nothing else is reachable, not because this app declined to call it.
+ * See the Limitations entry and the accepted risk in SECURITY.md.
+ *
+ * Checked here because the whole limitation rests on it. The day either appears, the
+ * README is wrong, the sign-out notice is wrong, and there is a real feature to build —
+ * a red line on every push is how anyone finds that out.
+ */
+const ABSENT_ENDPOINTS = ["revocation_endpoint", "end_session_endpoint"] as const;
+
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
@@ -152,6 +169,19 @@ async function checkDiscovery() {
     } else {
       console.log(
         bad(`${key} no longer offers ${member}: live [${actual.join(", ")}]`),
+      );
+      failed = true;
+    }
+  }
+
+  for (const key of ABSENT_ENDPOINTS) {
+    const actual = doc[key];
+    if (actual === undefined) {
+      console.log(ok(`${key} still absent`));
+    } else {
+      // The URL, not just the fact: whoever reads this line is about to write the call.
+      console.log(
+        bad(`${key} now offered at ${String(actual)} — sign-out can end the grant`),
       );
       failed = true;
     }

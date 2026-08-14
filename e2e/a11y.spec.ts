@@ -64,6 +64,20 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `landing-error/${theme}`);
     });
 
+    test(`the sign-out notice has no violations (${theme})`, async ({ page }) => {
+      /*
+       * A different banner tone from the one above, and the only one on this page that
+       * carries a link — so it is the contrast pair the error scan cannot reach:
+       * anchor text on the `info` surface rather than plain copy on `danger`.
+       */
+      await page.goto("/?signed_out=1");
+      await setTheme(page, theme);
+      await expect(
+        page.getByRole("link", { name: /railway account settings/i }),
+      ).toBeVisible();
+      await expectNoA11yViolations(page, `landing-signed-out/${theme}`);
+    });
+
     test(`the 404 has no violations (${theme})`, async ({ page }) => {
       // The surface with no scan until now, and the one that had no landmark at all:
       // Next's built-in 404 renders bare text with no <main> to skip to.

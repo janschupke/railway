@@ -400,6 +400,15 @@ export const LIST = {
  */
 export const LINKS = {
   RAILWAY_DASHBOARD: "https://railway.com/dashboard",
+  /**
+   * Railway's account settings — where this app's authorization is removed.
+   *
+   * The settings root, not a deep link to an authorized-apps view. Railway serves that
+   * page only behind its own login, so the exact path cannot be verified from here, and
+   * a guessed one that 404s is worse than a click of navigation. The sign-out notice
+   * says "account settings" for the same reason.
+   */
+  RAILWAY_ACCOUNT: "https://railway.com/account",
   RAILWAY_HOME: "https://railway.com",
   /**
    * Where the spend figure actually lives.

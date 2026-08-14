@@ -70,9 +70,16 @@ export async function POST(request: NextRequest) {
      */
     log.info("auth.session.cleared");
 
-    // APP_URL, not request.url: in a route handler the latter is the container's own
-    // origin, and the redirect goes out absolute. See the callback route.
-    const response = NextResponse.redirect(new URL("/", env().APP_URL), {
+    /*
+     * APP_URL, not request.url: in a route handler the latter is the container's own
+     * origin, and the redirect goes out absolute. See the callback route.
+     *
+     * `?signed_out` is what the landing page keys its notice off. Sign-out here ends the
+     * session on this app and nothing at Railway — the authorization survives, and
+     * Railway offers no endpoint that would end it — so the page the user lands on is
+     * the only place that difference can be stated at the moment it matters.
+     */
+    const response = NextResponse.redirect(new URL("/?signed_out=1", env().APP_URL), {
       // 303 so the browser follows with GET after the POST.
       status: 303,
     });

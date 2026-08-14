@@ -266,6 +266,21 @@ the other side instead, by a `no-restricted-imports` rule in `eslint.config.mjs`
 success yields both Railway tokens plus the ability to forge sessions. `.env.example`
 documents `openssl rand -base64 32`; that guidance is the actual control.
 
+**Sign-out cannot end the Railway grant.** It clears the session cookie and nothing else,
+so the tokens inside it become unreachable, but the authorization at Railway survives
+until it expires or the user removes the app. This is the one accepted risk with no
+mitigation available at all: Railway's discovery document publishes no
+`revocation_endpoint` and no `end_session_endpoint`, and the paths a provider of this
+shape would put them on — `/oauth/token/revocation`, `/oauth/revoke`,
+`/oauth/revocation`, `/oauth/session/end`, `/oauth/logout` — answer 404 to a POST that
+`/oauth/token` answers with `invalid_request`, so a client-side revoke has nothing to
+call. What is done instead is to stop the gap being invisible: the landing page states
+both halves of what sign-out did and links to Railway's account settings, and
+`ABSENT_ENDPOINTS` in `scripts/verify-schema.ts` fails CI the day either endpoint
+appears. The residual cost is an abandoned refresh token per sign-out against Railway's
+cap of 100 live tokens per authorization (`src/lib/auth/refresh.ts`), which only the user
+can reclaim.
+
 **The stream cap and the idempotency map are in-memory and per replica.** Honest rather
 than lazy: SSE pins a client to one replica, which is why the README already describes this
 as a single-replica app. If that changes, both move to shared state along with everything
