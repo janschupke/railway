@@ -20,11 +20,14 @@ import {
   SERVICE_DEPLOY_MUTATION,
   VARIABLE_COLLECTION_UPSERT_MUTATION,
 } from "./operations";
-import {
-  pickFailureReason,
-  type DeploymentEventNode,
-  type DeploymentFailure,
-} from "./failure-reason";
+import { pickFailureReason, type DeploymentFailure } from "./failure-reason";
+/*
+ * The node types are gone from this file's imports and that absence is the ticket.
+ * `gql<{ project: ProjectNode & { services: Edges<ServiceNode> } }>` used to restate, by
+ * hand, the shape of a document written thirty lines away; the shapes now arrive with the
+ * documents. What is left is the mapper functions and `ViewerNode`, which is a merged
+ * domain type rather than a claim about any one response.
+ */
 import {
   nodes,
   toContainerMetrics,
@@ -32,12 +35,7 @@ import {
   toProject,
   toProjects,
   toWorkspaceSpend,
-  type Edges,
-  type MetricsResultNode,
-  type ProjectNode,
-  type ServiceNode,
   type ViewerNode,
-  type WorkspaceNode,
 } from "./mappers";
 import type {
   Container,
@@ -47,6 +45,8 @@ import type {
   RailwayProject,
   WorkspaceSpend,
 } from "./types";
+import type { Refusable, TypedDocument } from "./typed-document";
+import type { ServiceInstanceDeployV2Mutation } from "./graphql.generated";
 
 export type Viewer = { id: string; name?: string; email?: string };
 
@@ -80,20 +80,29 @@ export async function listProjects(
   projects: RailwayProject[];
   failures: RailwayApiError[];
 }> {
-  const read = async (
+  /*
+   * `toViewer` per source rather than one shared result type, because the two documents
+   * select different halves of `me` and now say so: ProjectsPersonal carries `projects`,
+   * ProjectsWorkspace carries `workspaces`, and neither generated type has the other's
+   * field. `ViewerNode` stays the merged shape the mappers read, and each source maps into
+   * it — which is where the optionality on that type comes from and is now the only place
+   * it is claimed.
+   */
+  const read = async <TResult extends { me: unknown }>(
     name: SourceResult["name"],
-    query: string,
+    query: TypedDocument<TResult, Record<string, never>>,
     operationName: string,
+    toViewer: (me: NonNullable<Refusable<TResult>["me"]>) => ViewerNode,
   ): Promise<SourceResult> => {
     try {
-      const { data, errors } = await gqlPartial<{ me: ViewerNode }>(
+      const { data, errors } = await gqlPartial(
         query,
         {},
         { accessToken, operationName, signal },
       );
       // `me` itself refused means nothing usable came back, however the transport went.
       if (!data?.me) return { name, viewer: null, error: errors[0] ?? null };
-      return { name, viewer: data.me, error: errors[0] ?? null };
+      return { name, viewer: toViewer(data.me), error: errors[0] ?? null };
     } catch (error) {
       if (error instanceof RailwayApiError) return { name, viewer: null, error };
       throw error;
@@ -101,8 +110,18 @@ export async function listProjects(
   };
 
   const sources = await Promise.all([
-    read("personal", PROJECTS_PERSONAL_QUERY, "ProjectsPersonal"),
-    read("workspace", PROJECTS_WORKSPACE_QUERY, "ProjectsWorkspace"),
+    read("personal", PROJECTS_PERSONAL_QUERY, "ProjectsPersonal", (me) => ({
+      id: me.id,
+      // Narrowed rather than spread through: `name` is nullable on the live schema, and
+      // ViewerNode carries both of these as absent-or-present rather than nullable.
+      ...(me.name ? { name: me.name } : {}),
+      ...(me.email ? { email: me.email } : {}),
+      projects: me.projects,
+    })),
+    read("workspace", PROJECTS_WORKSPACE_QUERY, "ProjectsWorkspace", (me) => ({
+      id: me.id,
+      workspaces: me.workspaces,
+    })),
   ]);
 
   const answered = sources.filter((source) => source.viewer !== null);
@@ -190,9 +209,7 @@ export async function getProjectContainers(
   environmentId: string,
   signal?: AbortSignal,
 ): Promise<{ project: RailwayProject; containers: Container[] }> {
-  const data = await gql<{
-    project: ProjectNode & { services: Edges<ServiceNode> };
-  }>(
+  const data = await gql(
     PROJECT_QUERY,
     { id: projectId },
     { accessToken, operationName: "Project", signal },
@@ -230,10 +247,7 @@ export async function getProjectMetrics(
   metrics: Record<string, ContainerMetrics>;
   spend: WorkspaceSpend | null;
 }> {
-  const { data, errors } = await gqlPartial<{
-    metrics: MetricsResultNode[] | null;
-    project: { id: string; workspace: WorkspaceNode } | null;
-  }>(
+  const { data, errors } = await gqlPartial(
     PROJECT_METRICS_QUERY,
     {
       projectId,
@@ -284,7 +298,7 @@ export async function createProject(
   name: string,
   signal?: AbortSignal,
 ): Promise<RailwayProject> {
-  const data = await gql<{ projectCreate: ProjectNode }>(
+  const data = await gql(
     PROJECT_CREATE_MUTATION,
     { input: { name } },
     { accessToken, operationName: "ProjectCreate", signal },
@@ -304,7 +318,7 @@ export async function createEnvironment(
   name: string,
   signal?: AbortSignal,
 ): Promise<RailwayEnvironment> {
-  const data = await gql<{ environmentCreate: { id: string; name: string } }>(
+  const data = await gql(
     ENVIRONMENT_CREATE_MUTATION,
     { input: { projectId, name, skipInitialDeploys: true } },
     { accessToken, operationName: "EnvironmentCreate", signal },
@@ -340,7 +354,7 @@ export async function createContainer(
    */
   outcome: "deployed" | "variables_failed" | "deploy_failed";
 }> {
-  const created = await gql<{ serviceCreate: { id: string; name: string } }>(
+  const created = await gql(
     SERVICE_CREATE_MUTATION,
     {
       input: {
@@ -420,9 +434,9 @@ export async function createContainer(
    * this discards from the user's sentence — auth, rate limit, outage — is entirely
    * preserved in the record below, incident id included.
    */
-  let deployed: { serviceInstanceDeployV2: string | null };
+  let deployed: ServiceInstanceDeployV2Mutation;
   try {
-    deployed = await gql<{ serviceInstanceDeployV2: string | null }>(
+    deployed = await gql(
       SERVICE_DEPLOY_MUTATION,
       { serviceId, environmentId: params.environmentId },
       { accessToken, operationName: "ServiceInstanceDeployV2", signal },
@@ -434,6 +448,13 @@ export async function createContainer(
 
   return {
     serviceId,
+    /*
+     * `?? null` on a field the schema calls `String!`, kept deliberately. This value is the
+     * id the row's log stream keys on, and the whole point of preferring
+     * `serviceInstanceDeployV2` over `serviceInstanceDeploy` was getting an id back — a
+     * Railway that answered null anyway would take the stream down at the first property
+     * access rather than degrade to "no logs for this deployment".
+     */
     deploymentId: deployed.serviceInstanceDeployV2 ?? null,
     outcome: "deployed",
   };
@@ -444,7 +465,7 @@ export async function destroyContainer(
   serviceId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await gql<{ serviceDelete: boolean }>(
+  await gql(
     SERVICE_DELETE_MUTATION,
     { id: serviceId },
     { accessToken, operationName: "ServiceDelete", signal },
@@ -456,13 +477,7 @@ export async function getDeployment(
   deploymentId: string,
   signal?: AbortSignal,
 ): Promise<{ id: string; status: string | null; updatedAt: string | null } | null> {
-  const data = await gql<{
-    deployment: {
-      id: string;
-      status: string | null;
-      updatedAt: string | null;
-    } | null;
-  }>(
+  const data = await gql(
     DEPLOYMENT_QUERY,
     { id: deploymentId },
     { accessToken, operationName: "Deployment", signal },
@@ -491,9 +506,7 @@ export async function getDeploymentFailure(
   deploymentId: string,
   signal?: AbortSignal,
 ): Promise<DeploymentFailure | null> {
-  const { data, errors } = await gqlPartial<{
-    deploymentEvents: Edges<DeploymentEventNode>;
-  }>(
+  const { data, errors } = await gqlPartial(
     DEPLOYMENT_EVENTS_QUERY,
     { id: deploymentId, last: STREAM.FAILURE_EVENTS },
     { accessToken, operationName: "DeploymentEvents", signal },
@@ -545,15 +558,29 @@ export async function getLogs(
   limit: number = STREAM.BACKFILL_LINES,
   signal?: AbortSignal,
 ): Promise<LogLine[]> {
-  const isBuild = kind === "build";
-  const data = await gql<Record<string, LogLine[] | null>>(
-    isBuild ? BUILD_LOGS_QUERY : DEPLOYMENT_LOGS_QUERY,
+  /*
+   * Branched rather than one call with a computed field name, which is what the old
+   * `Record<string, LogLine[] | null>` was buying. The two documents have two result types
+   * now — `{ buildLogs }` and `{ deploymentLogs }` — and a union of them has no property in
+   * common, so a computed key cannot be read off it. Two lines that each name their own
+   * field is the trade, and it is the same trade the monitor makes one layer up.
+   */
+  if (kind === "build") {
+    const data = await gql(
+      BUILD_LOGS_QUERY,
+      { deploymentId, limit },
+      { accessToken, operationName: "BuildLogs", signal },
+    );
+    // `?? []` although the schema says `[Log!]!`: a Railway that answered null here without
+    // an errors[] entry would reach the log pane as a null array, and a backfill that
+    // returns nothing is the designed empty state.
+    return data.buildLogs ?? [];
+  }
+
+  const data = await gql(
+    DEPLOYMENT_LOGS_QUERY,
     { deploymentId, limit },
-    {
-      accessToken,
-      operationName: isBuild ? "BuildLogs" : "DeploymentLogs",
-      signal,
-    },
+    { accessToken, operationName: "DeploymentLogs", signal },
   );
-  return data[isBuild ? "buildLogs" : "deploymentLogs"] ?? [];
+  return data.deploymentLogs ?? [];
 }

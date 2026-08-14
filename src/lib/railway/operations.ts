@@ -1,12 +1,58 @@
 /**
  * Every GraphQL document the app sends, in one file.
  *
- * Railway does not publish a schema artifact, so these are written against their docs
- * and the public GraphQL endpoint. `pnpm verify:schema` introspects the live API and
- * checks each root field below actually exists with the argument names used here —
- * run it before trusting any of this (see README, "Schema verification").
+ * Railway does not publish a schema artifact, so `pnpm schema:pull` dumps one from live
+ * introspection into ./schema.graphql, `pnpm codegen` generates the result and variable
+ * types below from it, and every document here is validated against it — nested fields,
+ * argument names, enum members and all. A renamed field fails `pnpm codegen`, and a
+ * mismatched result type fails `pnpm typecheck` at the call site.
+ *
+ * `pnpm verify:schema` is what says whether that committed schema still matches the live
+ * API. It validates these same documents against Railway's current schema and diffs the
+ * surface they reach — see README, "Schema verification".
+ *
+ * The type annotations are the load-bearing part of each export. `TypedDocument<Result,
+ * Variables>` is what `gql`/`gqlPartial` read the shapes from, so a document and its types
+ * cannot drift apart and the variables are checked against the document that consumes them.
  */
 
+import type {
+  BuildLogsQuery,
+  BuildLogsQueryVariables,
+  DeploymentEventsQuery,
+  DeploymentEventsQueryVariables,
+  DeploymentLogsQuery,
+  DeploymentLogsQueryVariables,
+  DeploymentQuery,
+  DeploymentQueryVariables,
+  EnvironmentCreateMutation,
+  EnvironmentCreateMutationVariables,
+  ProjectCreateMutation,
+  ProjectCreateMutationVariables,
+  ProjectMetricsQuery,
+  ProjectMetricsQueryVariables,
+  ProjectQuery,
+  ProjectQueryVariables,
+  ProjectsPersonalQuery,
+  ProjectsPersonalQueryVariables,
+  ProjectsWorkspaceQuery,
+  ProjectsWorkspaceQueryVariables,
+  ServiceCreateMutation,
+  ServiceCreateMutationVariables,
+  ServiceDeleteMutation,
+  ServiceDeleteMutationVariables,
+  ServiceInstanceDeployV2Mutation,
+  ServiceInstanceDeployV2MutationVariables,
+  StreamBuildLogsSubscription,
+  StreamBuildLogsSubscriptionVariables,
+  StreamDeploymentLogsSubscription,
+  StreamDeploymentLogsSubscriptionVariables,
+  VariableCollectionUpsertMutation,
+  VariableCollectionUpsertMutationVariables,
+} from "./graphql.generated";
+import type { TypedDocument } from "./typed-document";
+
+/** A fragment, not an operation: interpolated into the three documents that select it. */
 const PROJECT_FIELDS = /* GraphQL */ `
   fragment ProjectFields on Project {
     id
@@ -49,7 +95,10 @@ const PROJECT_FIELDS = /* GraphQL */ `
  * header rather than an empty dashboard: they are optional on ViewerNode, and gqlPartial
  * keeps whatever `me` did return.
  */
-export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
+export const PROJECTS_PERSONAL_QUERY: TypedDocument<
+  ProjectsPersonalQuery,
+  ProjectsPersonalQueryVariables
+> = /* GraphQL */ `
   ${PROJECT_FIELDS}
   query ProjectsPersonal {
     me {
@@ -75,7 +124,10 @@ export const PROJECTS_PERSONAL_QUERY = /* GraphQL */ `
  * `Workspace`, so the latter is the one liable to disappear without notice. Requires a
  * `workspace:*` scope at consent — see SCOPES in lib/auth/oidc.ts.
  */
-export const PROJECTS_WORKSPACE_QUERY = /* GraphQL */ `
+export const PROJECTS_WORKSPACE_QUERY: TypedDocument<
+  ProjectsWorkspaceQuery,
+  ProjectsWorkspaceQueryVariables
+> = /* GraphQL */ `
   ${PROJECT_FIELDS}
   query ProjectsWorkspace {
     me {
@@ -95,39 +147,41 @@ export const PROJECTS_WORKSPACE_QUERY = /* GraphQL */ `
   }
 `;
 
-export const PROJECT_QUERY = /* GraphQL */ `
-  query Project($id: String!) {
-    project(id: $id) {
-      id
-      name
-      environments {
-        edges {
-          node {
-            id
-            name
+export const PROJECT_QUERY: TypedDocument<ProjectQuery, ProjectQueryVariables> =
+  /* GraphQL */ `
+    query Project($id: String!) {
+      project(id: $id) {
+        id
+        name
+        environments {
+          edges {
+            node {
+              id
+              name
+            }
           }
         }
-      }
-      services {
-        edges {
-          node {
-            id
-            name
-            createdAt
-            serviceInstances {
-              edges {
-                node {
-                  id
-                  environmentId
-                  source {
-                    image
-                    repo
-                  }
-                  latestDeployment {
+        services {
+          edges {
+            node {
+              id
+              name
+              createdAt
+              serviceInstances {
+                edges {
+                  node {
                     id
-                    status
-                    createdAt
-                    updatedAt
+                    environmentId
+                    source {
+                      image
+                      repo
+                    }
+                    latestDeployment {
+                      id
+                      status
+                      createdAt
+                      updatedAt
+                    }
                   }
                 }
               }
@@ -136,8 +190,7 @@ export const PROJECT_QUERY = /* GraphQL */ `
         }
       }
     }
-  }
-`;
+  `;
 
 /**
  * What the containers in one environment are using, and what the workspace has spent.
@@ -172,7 +225,10 @@ export const PROJECT_QUERY = /* GraphQL */ `
  * workspace; `estimatedUsage` returns GB and vCPU rather than money, which is why it is not
  * selected here. Whatever renders this has to say which of those it is showing.
  */
-export const PROJECT_METRICS_QUERY = /* GraphQL */ `
+export const PROJECT_METRICS_QUERY: TypedDocument<
+  ProjectMetricsQuery,
+  ProjectMetricsQueryVariables
+> = /* GraphQL */ `
   query ProjectMetrics(
     $projectId: String!
     $environmentId: String!
@@ -228,11 +284,15 @@ export const PROJECT_METRICS_QUERY = /* GraphQL */ `
  * `ProjectCreateInput` also carries `workspaceId`, `defaultEnvironmentName`, `description`,
  * `isPublic`, `prDeploys`, `repo`, `runtime` and `isMonorepo`. The app sends `name` and
  * nothing else: an omitted `workspaceId` is what makes the project personal, and every
- * other member is a decision the user has not been asked to make. Adding one means adding
- * it to REQUIRED_INPUT_TYPES below, because a member this app sends is a member whose
- * removal must fail verification.
+ * other member is a decision the user has not been asked to make. Sending one is all it
+ * takes for its removal to fail verification now: the member is in
+ * `ProjectCreateMutationVariables`, so `pnpm typecheck` rejects the object the day
+ * `pnpm schema:pull` stops finding it, and there is no list to remember to update.
  */
-export const PROJECT_CREATE_MUTATION = /* GraphQL */ `
+export const PROJECT_CREATE_MUTATION: TypedDocument<
+  ProjectCreateMutation,
+  ProjectCreateMutationVariables
+> = /* GraphQL */ `
   ${PROJECT_FIELDS}
   mutation ProjectCreate($input: ProjectCreateInput!) {
     projectCreate(input: $input) {
@@ -253,7 +313,10 @@ export const PROJECT_CREATE_MUTATION = /* GraphQL */ `
  * `ephemeral`, `stageInitialChanges` and `applyChangesInBackground` are the remaining
  * members and are all left out — see the note on ProjectCreateInput above.
  */
-export const ENVIRONMENT_CREATE_MUTATION = /* GraphQL */ `
+export const ENVIRONMENT_CREATE_MUTATION: TypedDocument<
+  EnvironmentCreateMutation,
+  EnvironmentCreateMutationVariables
+> = /* GraphQL */ `
   mutation EnvironmentCreate($input: EnvironmentCreateInput!) {
     environmentCreate(input: $input) {
       id
@@ -262,7 +325,10 @@ export const ENVIRONMENT_CREATE_MUTATION = /* GraphQL */ `
   }
 `;
 
-export const SERVICE_CREATE_MUTATION = /* GraphQL */ `
+export const SERVICE_CREATE_MUTATION: TypedDocument<
+  ServiceCreateMutation,
+  ServiceCreateMutationVariables
+> = /* GraphQL */ `
   mutation ServiceCreate($input: ServiceCreateInput!) {
     serviceCreate(input: $input) {
       id
@@ -276,19 +342,28 @@ export const SERVICE_CREATE_MUTATION = /* GraphQL */ `
  * subscription keys on. The older `serviceInstanceDeploy` returns a Boolean and would
  * force a follow-up query to find the deployment.
  */
-export const SERVICE_DEPLOY_MUTATION = /* GraphQL */ `
+export const SERVICE_DEPLOY_MUTATION: TypedDocument<
+  ServiceInstanceDeployV2Mutation,
+  ServiceInstanceDeployV2MutationVariables
+> = /* GraphQL */ `
   mutation ServiceInstanceDeployV2($serviceId: String!, $environmentId: String!) {
     serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
   }
 `;
 
-export const SERVICE_DELETE_MUTATION = /* GraphQL */ `
+export const SERVICE_DELETE_MUTATION: TypedDocument<
+  ServiceDeleteMutation,
+  ServiceDeleteMutationVariables
+> = /* GraphQL */ `
   mutation ServiceDelete($id: String!) {
     serviceDelete(id: $id)
   }
 `;
 
-export const DEPLOYMENT_QUERY = /* GraphQL */ `
+export const DEPLOYMENT_QUERY: TypedDocument<
+  DeploymentQuery,
+  DeploymentQueryVariables
+> = /* GraphQL */ `
   query Deployment($id: String!) {
     deployment(id: $id) {
       id
@@ -320,7 +395,10 @@ export const DEPLOYMENT_QUERY = /* GraphQL */ `
  * chosen; `step` earns its place by being a bounded enum this app can translate, and the
  * only useful thing left when all three text members come back null.
  */
-export const DEPLOYMENT_EVENTS_QUERY = /* GraphQL */ `
+export const DEPLOYMENT_EVENTS_QUERY: TypedDocument<
+  DeploymentEventsQuery,
+  DeploymentEventsQueryVariables
+> = /* GraphQL */ `
   query DeploymentEvents($id: String!, $last: Int) {
     deploymentEvents(id: $id, last: $last) {
       edges {
@@ -338,7 +416,10 @@ export const DEPLOYMENT_EVENTS_QUERY = /* GraphQL */ `
   }
 `;
 
-export const DEPLOYMENT_LOGS_QUERY = /* GraphQL */ `
+export const DEPLOYMENT_LOGS_QUERY: TypedDocument<
+  DeploymentLogsQuery,
+  DeploymentLogsQueryVariables
+> = /* GraphQL */ `
   query DeploymentLogs($deploymentId: String!, $limit: Int) {
     deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
       timestamp
@@ -348,18 +429,22 @@ export const DEPLOYMENT_LOGS_QUERY = /* GraphQL */ `
   }
 `;
 
-export const BUILD_LOGS_QUERY = /* GraphQL */ `
-  query BuildLogs($deploymentId: String!, $limit: Int) {
-    buildLogs(deploymentId: $deploymentId, limit: $limit) {
-      timestamp
-      message
-      severity
+export const BUILD_LOGS_QUERY: TypedDocument<BuildLogsQuery, BuildLogsQueryVariables> =
+  /* GraphQL */ `
+    query BuildLogs($deploymentId: String!, $limit: Int) {
+      buildLogs(deploymentId: $deploymentId, limit: $limit) {
+        timestamp
+        message
+        severity
+      }
     }
-  }
-`;
+  `;
 
 /** Streamed over `wss://backboard.railway.com/graphql/v2` (graphql-transport-ws). */
-export const DEPLOYMENT_LOGS_SUBSCRIPTION = /* GraphQL */ `
+export const DEPLOYMENT_LOGS_SUBSCRIPTION: TypedDocument<
+  StreamDeploymentLogsSubscription,
+  StreamDeploymentLogsSubscriptionVariables
+> = /* GraphQL */ `
   subscription StreamDeploymentLogs($deploymentId: String!) {
     deploymentLogs(deploymentId: $deploymentId) {
       timestamp
@@ -369,7 +454,10 @@ export const DEPLOYMENT_LOGS_SUBSCRIPTION = /* GraphQL */ `
   }
 `;
 
-export const BUILD_LOGS_SUBSCRIPTION = /* GraphQL */ `
+export const BUILD_LOGS_SUBSCRIPTION: TypedDocument<
+  StreamBuildLogsSubscription,
+  StreamBuildLogsSubscriptionVariables
+> = /* GraphQL */ `
   subscription StreamBuildLogs($deploymentId: String!) {
     buildLogs(deploymentId: $deploymentId) {
       timestamp
@@ -385,108 +473,74 @@ export const BUILD_LOGS_SUBSCRIPTION = /* GraphQL */ `
  * `replace: false` — the service was created moments ago and has nothing to replace, and
  * a mutation that can silently wipe variables is the wrong default to have lying around.
  */
-export const VARIABLE_COLLECTION_UPSERT_MUTATION = /* GraphQL */ `
+export const VARIABLE_COLLECTION_UPSERT_MUTATION: TypedDocument<
+  VariableCollectionUpsertMutation,
+  VariableCollectionUpsertMutationVariables
+> = /* GraphQL */ `
   mutation VariableCollectionUpsert($input: VariableCollectionUpsertInput!) {
     variableCollectionUpsert(input: $input)
   }
 `;
 
 /**
- * Root fields the app depends on, for `pnpm verify:schema`.
- * `args` lists argument names that must be present (not their types).
+ * Documents whose withdrawal degrades a readout rather than breaking the app.
+ *
+ * Everything else here is a dependency, and `verify:schema` derives that from the documents
+ * themselves: it validates each one against Railway's live schema, so a field, argument,
+ * enum member or input member this app sends and Railway no longer offers exits non-zero.
+ * There is no list of required fields to keep up to date any more, which is the point —
+ * the old one could only ever name *root* fields, and named them by hand.
+ *
+ * These two are the exception, and each is exactly the trade its own document explains.
+ * `Query.metrics` and `Query.deploymentEvents` are read through `gqlPartial`, on paths that
+ * already render a designed answer when Railway says no, so failing the schema CI job over
+ * one would be failing a build over a capability the app has a clean answer for. A
+ * validation error inside these two documents is reported and does not fail the run.
+ *
+ * The exemption is per document rather than per field, which is wider than it needs to be
+ * and costs nothing: `Query.project` is selected by ProjectMetrics as well, and it is a
+ * hard dependency — but PROJECT_QUERY selects it too and is not exempt, so its withdrawal
+ * still fails the run there.
  */
-export const REQUIRED_FIELDS: Array<{
-  root: "Query" | "Mutation" | "Subscription";
-  field: string;
-  args: string[];
-}> = [
-  { root: "Query", field: "me", args: [] },
-  { root: "Query", field: "project", args: ["id"] },
-  { root: "Query", field: "deployment", args: ["id"] },
-  { root: "Query", field: "deploymentLogs", args: ["deploymentId"] },
-  { root: "Query", field: "buildLogs", args: ["deploymentId"] },
-  { root: "Mutation", field: "serviceCreate", args: ["input"] },
+export const DEGRADING_OPERATIONS: Array<{ operationName: string; note: string }> = [
+  /*
+   * Where a failed deployment's reason lives. Losing it costs no capability: a failed row
+   * degrades to exactly what it showed before — the status, the fallback sentence, and the
+   * link to Railway's own page.
+   */
   {
-    root: "Mutation",
-    field: "serviceInstanceDeployV2",
-    args: ["serviceId", "environmentId"],
+    operationName: "DeploymentEvents",
+    note: "a failed row shows the status and a link, with no reason",
   },
-  { root: "Mutation", field: "serviceDelete", args: ["id"] },
   /*
-   * Required since the preset catalog started carrying environment. It was probed as
-   * optional first — a mutation this app builds an input for by hand is not something to
-   * assume — and confirmed against the live API on 2026-08-13, together with the shape in
-   * REQUIRED_INPUT_TYPES below.
+   * The usage readout, and with it the only cost signal the app has.
    *
-   * Required rather than optional because a database preset without it does not degrade,
-   * it crash-loops: `postgres` with no POSTGRES_PASSWORD exits on its first tick and
-   * Railway restarts it forever.
+   * A metrics read Railway refuses must degrade the row, not blank the dashboard: the
+   * container list, its filters and every destructive action are untouched by losing this,
+   * and the readout falls back to the same em dash it shows for a container with no samples
+   * yet.
    */
-  { root: "Mutation", field: "variableCollectionUpsert", args: ["input"] },
-  /*
-   * The two create paths, confirmed against the live API on 2026-08-14 together with their
-   * input shapes below. Both return an object rather than a Boolean —
-   * `projectCreate: Project!` and `environmentCreate: Environment!` — which is what lets
-   * the dashboard select what was just made instead of re-reading the list to find it.
-   *
-   * Required rather than optional because losing either does not degrade a feature, it
-   * removes the app's answer to an empty account: the first-run path is a person with no
-   * project, and the alternative to creating one here is sending them to railway.com and
-   * hoping they come back.
-   */
-  { root: "Mutation", field: "projectCreate", args: ["input"] },
-  { root: "Mutation", field: "environmentCreate", args: ["input"] },
-  { root: "Subscription", field: "deploymentLogs", args: ["deploymentId"] },
-  { root: "Subscription", field: "buildLogs", args: ["deploymentId"] },
+  {
+    operationName: "ProjectMetrics",
+    note: "container rows show no CPU, memory or uptime, and the list shows no usage total",
+  },
 ];
 
 /**
- * Capabilities Railway does not document in its public API guides. The verify script
- * reports whether each exists, and `note` says what the app can or cannot do without it —
- * previously the script printed one hardcoded sentence for all of them, which was already
- * wrong for `serviceInstanceUpdate`.
+ * Capabilities Railway does not document in its public API guides, and this app does not
+ * use. The verify script reports whether each exists, and `note` says what the app can or
+ * cannot do without it — previously the script printed one hardcoded sentence for all of
+ * them, which was already wrong for `serviceInstanceUpdate`.
+ *
+ * These cannot be derived from the documents for the same reason the entries above can: no
+ * document mentions them. They are a wishlist against the live schema, which is why
+ * `variableUpsert` is here while the collection form the app actually sends is not.
  */
 export const OPTIONAL_FIELDS: Array<{
   root: "Query" | "Mutation";
   field: string;
   note: string;
 }> = [
-  /*
-   * Where a failed deployment's reason lives, and the one entry here the app actually
-   * sends. Optional rather than required because losing it costs no capability: a failed
-   * row degrades to exactly what it showed before — the status, the fallback sentence, and
-   * the link to Railway's own page.
-   *
-   * verify:schema reports the *root* field only. A withdrawn member of
-   * DeploymentEventPayload is two types down and invisible to it; that arrives at runtime,
-   * is swallowed by the same best-effort catch, and shows up as one debug record. Stated
-   * in README's Limitations rather than papered over.
-   */
-  {
-    root: "Query",
-    field: "deploymentEvents",
-    note: "a failed row shows the status and a link, with no reason",
-  },
-  /*
-   * The usage readout, and with it the only cost signal the app has.
-   *
-   * Optional rather than required because a metrics read Railway refuses must degrade the
-   * row, not blank the dashboard: the container list, its filters and every destructive
-   * action are untouched by losing this, and the readout falls back to the same em dash it
-   * shows for a container with no samples yet. Requiring it would exit `verify:schema`
-   * non-zero — and therefore fail the schema CI job — over a capability the app already has
-   * a clean answer for.
-   *
-   * The half this cannot see: `Customer.currentUsage`, which is three types below
-   * `Query.project` and so invisible to a root-field check. That withdrawal arrives at
-   * runtime, is absorbed by gqlPartial, and shows up as one debug record — the same gap
-   * DeploymentEventPayload has, stated in README's Limitations rather than papered over.
-   */
-  {
-    root: "Query",
-    field: "metrics",
-    note: "container rows show no CPU, memory or uptime, and the list shows no usage total",
-  },
   {
     root: "Mutation",
     field: "deploymentStop",
@@ -503,86 +557,16 @@ export const OPTIONAL_FIELDS: Array<{
     note: "a service cannot be edited in place",
   },
   /*
-   * The per-key fallback. `variableCollectionUpsert` above is what the app actually sends
-   * and is now required; this one is here so that if the collection form is ever withdrawn
-   * the report names the replacement rather than leaving the reader to find it.
+   * The per-key fallback. `variableCollectionUpsert` is what the app actually sends, and a
+   * document that sends it is what makes it a dependency; this entry is here so that if the
+   * collection form is ever withdrawn the report names the replacement rather than leaving
+   * the reader to find it.
    */
   {
     root: "Mutation",
     field: "variableUpsert",
     note: "no per-key fallback if variableCollectionUpsert is withdrawn",
   },
-];
-
-/**
- * Input objects the app constructs by hand.
- *
- * `verify:schema` has always proved that root *fields* exist and has never once looked at
- * the shape of the input they take — which is exactly where `serviceCreate(input: {...})`
- * is an unchecked assumption. A renamed member there fails at runtime, per request, with
- * whatever wording Railway chooses.
- */
-export const REQUIRED_INPUT_TYPES: Array<{ name: string; fields: string[] }> = [
-  {
-    name: "ServiceCreateInput",
-    fields: ["projectId", "environmentId", "name", "source"],
-  },
-  /*
-   * Every member listed here is one `createContainer` sends, `skipDeploys` included:
-   * Railway redeploys a service when its variables change, and the app issues its own
-   * deploy on the very next line. Losing that member would not fail loudly — it would
-   * produce a second deployment the app never learns the id of, and the row would stream
-   * logs for a deployment the user is not watching.
-   */
-  {
-    name: "VariableCollectionUpsertInput",
-    fields: [
-      "projectId",
-      "environmentId",
-      "serviceId",
-      "variables",
-      "replace",
-      "skipDeploys",
-    ],
-  },
-  /*
-   * `name` alone. Every other member of ProjectCreateInput is left out deliberately — see
-   * PROJECT_CREATE_MUTATION — and listing one here that the app does not send would assert
-   * a dependency it does not have.
-   *
-   * `name` is nullable on the live schema (`String`, not `String!`): Railway will name an
-   * unnamed project itself. The app always sends one, so this entry is about the member
-   * still existing, not about it being mandatory.
-   */
-  { name: "ProjectCreateInput", fields: ["name"] },
-  /*
-   * `skipInitialDeploys` is in this list for the same reason `skipDeploys` is in the one
-   * above: its removal would not fail loudly, it would quietly start billing someone for a
-   * copy of every service in the project.
-   */
-  {
-    name: "EnvironmentCreateInput",
-    fields: ["projectId", "name", "skipInitialDeploys"],
-  },
-];
-
-/**
- * Enum members the app sends by name.
- *
- * The third axis of the same defect REQUIRED_INPUT_TYPES exists for. A root-field check
- * proves `Query.metrics` is still there; it says nothing about `CPU_USAGE` still being a
- * member of `MetricMeasurement`, and a withdrawn member is not a degraded readout — it is
- * GRAPHQL_VALIDATION_FAILED on every metrics request, because the whole document fails to
- * validate. `groupBy: [SERVICE_ID]` is written into the document itself and has exactly the
- * same exposure.
- *
- * Only members the app actually sends. `CPU_USAGE_2` and the limit measurements are real and
- * are not here, for the reason ProjectCreateInput's note gives: listing something the app
- * does not send asserts a dependency it does not have.
- */
-export const REQUIRED_ENUM_MEMBERS: Array<{ name: string; members: string[] }> = [
-  { name: "MetricMeasurement", members: ["CPU_USAGE", "MEMORY_USAGE_GB"] },
-  { name: "MetricTag", members: ["SERVICE_ID"] },
 ];
 
 /** Printed, never enforced: the shape is unknown until the probe has been run. */

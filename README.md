@@ -20,7 +20,7 @@ and deploy logs streamed while it happens.
 **Reference** — [Decisions (11 ADRs)](#decisions) · [Tests](#tests) ·
 [Design system](#design-system) · [Internationalisation](#internationalisation) ·
 [Performance](#performance) · [Accessibility](#accessibility) · [Logs](#logs) ·
-[Schema verification](#schema-verification) · [Security](SECURITY.md) ·
+[Typed documents](#typed-documents-and-schema-verification) · [Security](SECURITY.md) ·
 [License](#license)
 
 ---
@@ -79,11 +79,11 @@ The app deploys itself the same way it deploys containers.
 ### Checks
 
 ```bash
-pnpm check          # format + lint (0 warnings) + types + knip + coverage gate
+pnpm check          # format + lint (0 warnings) + types + codegen drift + knip + coverage
 pnpm test:e2e       # Playwright against the fake Railway fixture
 pnpm build && pnpm size   # per-route first-load JS against bundle-budgets.json
 pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
-pnpm verify:schema  # pinned OIDC metadata against Railway's discovery document
+pnpm verify:schema  # pinned OIDC metadata, and every document against the committed schema
 ```
 
 Two more gates have no local script, because what they check is not the source tree:
@@ -163,9 +163,10 @@ SSE route multiplexes deployment status and log output into the open tab.
   containers it created cost, only what the workspace they live in has spent, and the usage
   total beside the list is in vCPU and GB for exactly that reason. Three cases have no figure
   at all: a personal project, which belongs to no workspace; a token without
-  `workspace:viewer`, which cannot read one; and `Customer` being withdrawn, which
-  `verify:schema` cannot see because it is three types below a root field and which therefore
-  arrives at runtime as one `debug` record. All three render a link to Railway's own billing
+  `workspace:viewer`, which cannot read one; and `Customer` being withdrawn, which the
+  `ProjectMetrics` document is now validated against the schema for — three types below a root
+  field and no longer invisible, since `pnpm codegen` reads `customer { currentUsage
+billingPeriod { start end } }` as part of the document. All three render a link to Railway's own billing
   page rather than a number this app would have to caveat further.
 - **Uptime is derived, and it counts the build.** There is no started-at anywhere in the
   schema, so it is measured from `latestDeployment.createdAt` — when the deployment was
@@ -175,11 +176,12 @@ SSE route multiplexes deployment status and log output into the open tab.
   to the request budget rather than to what `Query.metrics` will return: a wider window and a
   faster `sampleRateSeconds` would give a sparkline at no extra _request_ cost but a much
   larger response, and the readout is deliberately the cheap half. `Query.metrics` is in
-  `OPTIONAL_FIELDS`, so losing it costs the readouts and the usage total and nothing else —
-  the row falls back to the same em dash it shows for a container with no samples yet.
+  `DEGRADING_OPERATIONS`, so losing it costs the readouts and the usage total and nothing
+  else — the row falls back to the same em dash it shows for a container with no samples yet.
 - **Projects and environments can be created here but never deleted here.** `projectCreate`
-  and `environmentCreate` are in `REQUIRED_FIELDS`; `projectDelete` and `environmentDelete`
-  are absent from `operations.ts` entirely, so no request shape reaches them. This is not a
+  and `environmentCreate` have documents, which is what makes them dependencies;
+  `projectDelete` and `environmentDelete` are absent from `operations.ts` entirely, so no
+  request shape reaches them. This is not a
   gap waiting to be filled. Deleting a service is bounded — the `MANAGED_PREFIX` check means
   this app only ever deletes what it created, and what it created is one container. Deleting
   a project takes every service, environment and volume inside it, including the ones this
@@ -224,18 +226,21 @@ SSE route multiplexes deployment status and log output into the open tab.
   its own document — never from the status poll, which runs for the life of every open stream
   and would turn a withdrawn field into a schema rejection the monitor treats as transient
   and now backs off from, so the silence would last the full duration ceiling and be quieter
-  than before. `deploymentEvents` is in `OPTIONAL_FIELDS`, so `pnpm verify:schema` reports its
-  withdrawal without failing CI, and a row whose feed is empty, refused or withdrawn shows
-  exactly what it showed before: the status, the sentence, and the link out. Three things stay
+  than before. `DeploymentEvents` is in `DEGRADING_OPERATIONS`, so `pnpm verify:schema` reports
+  its withdrawal without failing, and a row whose feed is empty, refused or withdrawn shows
+  exactly what it showed before: the status, the sentence, and the link out. Two things stay
   unresolved. Which of `payload.error`, `payload.reason` and `payload.detail` Railway actually
   populates has never been observed on a real failed deployment — the schema was introspected,
   not the behaviour — so the app tries all three newest-event-first and `pnpm probe:deployment
-<id>` settles it. `verify:schema` introspects **root** fields only, so it can report that
-  `deploymentEvents` is gone but not that a member of `DeploymentEventPayload` is; that
-  arrives at runtime, is swallowed by the same best-effort catch, and shows up as one `debug`
-  record. And the reason arrives on **expand**, not on page load: the stream only opens for a
-  settled container once its panel is open, and fetching per failed row at render time is the
-  cost profile the whole streaming design exists to avoid.
+<id>` settles it. And the reason arrives on **expand**, not on page load: the stream only
+  opens for a settled container once its panel is open, and fetching per failed row at render
+  time is the cost profile the whole streaming design exists to avoid.
+
+  The third used to be that verification could not see a withdrawn member of
+  `DeploymentEventPayload`, two types below the root field. It can now: the document itself is
+  validated against Railway's schema, `payload { error reason detail skipped }` included, and
+  `pnpm codegen` refuses to generate a type for a selection Railway no longer offers.
+
 - **Spin-down means destroy.** `deploymentStop` does exist — verified against the live
   API on 2026-08-13, so this is no longer an unknown, it is a feature that has not been
   built. Offering it means a second confirm path, a fourth container state the dashboard
@@ -295,9 +300,14 @@ SSE route multiplexes deployment status and log output into the open tab.
   packages, add `register()` to `src/instrumentation.ts`, point Grafana Alloy at Railway's
   log drain. Nothing in `src/**` outside that one file should need to change — that is the
   test of whether the seam was cut in the right place.
-- **Typed GraphQL documents** via codegen against the live schema, replacing the
-  unchecked `gql<T>()` assertions (ADR-8). `verify-schema.ts` catches a renamed root
-  field today; it cannot catch a renamed nested one.
+- **Move off the two deprecated reads**, which the deprecation report in `pnpm verify:schema`
+  named as soon as it existed. `User.projects` is marked _"This field will not return anything
+  anymore, go through the workspace's projects"_ and `Service.serviceInstances` is marked
+  _"Use environment.serviceInstances for properly scoped access control"_ — the personal
+  project source and the container list, so the two most important reads in the app. Both
+  still answer, which is why this is a plan rather than a bug. It is also a candidate
+  explanation for the empty-project-list case documented above, and the reason to do it before
+  Railway makes the decision for us.
 - **Budget guards:** a per-user cap on concurrent containers, and a TTL that reaps them
   automatically — the obvious next thing for a tool whose whole purpose is creating
   billable infrastructure.
@@ -682,48 +692,85 @@ exactly those, and hand-rolling them now would mean two spellings of one concept
 
 ---
 
-## Schema verification
+## Typed documents and schema verification
 
-Railway publishes no schema artifact, and their API guides omit several things this app
-depends on. Rather than assume, `scripts/verify-schema.ts` introspects the live API and
-checks every root field the app sends, plus re-fetches the OIDC discovery document and
-diffs it against the pinned metadata:
+Railway publishes no schema artifact and their API guides omit several things this app
+depends on, so the schema is dumped from live introspection and committed:
 
 ```bash
-pnpm verify:schema                       # discovery checks only
-RAILWAY_TOKEN=… pnpm verify:schema       # + full schema introspection
+RAILWAY_TOKEN=… pnpm schema:pull    # src/lib/railway/schema.graphql — 6 900 lines of SDL
+pnpm codegen                        # the documents' result and variable types, from that file
 ```
 
-Get a token at <https://railway.com/account/tokens>. Beyond the root fields, it
-introspects the **input objects the app builds by hand** — `ServiceCreateInput`,
-`VariableCollectionUpsertInput`, `ProjectCreateInput` and `EnvironmentCreateInput`. That
-gap was real: a renamed member inside an input passes a root-field check and fails every
-spin-up.
+`pnpm codegen` validates all sixteen documents against that schema and generates
+`src/lib/railway/graphql.generated.ts` — 345 lines, being exactly the operation types plus
+the eight enums and input objects the documents reach. Each export in `operations.ts` is
+annotated with its pair:
 
-Each of those input entries lists only the members the app actually sends, which is why
-`ProjectCreateInput` asserts `name` alone and not the eight other members Railway offers
-there. Two of the listed members exist to prevent a silent cost rather than a crash:
-`skipDeploys` on the variables upsert, and `skipInitialDeploys` on `EnvironmentCreateInput`
-— without the latter Railway seeds a new environment from an existing one and deploys what
-it copies, so a person clicking **New environment** would be billed for a duplicate of
-every service in the project. Losing either member would not fail loudly.
+```ts
+export const PROJECT_QUERY: TypedDocument<ProjectQuery, ProjectQueryVariables> = …
+```
 
-It also prints the optional capabilities, with the consequence of each. As of 2026-08-13
-`deploymentStop`, `deploymentRemove` and `serviceInstanceUpdate` all exist — see
-Limitations for why spin-down is still destroy-only regardless. `Query.deploymentEvents`
-is the one entry in that list the app actually sends: it is optional not because it is
-unused but because losing it costs no capability, only the reason on a failed row.
+so `gql`/`gqlPartial` read both off the document and a call site passes no type argument at
+all. What that replaced was `gql<{ project: ProjectNode & { services: Edges<ServiceNode> } }>`
+— a result shape restated by hand next to the document it claimed to describe, checked by
+nothing, alongside a `variables` argument typed `Record<string, unknown>`. A renamed nested
+field now fails `pnpm codegen`; a variable of the wrong type fails `pnpm typecheck`.
 
-CI runs the discovery half on every push.
+**The artifact is in git**, which is the decision the rest of this rests on. CI holds no
+`RAILWAY_TOKEN`, so a schema fetched at build time would mean neither the typecheck nor the
+codegen gate could run there — and a generated file nobody can regenerate is a file nobody
+can check. Committed, `pnpm codegen:check` is part of `pnpm check` and of the `quality` job:
+regeneration must be a no-op, so a document edited without regenerating fails the merge.
+Committing it also makes a Railway-side change readable as lines in a pull request rather
+than as a runtime `undefined`.
+
+```bash
+pnpm verify:schema                       # discovery + documents vs the committed schema
+RAILWAY_TOKEN=… pnpm verify:schema       # + documents vs the live API, and the drift between
+```
+
+With a token, `scripts/verify-schema.ts` introspects the live API, validates every document
+against **it** rather than against the committed copy, and then diffs the two over the surface
+the documents reach — 76 selected fields and 38 input members, as of today. The diff is what
+catches a change validation cannot see: a field going from `String!` to `String` validates
+perfectly and makes every non-null claim in the generated types a lie. An input member
+becoming required is the same class, and is invisible to a document because the app builds
+those objects in TypeScript.
+
+**There is no field list to maintain any more.** `REQUIRED_FIELDS`, `REQUIRED_INPUT_TYPES` and
+`REQUIRED_ENUM_MEMBERS` are gone — three hand-written manifests that could only ever name
+_root_ fields, and said nothing about the selections underneath them. Two declarations
+survive, because neither is derivable from a document:
+
+- `DEGRADING_OPERATIONS` — `ProjectMetrics` and `DeploymentEvents`, the two documents whose
+  refusal degrades a readout rather than breaking the app. A validation error inside those is
+  reported and does not fail the run. That is a product decision, not a fact about the schema.
+- `OPTIONAL_FIELDS` — capabilities Railway does not document and this app does not use, with
+  what the app cannot do without each. As of 2026-08-14 `deploymentStop`, `deploymentRemove`,
+  `serviceInstanceUpdate` and `variableUpsert` all exist; see Limitations for why spin-down is
+  destroy-only regardless. No document mentions them, so no derivation can find them.
+
+It also prints every **deprecated** field the app selects, which found two on the first run
+and both are load-bearing: `User.projects` (_"This field will not return anything anymore, go
+through the workspace's projects"_) and `Service.serviceInstances` (_"Use
+environment.serviceInstances for properly scoped access control"_). They still answer, and
+the personal project source is exactly the one the section below is about. That is reported,
+not gated — a deprecation is an announcement, and the app keeps working until the field goes.
+
+CI runs the discovery check and the committed-schema validation on every push; the live
+comparison is local, because CI has no token to make it with.
 
 ### When the dashboard says there are no projects
 
-`verify:schema` only introspects _root_ fields, so it cannot see what hangs off `me` —
-and the project list is read from `me`. When the dashboard reports an empty list for an
-account that plainly has projects, the cause is one of four things that look identical
-from the outside: consent granted a narrower scope than was asked for, the OAuth token
-sees a different viewer than the browser session, the projects hang off a connection the
-app does not query, or there genuinely are none.
+Verification proves the document is valid, which is a different claim from the data being
+there — and the project list is read from `me`, where `User.projects` is deprecated upstream
+with _"This field will not return anything anymore, go through the workspace's projects"_.
+When the dashboard reports an empty list for an account that plainly has projects, the cause
+is one of four things that look identical from the outside: consent granted a narrower scope
+than was asked for, the OAuth token sees a different viewer than the browser session, the
+projects hang off a connection the app does not query — which that deprecation says is now
+the likeliest of the four — or there genuinely are none.
 
 Note the shape of Railway's refusal, because it is not the one the spec suggests: an
 unauthorized field returns **HTTP 200** with `{"message":"Not Authorized","extensions":

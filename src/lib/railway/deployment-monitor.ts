@@ -8,7 +8,12 @@ import { sleep } from "@/lib/utils";
 import { getDeployment, getDeploymentFailure, getLogs } from "./api";
 import { RailwayApiError } from "./errors";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
-import { createLogClient, streamLogs } from "./subscribe";
+import {
+  createLogClient,
+  streamLogs,
+  type LogSubscriptionDocument,
+  type LogSubscriptionField,
+} from "./subscribe";
 import {
   isTerminal,
   isTransitioning,
@@ -58,8 +63,8 @@ export type MonitorDeps = {
   getDeploymentFailure: typeof getDeploymentFailure;
   subscribeLogs: (
     accessToken: string,
-    document: string,
-    field: "buildLogs" | "deploymentLogs",
+    document: LogSubscriptionDocument,
+    field: LogSubscriptionField,
     deploymentId: string,
     signal: AbortSignal,
   ) => AsyncGenerator<LogLine>;

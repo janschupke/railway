@@ -11,8 +11,10 @@ meta:
 pnpm check
 ```
 
-is `format:check && lint && typecheck && knip && test:coverage`. **Run it before saying
-anything is done.** `pnpm format` fixes the formatting half.
+is `format:check && lint && typecheck && codegen:check && knip && test:coverage`. **Run it
+before saying anything is done.** `pnpm format` fixes the formatting half, and `pnpm codegen`
+fixes the codegen half — `codegen:check` regenerates the GraphQL types and fails if the
+result differs from what is committed, so a document edited without regenerating stops here.
 
 CI adds four things `pnpm check` does not run: `pnpm build && pnpm size`, `pnpm test:e2e`,
 `pnpm lighthouse`, and `pnpm verify:schema`. Run whichever your change can reach — the
@@ -35,15 +37,15 @@ dead. That is why `src/test/log-capture.ts` imports nothing from `src/lib`.
 `.github/workflows/ci.yml`, on push and PR to `master` plus a Monday cron, six jobs plus an
 aggregator:
 
-| Job        | What it runs                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------- |
-| `quality`  | `pnpm audit --prod --audit-level=high` (gating) + full-tree audit (advisory), prettier, eslint, tsc, knip, coverage |
-| `build`    | `pnpm build`, then `pnpm size`                                                                                      |
-| `browser`  | Playwright — both the `chromium` and `mobile` projects — then `pnpm serve:e2e` backgrounded and LHCI, in one job    |
-| `image`    | hadolint, `docker build`, boot the image against `/api/health`, then Trivy on what was built                        |
-| `secrets`  | gitleaks over the whole history                                                                                     |
-| `schema`   | `pnpm verify:schema` — OIDC discovery drift only, since CI holds no `RAILWAY_TOKEN`                                 |
-| `required` | aggregator named **"All checks"**, the single name branch protection requires                                       |
+| Job        | What it runs                                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `quality`  | `pnpm audit --prod --audit-level=high` (gating) + full-tree audit (advisory), prettier, eslint, tsc, codegen drift, knip, coverage                                 |
+| `build`    | `pnpm build`, then `pnpm size`                                                                                                                                     |
+| `browser`  | Playwright — both the `chromium` and `mobile` projects — then `pnpm serve:e2e` backgrounded and LHCI, in one job                                                   |
+| `image`    | hadolint, `docker build`, boot the image against `/api/health`, then Trivy on what was built                                                                       |
+| `secrets`  | gitleaks over the whole history                                                                                                                                    |
+| `schema`   | `pnpm verify:schema` — OIDC discovery, plus every document validated against the committed schema; the live comparison needs `RAILWAY_TOKEN`, which CI has none of |
+| `required` | aggregator named **"All checks"**, the single name branch protection requires                                                                                      |
 
 **A new job has to be added to `required`'s `needs`.** From the aggregator, a job that was
 never listed is indistinguishable from one that does not exist, so branch protection goes
@@ -92,6 +94,14 @@ once.
 - Files under `scripts/` run on Node's type-stripping loader
   (`node --experimental-strip-types`), which is why `allowImportingTsExtensions` is on and
   why those imports carry explicit `.ts` specifiers. Safe because the project never emits.
+  `src/lib/railway/documents.ts` carries one too, and is the only file under `src/` that
+  does: `verify-schema.ts` reaches it, so that loader resolves its imports as written.
+- **`src/lib/railway/schema.graphql` and `graphql.generated.ts` are generated and committed.**
+  `pnpm schema:pull` writes the first from live introspection and needs `RAILWAY_TOKEN`;
+  `pnpm codegen` writes the second from it and needs nothing, which is what lets CI check
+  both without a credential. Do not hand-edit either. The SDL is in `.prettierignore` —
+  `printSchema` is its normaliser — while the generated types are prettier-formatted by a
+  codegen hook so `format:check` has nothing to say about them.
 - `noUncheckedIndexedAccess` is on. An index read is `T | undefined` — Relay connections and
   preset arrays are indexed all over this codebase. **Narrow it; do not `!` it away.**
 - Also on: `noFallthroughCasesInSwitch`, `noImplicitOverride`, `isolatedModules`.

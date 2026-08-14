@@ -63,6 +63,14 @@ export default defineConfig({
         "src/**/*.d.ts",
         "src/**/*.test.*",
         /*
+         * Railway's schema, which lives beside the client that queries it. `all` reports
+         * every file under `include`, and the v8 provider hands each one to a JavaScript
+         * parser — so 6 900 lines of SDL arrive as a RolldownError on every coverage run.
+         * It is data, not code; `src/lib/railway/graphql.generated.ts` is the code generated
+         * from it and stays inside the gate, where it costs nothing because it is types only.
+         */
+        "src/**/*.graphql",
+        /*
          * Framework shells: these are React Server Components and route boundaries
          * whose behaviour is composition. They are covered end-to-end by Playwright
          * (e2e/), which does not feed this number — counting them here would either

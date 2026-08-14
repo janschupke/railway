@@ -136,9 +136,15 @@ browser. Do not introduce persistence to solve a caching problem.
 ## The GraphQL client is hand-rolled, on purpose
 
 `src/lib/railway/client.ts` (transport, retry, timeout) and `src/lib/railway/operations.ts`
-(documents and the field manifest). Not Apollo (ADR-8). `src/lib/railway/subscribe.ts`
-speaks `graphql-ws` upstream; `mappers.ts` turns Railway's shapes into
-`src/lib/railway/types.ts`.
+(the documents). Not Apollo (ADR-8). `src/lib/railway/subscribe.ts` speaks `graphql-ws`
+upstream; `mappers.ts` turns Railway's shapes into `src/lib/railway/types.ts`.
+
+**The documents carry their own types, and nothing else may claim them.** Each export in
+`operations.ts` is annotated `TypedDocument<Result, Variables>` from
+`graphql.generated.ts`, and `gql`/`gqlPartial` read both off the document — so a call site
+passes no type argument and its variables are checked. Writing a result shape by hand is
+the thing T-476 removed: it was an assertion nothing verified. A new document means a new
+entry in `operations.ts`, `pnpm codegen`, and nothing else.
 
 Scripts exist so you do not have to reason about Railway's schema from memory:
 
@@ -148,12 +154,19 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
   `estimatedUsage` and the `project.workspace.customer` chain answer for a real OAuth
   session. Introspection says what the schema declares; only this says what the token is
   permitted to read, which is a different question and the one the readouts depend on.
-- `pnpm verify:schema` — introspects the live API against `REQUIRED_FIELDS`,
-  `OPTIONAL_FIELDS`, `PROBED_INPUT_TYPES`, `REQUIRED_INPUT_TYPES` and
-  `REQUIRED_ENUM_MEMBERS` in `operations.ts`, and
-  diffs the pinned OIDC metadata in `src/lib/auth/oidc-metadata.ts`. Run it after touching
-  either. Full introspection needs `RAILWAY_TOKEN`; CI holds none, so CI only checks OIDC
-  discovery — a schema change can pass CI and fail locally.
+- `pnpm schema:pull` — dumps Railway's schema from live introspection into
+  `src/lib/railway/schema.graphql`, which is **committed**. Needs `RAILWAY_TOKEN`.
+- `pnpm codegen` — generates `src/lib/railway/graphql.generated.ts` from that artifact and
+  the documents in `operations.ts`, validating each one on the way. Needs no token, which is
+  what lets `pnpm codegen:check` gate CI: regeneration must be a no-op.
+- `pnpm verify:schema` — validates every document against the committed schema (no token),
+  then against the **live** schema and diffs the two over the surface the documents reach
+  (with `RAILWAY_TOKEN`). It also prints the optional capabilities, the probed input shapes
+  and any deprecated field the app selects. There is no hand-maintained field list any more;
+  the only declarations left in `operations.ts` are `DEGRADING_OPERATIONS` and
+  `OPTIONAL_FIELDS`, which are product decisions rather than derivable facts. CI holds no
+  token, so the live comparison is local-only — a Railway-side change can pass CI and fail
+  here.
 
 ## Import boundaries are enforced from the client side
 
@@ -266,5 +279,10 @@ pnpm check
 If you edited `src/lib/railway/operations.ts` or `src/lib/auth/oidc-metadata.ts`, also:
 
 ```sh
+pnpm codegen        # a document's types; `pnpm check` fails if this was not run
 pnpm verify:schema
 ```
+
+`pnpm codegen` validates against the committed schema, so it is only as current as the last
+`pnpm schema:pull`. If a document is failing for a reason Railway's own docs contradict,
+refresh the artifact — with a token — before believing the error.

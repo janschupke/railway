@@ -5,6 +5,12 @@ import { NETWORK } from "@/lib/constants";
 import { log } from "@/lib/logger";
 import { sleep } from "@/lib/utils";
 import { RailwayApiError } from "./errors";
+import type {
+  AnyTypedDocument,
+  Refusable,
+  ResultOf,
+  VariablesOf,
+} from "./typed-document";
 
 /** Configurable so the E2E fixture can stand in for Railway. Defaults to production. */
 export const railwayApiUrl = () => env().RAILWAY_API_URL;
@@ -274,13 +280,23 @@ async function execute<T>(
  * This is the right default for mutations and for single-purpose reads: a partial
  * mutation result is not a success, and letting one through would surface later as a
  * TypeError on a null field rather than as the failure it is.
+ *
+ * Both types come off the document rather than from a type argument here. `gql<{
+ * serviceCreate: { id: string; name: string } }>(SERVICE_CREATE_MUTATION, …)` was an
+ * assertion nothing checked — not that the shape matched the document, and not that the
+ * variables matched either, since they were `Record<string, unknown>`. See
+ * ./typed-document.
  */
-export async function gql<T>(
-  query: string,
-  variables: Record<string, unknown>,
+export async function gql<TDocument extends AnyTypedDocument>(
+  query: TDocument,
+  variables: VariablesOf<TDocument>,
   options: GqlOptions,
-): Promise<T> {
-  const { body, status } = await execute<T>(query, variables, options);
+): Promise<ResultOf<TDocument>> {
+  const { body, status } = await execute<ResultOf<TDocument>>(
+    query,
+    variables,
+    options,
+  );
 
   const [firstError] = body.errors ?? [];
   if (firstError) {
@@ -311,13 +327,23 @@ export async function gql<T>(
  * was not permitted, and the dashboard showed nothing at all.
  *
  * Transport, rate-limit and 5xx failures still throw — there is no partial result there.
+ *
+ * `Refusable` is what says so in the type system: every root field of the result becomes
+ * nullable, because any one of them may be the field Railway refused. The generated types
+ * cannot express that on their own — `Query.me` is `User!` and `Query.metrics` is
+ * `[MetricsResult!]`, and this function exists precisely for the case where one of them
+ * comes back null anyway.
  */
-export async function gqlPartial<T>(
-  query: string,
-  variables: Record<string, unknown>,
+export async function gqlPartial<TDocument extends AnyTypedDocument>(
+  query: TDocument,
+  variables: VariablesOf<TDocument>,
   options: GqlOptions,
-): Promise<{ data: T | null; errors: RailwayApiError[] }> {
-  const { body, status } = await execute<T>(query, variables, options);
+): Promise<{ data: Refusable<ResultOf<TDocument>> | null; errors: RailwayApiError[] }> {
+  const { body, status } = await execute<Refusable<ResultOf<TDocument>>>(
+    query,
+    variables,
+    options,
+  );
   return {
     data: body.data ?? null,
     errors: (body.errors ?? []).map((entry) =>

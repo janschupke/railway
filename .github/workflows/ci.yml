@@ -77,6 +77,18 @@ jobs:
       - name: TypeScript
         run: pnpm typecheck
 
+      # The generated GraphQL types against the committed schema and the documents that
+      # produced them. It runs here rather than in the `schema` job because it needs no
+      # RAILWAY_TOKEN — `codegen.ts` reads src/lib/railway/schema.graphql, which is in git
+      # for exactly this reason — and because a stale generated file is a typecheck that
+      # passed against a shape Railway no longer has.
+      #
+      # `git diff --exit-code` is the assertion: regeneration must be a no-op. A document
+      # edited without `pnpm codegen` fails here, and codegen itself fails first if the
+      # document no longer validates.
+      - name: GraphQL codegen is current
+        run: pnpm codegen:check
+
       # Unused files, dependencies and exports. Findings fail; they are not advisory.
       - name: knip (dead code)
         run: pnpm knip
@@ -349,8 +361,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Checks the pinned OIDC metadata against Railway's live discovery document.
-      # Full schema introspection needs RAILWAY_TOKEN, which CI does not hold.
+      # Two halves, one of which is new. It checks the pinned OIDC metadata against
+      # Railway's live discovery document, and validates every document in operations.ts
+      # against the committed schema — nested fields, arguments, enum values and variable
+      # types included. Comparing that committed copy against the *live* schema needs
+      # RAILWAY_TOKEN, which CI does not hold.
       - run: pnpm verify:schema
 
   # Single stable check name for branch protection to require.

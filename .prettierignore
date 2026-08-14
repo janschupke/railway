@@ -6,3 +6,9 @@ playwright-report
 test-results
 pnpm-lock.yaml
 next-env.d.ts
+
+# Railway's schema, dumped by `pnpm schema:pull`. printSchema is the normaliser — two dumps
+# of the same schema are byte-identical, which is the property the drift diff rests on, and
+# reformatting 6900 machine-printed lines would gain nothing. The types generated *from* it
+# are prettier-formatted on write, by a codegen hook.
+src/lib/railway/schema.graphql

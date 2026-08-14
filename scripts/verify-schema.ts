@@ -1,23 +1,51 @@
 /**
- * Phase 0 verification.
+ * Does the app still match Railway's API?
  *
- * Railway publishes no schema artifact, and their API guides omit several things this
- * app depends on. Rather than assume, this script introspects the live API and checks
- * every root field the app sends, plus re-fetches the OIDC discovery document and
- * diffs it against the metadata pinned in src/lib/auth/oidc-metadata.ts.
+ * Railway publishes no schema artifact, so `pnpm schema:pull` dumps one from live
+ * introspection into src/lib/railway/schema.graphql, `pnpm codegen` generates the documents'
+ * types from it, and this script is what says whether that committed copy is still true.
  *
- *   RAILWAY_TOKEN=<account or workspace token> pnpm verify:schema
+ *   pnpm verify:schema                      # OIDC discovery + documents vs the committed schema
+ *   RAILWAY_TOKEN=… pnpm verify:schema      # + documents vs the LIVE schema, and the drift
  *
  * Exits non-zero if anything the app *requires* is missing.
+ *
+ * What replaced the hand-maintained lists. This script used to check a list of root fields,
+ * input objects and enum members restated in operations.ts by hand — which could only ever
+ * name *root* fields, and which said nothing about the nested selections underneath them.
+ * Now the real documents are validated against the real schema, so a renamed field two types
+ * down is a validation error like any other, and there is no list to keep up to date. The
+ * two things that cannot be derived are still declared there: DEGRADING_OPERATIONS, because
+ * "this document may fail and the app still works" is a product decision, and OPTIONAL_FIELDS,
+ * because no document mentions a capability the app has not built yet.
  */
 
+import { readFileSync } from "node:fs";
 import {
+  buildClientSchema,
+  buildSchema,
+  getIntrospectionQuery,
+  isEnumType,
+  isInputObjectType,
+  isObjectType,
+  Kind,
+  parse,
+  TypeInfo,
+  validate,
+  visit,
+  visitWithTypeInfo,
+  type DocumentNode,
+  type GraphQLNamedType,
+  type GraphQLSchema,
+  type IntrospectionQuery,
+} from "graphql";
+import { DOCUMENTS } from "../src/lib/railway/documents.ts";
+import {
+  DEGRADING_OPERATIONS,
   OPTIONAL_FIELDS,
   PROBED_INPUT_TYPES,
-  REQUIRED_ENUM_MEMBERS,
-  REQUIRED_FIELDS,
-  REQUIRED_INPUT_TYPES,
 } from "../src/lib/railway/operations.ts";
+import { SCHEMA_PATH } from "../src/lib/railway/schema-path.ts";
 import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
 
@@ -52,67 +80,36 @@ const REQUIRED_MEMBERS: Record<string, string> = {
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
-/*
- * Arg *types* as well as names. A field that still exists but now takes a different input
- * object is a passing check and a failing app, and reading the type is the difference
- * between "serviceCreate exists" and "serviceCreate takes the thing we are sending".
- */
-const INTROSPECTION = `
-  query VerifyRootFields {
-    __schema {
-      queryType { fields { name args { name ...ArgType } } }
-      mutationType { fields { name args { name ...ArgType } } }
-      subscriptionType { fields { name args { name ...ArgType } } }
-    }
-  }
-  fragment ArgType on __InputValue {
-    type { kind name ofType { kind name ofType { kind name } } }
-  }
-`;
-
-const INPUT_TYPE_INTROSPECTION = `
-  query VerifyInputType($name: String!) {
-    __type(name: $name) {
-      name
-      inputFields { name type { kind name ofType { kind name } } }
-    }
-  }
-`;
-
-const ENUM_INTROSPECTION = `
-  query VerifyEnum($name: String!) {
-    __type(name: $name) { name enumValues { name } }
-  }
-`;
-
-type TypeRef = {
-  kind: string;
-  name: string | null;
-  ofType?: TypeRef | null;
-} | null;
-
-/** `NON_NULL(LIST(String))` → `[String]!`, close enough to read at a glance. */
-function typeName(type: TypeRef): string {
-  if (!type) return "?";
-  if (type.kind === "NON_NULL") return `${typeName(type.ofType ?? null)}!`;
-  if (type.kind === "LIST") return `[${typeName(type.ofType ?? null)}]`;
-  return type.name ?? "?";
-}
-
-type Field = { name: string; args: Array<{ name: string; type?: TypeRef }> };
-type Introspection = {
-  __schema: {
-    queryType: { fields: Field[] } | null;
-    mutationType: { fields: Field[] } | null;
-    subscriptionType: { fields: Field[] } | null;
-  };
-};
-
 const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
 const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
 const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
+const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
 let failed = false;
+
+/** A document, parsed once, with the operation name Railway knows it by. */
+type ParsedDocument = { operationName: string; export: string; ast: DocumentNode };
+
+function parseDocuments(): ParsedDocument[] {
+  return DOCUMENTS.map((document) => {
+    // A parse failure here is a broken document, not a schema question — it throws, and
+    // main()'s catch reports it as a crash rather than as drift.
+    const ast = parse(document.document);
+    const operation = ast.definitions.find(
+      (definition) => definition.kind === Kind.OPERATION_DEFINITION,
+    );
+    return {
+      // Read off the AST rather than the text: this is the name Railway reports errors
+      // against, and `operations.ts` passes the same one as `operationName` on the wire.
+      operationName: operation?.name?.value ?? document.export,
+      export: document.export,
+      ast,
+    };
+  });
+}
+
+const degrades = (operationName: string) =>
+  DEGRADING_OPERATIONS.find((entry) => entry.operationName === operationName);
 
 async function checkDiscovery() {
   console.log("\nOIDC discovery");
@@ -173,70 +170,277 @@ async function checkDiscovery() {
   }
 }
 
-async function checkSchema(token: string) {
-  console.log("\nGraphQL schema");
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query: INTROSPECTION }),
-  });
+/**
+ * Every document, validated against one schema.
+ *
+ * This is the whole verification, and it reaches everything the old field list could not:
+ * a nested field, an argument name, an enum value written into a document, the type of a
+ * variable. A document in DEGRADING_OPERATIONS reports and does not fail — see the note on
+ * that constant for why the two exceptions exist and why the exemption being per document
+ * costs nothing.
+ */
+function checkDocuments(
+  schema: GraphQLSchema,
+  documents: ParsedDocument[],
+  against: string,
+) {
+  console.log(`\nDocuments vs ${against}`);
 
-  const body = (await response.json()) as {
-    data?: Introspection;
-    errors?: Array<{ message: string }>;
-  };
-
-  const [introspectionError] = body.errors ?? [];
-  if (introspectionError) {
-    console.log(bad(`introspection rejected: ${introspectionError.message}`));
-    console.log(
-      warn("If introspection is disabled, verify operations by running them instead."),
-    );
-    failed = true;
-    return;
-  }
-  if (!body.data) {
-    console.log(bad(`introspection returned no data (HTTP ${response.status})`));
-    failed = true;
-    return;
-  }
-
-  const byRoot: Record<string, Field[]> = {
-    Query: body.data.__schema.queryType?.fields ?? [],
-    Mutation: body.data.__schema.mutationType?.fields ?? [],
-    Subscription: body.data.__schema.subscriptionType?.fields ?? [],
-  };
-
-  for (const required of REQUIRED_FIELDS) {
-    const field = byRoot[required.root]?.find((f) => f.name === required.field);
-    const label = `${required.root}.${required.field}`;
-
-    if (!field) {
-      console.log(bad(`${label} does not exist`));
-      failed = true;
+  for (const document of documents) {
+    const errors = validate(schema, document.ast);
+    if (errors.length === 0) {
+      console.log(ok(document.operationName));
       continue;
     }
 
-    const argNames = new Set(field.args.map((a) => a.name));
-    const missing = required.args.filter((a) => !argNames.has(a));
-    if (missing.length) {
-      console.log(bad(`${label} exists but is missing args: ${missing.join(", ")}`));
+    const degrading = degrades(document.operationName);
+    for (const error of errors) {
+      const label = `${document.operationName}: ${error.message}`;
+      if (degrading) {
+        console.log(warn(`${label} — ${degrading.note}`));
+      } else {
+        console.log(bad(label));
+        failed = true;
+      }
+    }
+  }
+}
+
+/**
+ * The part of a schema the documents actually reach.
+ *
+ * Collected by walking each document with the type information the committed schema gives
+ * it, so it is derived from the app's selections rather than declared: every field selected,
+ * every input object a variable carries (and every input object inside those), and every
+ * enum either of them names.
+ *
+ * Field and input members are recorded with their *printed type* — `String!`, `[Log!]!` —
+ * because a field that still exists with a different type is the drift the generated types
+ * would go on misclaiming. That is the class of change document validation cannot see: a
+ * field going from `String!` to `String` validates perfectly and makes every non-null
+ * assertion downstream a lie.
+ */
+type Surface = {
+  /** "Project.name" → "String!" */
+  fields: Map<string, string>;
+  /** "ServiceCreateInput.source" → "ServiceSourceInput" */
+  inputFields: Map<string, string>;
+  /** Enum type name → its members, as the committed schema has them. */
+  enums: Map<string, string[]>;
+  /** Selected fields Railway has marked deprecated, with the reason it gave. */
+  deprecations: string[];
+};
+
+function collectSurface(schema: GraphQLSchema, documents: ParsedDocument[]): Surface {
+  const surface: Surface = {
+    fields: new Map(),
+    inputFields: new Map(),
+    enums: new Map(),
+    deprecations: [],
+  };
+
+  /** An input object or enum a variable carries, plus everything nested inside it. */
+  const collectInput = (type: GraphQLNamedType, seen: Set<string>) => {
+    if (seen.has(type.name)) return;
+    seen.add(type.name);
+
+    if (isEnumType(type)) {
+      surface.enums.set(
+        type.name,
+        type.getValues().map((value) => value.name),
+      );
+      return;
+    }
+    if (!isInputObjectType(type)) return;
+
+    for (const field of Object.values(type.getFields())) {
+      surface.inputFields.set(`${type.name}.${field.name}`, String(field.type));
+      const named = namedTypeOf(field.type);
+      const resolved = schema.getType(named);
+      if (resolved) collectInput(resolved, seen);
+    }
+  };
+
+  for (const document of documents) {
+    const typeInfo = new TypeInfo(schema);
+    visit(
+      document.ast,
+      visitWithTypeInfo(typeInfo, {
+        Field() {
+          const parent = typeInfo.getParentType();
+          const field = typeInfo.getFieldDef();
+          if (!parent || !field) return;
+
+          surface.fields.set(`${parent.name}.${field.name}`, String(field.type));
+
+          if (field.deprecationReason) {
+            surface.deprecations.push(
+              `${parent.name}.${field.name} — ${field.deprecationReason}`,
+            );
+          }
+
+          const named = schema.getType(namedTypeOf(field.type));
+          // An enum a *field* returns, so a member Railway withdraws from
+          // DeploymentStatus is visible here too and not only through the variables.
+          if (named && isEnumType(named)) {
+            surface.enums.set(
+              named.name,
+              named.getValues().map((value) => value.name),
+            );
+          }
+        },
+        VariableDefinition() {
+          const type = typeInfo.getInputType();
+          if (!type) return;
+          const resolved = schema.getType(namedTypeOf(type));
+          if (resolved) collectInput(resolved, new Set());
+        },
+      }),
+    );
+  }
+
+  return surface;
+}
+
+/** `[Log!]!` → `Log`. */
+function namedTypeOf(type: { toString: () => string }): string {
+  return String(type).replaceAll(/[[\]!]/g, "");
+}
+
+/**
+ * Fields the app selects that Railway has marked deprecated.
+ *
+ * Printed, never gating: a deprecation is an announcement, not a withdrawal, and the app
+ * keeps working until the field goes. It earns its place because two of them are live right
+ * now and both sit on reads this app cannot do without — see README's Limitations.
+ */
+function reportDeprecations(deprecations: string[]) {
+  if (deprecations.length === 0) return;
+  console.log("\nDeprecated fields the app selects");
+  for (const entry of [...new Set(deprecations)].sort()) console.log(warn(entry));
+}
+
+/**
+ * The committed schema against the live one, over the surface the documents reach.
+ *
+ * Deliberately not a whole-schema diff. Railway ships changes to this API constantly and
+ * almost none of them are about the sixteen documents in operations.ts; a report that listed
+ * all of them would be a report nobody reads. A change to a field the app selects is a
+ * different thing, and it fails.
+ */
+function checkDrift(committed: Surface, live: GraphQLSchema) {
+  console.log("\nCommitted schema vs live");
+  let drifted = 0;
+
+  for (const [key, committedType] of committed.fields) {
+    const [typeName = "", fieldName = ""] = key.split(".");
+    const parent = live.getType(typeName);
+    if (!parent || !isObjectType(parent)) {
+      console.log(bad(`${typeName} is gone from the live schema (selected as ${key})`));
       failed = true;
-    } else {
-      console.log(ok(label));
+      drifted++;
+      continue;
+    }
+    const field = parent.getFields()[fieldName];
+    if (!field) {
+      console.log(bad(`${key} is gone from the live schema`));
+      failed = true;
+      drifted++;
+      continue;
+    }
+    if (String(field.type) !== committedType) {
+      console.log(
+        bad(`${key}: committed ${committedType}, live ${String(field.type)}`),
+      );
+      failed = true;
+      drifted++;
     }
   }
 
+  for (const [key, committedType] of committed.inputFields) {
+    const [typeName = "", fieldName = ""] = key.split(".");
+    const parent = live.getType(typeName);
+    if (!parent || !isInputObjectType(parent)) {
+      console.log(
+        bad(`${typeName} is gone from the live schema (a variable sends it)`),
+      );
+      failed = true;
+      drifted++;
+      continue;
+    }
+    const field = parent.getFields()[fieldName];
+    if (!field) {
+      console.log(bad(`${key} is gone from the live schema`));
+      failed = true;
+      drifted++;
+      continue;
+    }
+    if (String(field.type) !== committedType) {
+      // Covers a member becoming required, which no document can show: the app builds
+      // these objects in TypeScript, so the only place `String` → `String!` is visible is
+      // right here and in the types the next `pnpm codegen` would generate.
+      console.log(
+        bad(`${key}: committed ${committedType}, live ${String(field.type)}`),
+      );
+      failed = true;
+      drifted++;
+    }
+  }
+
+  /*
+   * Enum members are reported, not gated, and the asymmetry is deliberate. A member the app
+   * writes into a document is already covered — validation against live fails on it — and a
+   * member it only reads back degrades by design: `toContainerState` maps an unknown
+   * DeploymentStatus to "unknown" precisely because Railway adds these without notice.
+   */
+  for (const [name, members] of committed.enums) {
+    const type = live.getType(name);
+    if (!type || !isEnumType(type)) {
+      console.log(bad(`enum ${name} is gone from the live schema`));
+      failed = true;
+      drifted++;
+      continue;
+    }
+    const liveMembers = type.getValues().map((value) => value.name);
+    const removed = members.filter((member) => !liveMembers.includes(member));
+    const added = liveMembers.filter((member) => !members.includes(member));
+    if (removed.length)
+      console.log(warn(`${name} no longer offers: ${removed.join(", ")}`));
+    if (added.length) console.log(dim(`  ${name} also offers: ${added.join(", ")}`));
+  }
+
+  if (drifted === 0) {
+    console.log(
+      ok(
+        `${committed.fields.size} selected fields and ${committed.inputFields.size} input members match`,
+      ),
+    );
+  } else {
+    console.log(warn("Run `pnpm schema:pull && pnpm codegen` to take the change on."));
+  }
+}
+
+/**
+ * Capabilities Railway does not document and this app does not use.
+ *
+ * The one part of this script that is still a hand-written list, because it has to be: no
+ * document mentions a mutation nobody calls. See OPTIONAL_FIELDS.
+ */
+function checkOptional(live: GraphQLSchema) {
   console.log("\nOptional capabilities");
+  const roots: Record<string, GraphQLNamedType | null | undefined> = {
+    Query: live.getQueryType(),
+    Mutation: live.getMutationType(),
+  };
+
   for (const optional of OPTIONAL_FIELDS) {
-    const field = byRoot[optional.root]?.find((f) => f.name === optional.field);
+    const root = roots[optional.root];
+    const field =
+      root && isObjectType(root) ? root.getFields()[optional.field] : undefined;
     const label = `${optional.root}.${optional.field}`;
     if (field) {
       const args =
-        field.args.map((a) => `${a.name}: ${typeName(a.type ?? null)}`).join(", ") ||
+        field.args.map((arg) => `${arg.name}: ${String(arg.type)}`).join(", ") ||
         "none";
       console.log(ok(`${label} available (${args})`));
     } else {
@@ -245,131 +449,85 @@ async function checkSchema(token: string) {
       console.log(warn(`${label} not available — ${optional.note}`));
     }
   }
-}
-
-/**
- * Input object shapes.
- *
- * The gap this closes: every check above proves a root *field* exists, and the app also
- * hand-builds the object that field takes. `serviceCreate(input:)` has never been checked
- * beyond its name, so a renamed member inside ServiceCreateInput would pass verification
- * and fail on every real spin-up.
- */
-async function checkInputTypes(token: string) {
-  console.log("\nInput object shapes");
-
-  const introspect = async (name: string) => {
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query: INPUT_TYPE_INTROSPECTION, variables: { name } }),
-    });
-    const body = (await response.json()) as {
-      data?: {
-        __type: {
-          name: string;
-          inputFields: Array<{ name: string; type: TypeRef }> | null;
-        } | null;
-      };
-    };
-    return body.data?.__type ?? null;
-  };
-
-  for (const required of REQUIRED_INPUT_TYPES) {
-    const type = await introspect(required.name);
-    if (!type?.inputFields) {
-      console.log(bad(`${required.name} does not exist`));
-      failed = true;
-      continue;
-    }
-    const present = new Set(type.inputFields.map((f) => f.name));
-    const missing = required.fields.filter((f) => !present.has(f));
-    if (missing.length) {
-      console.log(bad(`${required.name} is missing: ${missing.join(", ")}`));
-      failed = true;
-    } else {
-      console.log(ok(`${required.name} accepts ${required.fields.join(", ")}`));
-    }
-  }
 
   // Printed, never enforced. These are the shapes a feature is being designed against,
   // and guessing at a mutation's input is how you find out in production.
+  console.log("\nProbed input shapes");
   for (const name of PROBED_INPUT_TYPES) {
-    const type = await introspect(name);
-    if (!type?.inputFields) {
+    const type = live.getType(name);
+    if (!type || !isInputObjectType(type)) {
       console.log(warn(`${name} not available`));
       continue;
     }
-    const fields = type.inputFields
-      .map((f) => `${f.name}: ${typeName(f.type)}`)
+    const fields = Object.values(type.getFields())
+      .map((field) => `${field.name}: ${String(field.type)}`)
       .join(", ");
     console.log(ok(`${name} { ${fields} }`));
   }
 }
 
-/**
- * Enum members sent by name.
- *
- * The gap this closes is the one the input-type check closes one type over: every check
- * above proves a *field* exists, and the metrics document also names `CPU_USAGE`,
- * `MEMORY_USAGE_GB` and `SERVICE_ID` literally. A member Railway withdraws does not degrade
- * the readout — it fails the whole document at validation, on every request.
- */
-async function checkEnumMembers(token: string) {
-  console.log("\nEnum members");
+async function introspect(token: string): Promise<GraphQLSchema | null> {
+  const response = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query: getIntrospectionQuery({ descriptions: true }) }),
+  });
 
-  for (const required of REQUIRED_ENUM_MEMBERS) {
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        query: ENUM_INTROSPECTION,
-        variables: { name: required.name },
-      }),
-    });
-    const body = (await response.json()) as {
-      data?: { __type: { enumValues: Array<{ name: string }> | null } | null };
-    };
+  const body = (await response.json()) as {
+    data?: IntrospectionQuery;
+    errors?: Array<{ message: string }>;
+  };
 
-    const values = body.data?.__type?.enumValues;
-    if (!values) {
-      console.log(bad(`${required.name} does not exist`));
-      failed = true;
-      continue;
-    }
-
-    const present = new Set(values.map((v) => v.name));
-    const missing = required.members.filter((m) => !present.has(m));
-    if (missing.length) {
-      console.log(bad(`${required.name} is missing: ${missing.join(", ")}`));
-      failed = true;
-    } else {
-      console.log(ok(`${required.name} offers ${required.members.join(", ")}`));
-    }
+  const [error] = body.errors ?? [];
+  if (error) {
+    console.log(bad(`introspection rejected: ${error.message}`));
+    console.log(
+      warn("If introspection is disabled, verify operations by running them instead."),
+    );
+    failed = true;
+    return null;
   }
+  if (!body.data) {
+    console.log(bad(`introspection returned no data (HTTP ${response.status})`));
+    failed = true;
+    return null;
+  }
+
+  return buildClientSchema(body.data);
 }
 
 async function main() {
   const token = process.env.RAILWAY_TOKEN;
+  const documents = parseDocuments();
+  const committed = buildSchema(readFileSync(SCHEMA_PATH, "utf8"));
 
   await checkDiscovery();
 
+  /*
+   * The half that needs no credential, which is new and is the reason CI gains something
+   * from this file beyond the discovery check. It catches a document edited without
+   * regenerating — the same failure `pnpm codegen` catches, in the job that has no token.
+   */
+  checkDocuments(committed, documents, "the committed schema");
+  const surface = collectSurface(committed, documents);
+  reportDeprecations(surface.deprecations);
+
   if (!token) {
-    console.log(`\n${warn("RAILWAY_TOKEN not set — skipped schema introspection.")}`);
+    console.log(`\n${warn("RAILWAY_TOKEN not set — skipped the live API.")}`);
     console.log("  Create one at https://railway.com/account/tokens, then re-run:");
     console.log("  RAILWAY_TOKEN=… pnpm verify:schema\n");
     process.exit(failed ? 1 : 0);
   }
 
-  await checkSchema(token);
-  await checkInputTypes(token);
-  await checkEnumMembers(token);
+  const live = await introspect(token);
+  if (live) {
+    checkDocuments(live, documents, "the live API");
+    checkDrift(surface, live);
+    checkOptional(live);
+  }
 
   console.log(
     failed
@@ -379,7 +537,7 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(bad(`verification crashed: ${String(error)}`));
   process.exit(1);
 });

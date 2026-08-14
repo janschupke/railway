@@ -5,6 +5,7 @@ import { NETWORK } from "@/lib/constants";
 import { logRecords } from "@/test/log-capture";
 import { gql, railwayApiUrl } from "./client";
 import { RailwayApiError } from "./errors";
+import type { TypedDocument } from "./typed-document";
 
 const ENDPOINT = railwayApiUrl();
 const api = graphql.link(ENDPOINT);
@@ -14,7 +15,15 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-const QUERY = /* GraphQL */ `
+/*
+ * Annotated the way operations.ts annotates the real documents, rather than passing a type
+ * argument at the call site — which is no longer possible, and is the defect T-476 closed.
+ * Not generated: this document is a transport fixture and does not go to Railway.
+ */
+const QUERY: TypedDocument<
+  { me: { id: string } },
+  Record<string, never>
+> = /* GraphQL */ `
   query Ping {
     me {
       id
@@ -22,12 +31,7 @@ const QUERY = /* GraphQL */ `
   }
 `;
 
-const call = () =>
-  gql<{ me: { id: string } }>(
-    QUERY,
-    {},
-    { accessToken: "t0ken", operationName: "Ping" },
-  );
+const call = () => gql(QUERY, {}, { accessToken: "t0ken", operationName: "Ping" });
 
 describe("gql", () => {
   it("returns data and sends a bearer token", async () => {
