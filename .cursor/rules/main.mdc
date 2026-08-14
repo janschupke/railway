@@ -14,8 +14,8 @@ All detailed rules live in [`.ai/rules/`](../../.ai/rules/) — the single sourc
 This file mirrors the **Rules** and **Critical rules** sections of
 [`AGENTS.md`](../../AGENTS.md); keep those two in sync. It deliberately omits AGENTS.md's
 `## Commands` section and the `nextjs-agent-rules` block Next writes into that file. The
-reasoning behind each decision is in [README.md](../../README.md) (eleven ADRs) and
-[SECURITY.md](../../SECURITY.md).
+reasoning behind each decision is in [`docs/adr/`](../../docs/adr/README.md) (eleven
+ADRs) and [SECURITY.md](../../SECURITY.md).
 
 ## Rules
 

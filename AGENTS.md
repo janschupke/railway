@@ -16,8 +16,8 @@ destroys Docker-image services with live build and deploy logs streamed into the
 There is no database, no client store, and the visitor's token never leaves the server.
 
 All detailed rules live in [`.ai/rules/`](.ai/rules/) — the single source of truth. The
-reasoning behind each decision lives in [README.md](README.md) (eleven ADRs) and
-[SECURITY.md](SECURITY.md) (the OWASP review, the findings, and the accepted risks). Read
+reasoning behind each decision lives in [`docs/adr/`](docs/adr/README.md) (eleven ADRs)
+and [SECURITY.md](SECURITY.md) (the OWASP review, the findings, and the accepted risks). Read
 the relevant rule before touching auth, the design tokens, the log stream, or a CI gate.
 
 ## Rules

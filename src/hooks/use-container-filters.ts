@@ -38,7 +38,8 @@ import { useDebouncedValue } from "./use-debounced-value";
  *
  * ## The refresh loop this is shaped to avoid
  *
- * See README ADR-7: a fresh `t` identity in a dependency array once turned a refresh into
+ * See ADR-7 in `docs/adr/`: a fresh `t` identity in a dependency array once turned a
+ * refresh into
  * a loop. Nothing here depends on a non-primitive that changes when we write — the commit
  * effect watches the debounced string, and the commit itself is guarded to a no-op when
  * the URL it would write is the URL already showing.

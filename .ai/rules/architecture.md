@@ -5,9 +5,10 @@ meta:
 
 # Architecture
 
-The reasoning behind each decision is argued at length in [README.md](../../README.md)
-under `## Decisions` (ADR-1 … ADR-10). This file states what the decisions oblige you to
-do. When the two disagree, the README is the record and this file is stale — fix it.
+The reasoning behind each decision is argued at length in
+[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-11); the README carries a summary
+table under `## Decisions`. This file states what the decisions oblige you to do. When
+the two disagree, the ADR is the record and this file is stale — fix it.
 
 ## What the app is
 
@@ -18,8 +19,9 @@ services with live build and deploy logs streamed into the browser.
 Single package — not a monorepo. `pnpm-workspace.yaml` exists only to carry `allowBuilds`
 toggles; there is no `packages:` list. That is not a reason to move to npm: `allowBuilds` is
 a per-package postinstall allowlist with no npm equivalent, and therefore a supply-chain
-control rather than an install-speed tweak. See ADR-11 in [README.md](../../README.md),
-which prices the migration rather than assuming either answer. pnpm 11.9.0, Node 22,
+control rather than an install-speed tweak. See
+[ADR-11](../../docs/adr/0011-pnpm-stays.md), which prices the migration rather than
+assuming either answer. pnpm 11.9.0, Node 22,
 React 19.2.8, Next 16.3.0.
 
 `@/*` resolves to `src/*` (`tsconfig.json`, mirrored in `vitest.config.mts`). Use it for

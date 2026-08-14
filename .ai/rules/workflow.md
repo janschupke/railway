@@ -55,7 +55,7 @@ legitimate CI failure, not something to work around.
 - **pnpm 11.9.0**, pinned via `packageManager` _and_ installed by exact version in the
   Dockerfile. pnpm is not incidental — `pnpm-workspace.yaml`'s `allowBuilds` is a
   postinstall allowlist npm cannot express, and `pnpm audit --prod` is the shape the CI
-  gate argues for. ADR-11 in [README.md](../README.md) prices the alternative.
+  gate argues for. [ADR-11](../../docs/adr/0011-pnpm-stays.md) prices the alternative.
 - **Nothing in the deployment path may consult `packageManager`.** That field is a
   corepack instruction, and corepack's own version belongs to whatever base image is in
   use, not to this repository. See the deployment section for the failure that taught us
