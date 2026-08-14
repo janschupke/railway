@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { clearCookie, cookieOptions } from "@/lib/auth/session";
 
 /**
- * Nothing may remove a *response* cookie with `.delete()`.
+ * Nothing may remove a cookie the browser will keep, in any jar.
  *
  * Next's `delete` emits `name=; Path=/; Expires=1970` and no `Secure`. A cookie whose
  * name carries the `__Host-` prefix — which every cookie this app sets does, on any https
@@ -32,17 +32,44 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
+ * Any jar that writes to the response, whatever the variable holding it is called.
+ *
  * `request.cookies.delete` is deliberately allowed and is a different operation: it edits
  * the inbound request object so the headers forwarded to the render no longer carry a
- * cookie this layer has just invalidated. It sends nothing to the browser.
+ * cookie this layer has just invalidated. It sends nothing to the browser. That exemption
+ * is spelled `request.` and nothing else — a scanner that accepted `req.` or any other
+ * alias would be one rename away from letting a real removal through, and the one live
+ * use (src/proxy.ts) writes it in full.
+ *
+ * No `g` flag on either: a global regex carries lastIndex between `.test()` calls, so it
+ * would report every other file as clean.
  */
-// No `g` flag: a global regex carries lastIndex between `.test()` calls, so it would
-// report every other file as clean.
-const RESPONSE_DELETE = /response\.cookies\.delete\s*\(/;
+const RESPONSE_JAR_DELETE = /(?<!\brequest)\.cookies\.delete\s*\(/;
+
+/**
+ * The `next/headers` jar, taken and deleted from in one expression.
+ *
+ * `cookies()` is read-only in a Server Component but is the *response* jar inside a Server
+ * Action or Route Handler, so a delete on it reaches the browser with the same missing
+ * `Secure` and meets the same rejection.
+ */
+const HEADERS_JAR_DELETE = /cookies\s*\(\s*\)\s*\)?\s*\.delete\s*\(/;
+
+/** The same jar held in a variable first — `const jar = await cookies()`. */
+const HEADERS_JAR_ALIAS = /(?:const|let|var)\s+(\w+)\s*=\s*await\s+cookies\s*\(/g;
 
 /** Block and line comments removed, so only code is scanned. */
 function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
+function removesACookieUnsafely(source: string): boolean {
+  const code = withoutComments(source);
+  if (RESPONSE_JAR_DELETE.test(code) || HEADERS_JAR_DELETE.test(code)) return true;
+
+  return [...code.matchAll(HEADERS_JAR_ALIAS)].some((match) =>
+    new RegExp(`\\b${match[1]}\\.delete\\s*\\(`).test(code),
+  );
 }
 
 describe("cookie removal", () => {
@@ -76,17 +103,21 @@ describe("cookie removal", () => {
     expect(written[0]!.secure).toBe(false);
   });
 
-  it("has no response.cookies.delete anywhere in src", () => {
+  it("deletes a cookie from no jar anywhere in src", () => {
+    // Comments are stripped inside the check. session.ts and security.md document the
+    // banned call by name, and a scanner that reads prose is a scanner a reword defeats
+    // in either direction.
     const offenders = sourceFiles("src").filter((file) =>
-      // Comments stripped first. session.ts documents the banned call by name, and a
-      // scanner that reads prose is a scanner a reword defeats in either direction.
-      RESPONSE_DELETE.test(withoutComments(readFileSync(file, "utf8"))),
+      removesACookieUnsafely(readFileSync(file, "utf8")),
     );
 
     expect(
       offenders,
-      "response.cookies.delete() sends a removal with no Secure, which a browser " +
-        "rejects for any __Host- cookie. Use clearCookie(response.cookies, name, appUrl).",
+      "A cookie jar's delete() sends a removal with no Secure, which a browser rejects " +
+        "for any __Host- cookie. Use clearCookie(jar, name, appUrl). This covers the " +
+        "response jar under any name and the next/headers cookies() jar, which is a " +
+        "response jar inside a Server Action or Route Handler; only the inbound edit, " +
+        "written in full as request.cookies.delete, is exempt.",
     ).toEqual([]);
   });
 });

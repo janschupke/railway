@@ -43,11 +43,6 @@ export async function persistSession(session: RailwaySession): Promise<void> {
   });
 }
 
-export async function clearSession(): Promise<void> {
-  const jar = await cookies();
-  jar.delete(sessionCookieName(env().APP_URL));
-}
-
 /**
  * Get the session for an authenticated entry point, or refuse the request.
  *

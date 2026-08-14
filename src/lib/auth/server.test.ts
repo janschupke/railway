@@ -13,20 +13,17 @@ const jar = {
   set: vi.fn((...args: [string, string, Record<string, unknown>?]) =>
     store.set(args[0], args[1]),
   ),
-  delete: vi.fn((name: string) => store.delete(name)),
+  // No `delete`. The jar this stands in for has one, and using it is the defect
+  // src/cookie-removal.test.ts bans; a mock without it turns a re-introduction into a
+  // TypeError here as well as an offender there.
 };
 vi.mock("next/headers", () => ({ cookies: async () => jar }));
 
 // ./refresh is deliberately not mocked: nothing in server.ts calls the grant any more.
 // The proxy is the only refresh writer — see requireSession's doc comment.
 
-const {
-  getSession,
-  persistSession,
-  clearSession,
-  requireAccessToken,
-  SessionExpiredError,
-} = await import("./server");
+const { getSession, persistSession, requireAccessToken, SessionExpiredError } =
+  await import("./server");
 
 const SECRET = process.env.SESSION_SECRET!;
 const now = () => Math.floor(Date.now() / 1000);
@@ -43,7 +40,6 @@ const session = (over: Partial<RailwaySession> = {}): RailwaySession => ({
 beforeEach(() => {
   store.clear();
   jar.set.mockClear();
-  jar.delete.mockClear();
 });
 
 describe("getSession", () => {
@@ -99,14 +95,6 @@ describe("persistSession", () => {
     await persistSession(session());
     const [, , options] = jar.set.mock.calls[0]!;
     expect(options).toMatchObject({ secure: false });
-  });
-});
-
-describe("clearSession", () => {
-  it("removes the cookie", async () => {
-    store.set(SESSION_COOKIE, "anything");
-    await clearSession();
-    expect(jar.delete).toHaveBeenCalledWith(SESSION_COOKIE);
   });
 });
 

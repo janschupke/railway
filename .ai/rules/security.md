@@ -52,17 +52,27 @@ on client-submitted data. A `serviceId` from a different project than the submit
 
 ## Removing a cookie
 
-**Never `response.cookies.delete(name)`.** It emits `name=; Path=/; Expires=1970` with no
-`Secure`, and a `__Host-` cookie is rejected outright unless it is `Secure`, `Path=/` and
-carries no `Domain` — so the browser discards the removal and keeps the cookie. Use
-`clearCookie(response.cookies, name, appUrl)`, which writes the removal with the same
-options the cookie was set with.
+**Never `delete()` on a cookie jar that writes to the response.** It emits
+`name=; Path=/; Expires=1970` with no `Secure`, and a `__Host-` cookie is rejected outright
+unless it is `Secure`, `Path=/` and carries no `Domain` — so the browser discards the
+removal and keeps the cookie. Use `clearCookie(jar, name, appUrl)`, which writes the removal
+with the same options the cookie was set with.
+
+That covers `response.cookies` and the `cookies()` jar from `next/headers`, which is
+read-only in a Server Component but is a response jar inside a Server Action or Route
+Handler — a delete there reaches the browser and meets the same rejection. The one exempt
+call is `request.cookies.delete`, which edits the inbound request so the headers forwarded
+to the render drop a cookie this layer has just invalidated; it sends nothing to the
+browser. Write it as `request.` in full — the scan's exemption is that literal name.
 
 This failed silently for every cookie the app removes. Sign out did not sign anyone out:
 the session survived, the redirect to `/` found it, and `/` sent the user back to the
 dashboard. Neither dev nor the e2e suite can see it — both run on `http://localhost`,
 where `hostCookieName` returns unprefixed names and a plain delete works — so
-`src/cookie-removal.test.ts` bans the call structurally instead.
+`src/cookie-removal.test.ts` bans the call structurally instead, across every jar. It was
+one regex over the literal `response.cookies.delete` for a while, and `clearSession()` in
+`src/lib/auth/server.ts` sat outside it for exactly as long, deleting the session cookie
+off the `next/headers` jar.
 
 ## Upstream failure text never reaches the browser
 
