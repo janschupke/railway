@@ -190,4 +190,13 @@ async function main() {
   );
 }
 
-await main();
+/*
+ * Not `await main()`. package.json declares no `"type": "module"`, so tsx transforms a .ts
+ * script to CJS, where a top-level await is a hard transform error rather than a runtime
+ * one — the script died before printing a line of its own. The other three probes already
+ * end this way.
+ */
+main().catch((error: unknown) => {
+  console.error(bad(`probe crashed: ${String(error)}`));
+  process.exit(1);
+});

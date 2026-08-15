@@ -6,14 +6,22 @@
  * and the subscription opened after it replays whatever Railway holds. Nothing cancels the
  * overlap. The design for cancelling it — src/lib/log-overlap.ts — is positional, because
  * a LogLine as this app requests it is `{ timestamp, message, severity }` and that tuple
- * is not a key. Four things that design rests on have never been checked against reality,
- * and all four are things the E2E fake decides by fiat:
+ * is not a key. Four things that design rests on were unverified:
  *
  *   1. what arguments the two queries and the two subscriptions really take
  *   2. whether a log line carries an id or a cursor — if it does, the positional design is
  *      thrown away and both cancels key on it instead
  *   3. whether `limit` means the most recent N, and in which order they come back
  *   4. whether subscribing replays history at all, and how far back it starts
+ *
+ * The first two are answered by the schema this repository commits, so they are read from
+ * `src/lib/railway/schema.graphql` rather than introspected — no token, no network, and
+ * the same artifact codegen generates from. `pnpm verify:schema` is what keeps that file
+ * honest against the live API; duplicating its job here would be a second, weaker answer
+ * to a question already owned somewhere else.
+ *
+ * The last two are behaviour, which no schema states and which the E2E fake decides by
+ * fiat, so they need a real deployment:
  *
  *   RC_SESSION="<rc_session cookie value>" pnpm probe:logs <deployment-id> [--phase build]
  *
@@ -28,7 +36,7 @@
  * reason probe-deployment.ts does: those two credentials have different visibility, and
  * the question here is what the OAuth one can see.
  *
- * Read-only. Two queries, one subscription, and introspection.
+ * Read-only. Three queries and one subscription.
  *
  * It cannot call getLogs() or streamLogs(): src/lib/railway/api.ts and
  * src/lib/railway/subscribe.ts both `import "server-only"`, which is a bare throw outside
@@ -38,9 +46,12 @@
  * deliberate second copy of the fifteen lines in subscribe.ts.
  */
 
+import { readFileSync } from "node:fs";
 import { createClient } from "graphql-ws";
+import { buildSchema, getNamedType, isObjectType } from "graphql";
 import WebSocket from "ws";
 import { openSession } from "../src/lib/auth/session.ts";
+import { SCHEMA_PATH } from "../src/lib/railway/schema-path.ts";
 import {
   BUILD_LOGS_QUERY,
   BUILD_LOGS_SUBSCRIPTION,
@@ -77,49 +88,14 @@ const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
 const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
-type TypeRef = { kind: string; name: string | null; ofType?: TypeRef | null } | null;
-
-/** `NON_NULL(LIST(String))` → `[String]!`. Same shape as verify-schema.ts's. */
-function typeName(type: TypeRef): string {
-  if (!type) return "?";
-  if (type.kind === "NON_NULL") return `${typeName(type.ofType ?? null)}!`;
-  if (type.kind === "LIST") return `[${typeName(type.ofType ?? null)}]`;
-  return type.name ?? "?";
-}
-
-/** The named type at the bottom of a wrapper chain — `[LogLine!]!` → `LogLine`. */
-function unwrap(type: TypeRef): string | null {
-  if (!type) return null;
-  return type.name ?? unwrap(type.ofType ?? null);
-}
-
-type Field = {
-  name: string;
-  args?: Array<{ name: string; type?: TypeRef }>;
-  type?: TypeRef;
-};
-
-const ROOT_FIELDS = `
-  query ProbeLogFields {
-    __schema {
-      queryType { fields { name ...FieldShape } }
-      subscriptionType { fields { name ...FieldShape } }
-    }
-  }
-  fragment FieldShape on __Field {
-    args { name type { kind name ofType { kind name ofType { kind name } } } }
-    type { kind name ofType { kind name ofType { kind name } } }
-  }
-`;
-
-const OBJECT_TYPE = `
-  query ProbeType($name: String!) {
-    __type(name: $name) {
-      name
-      fields { name type { kind name ofType { kind name } } }
-    }
-  }
-`;
+/**
+ * Names that would make a log line addressable.
+ *
+ * Checked rather than assumed absent, because this is the one finding that deletes
+ * src/lib/log-overlap.ts outright: with a key per line, both cancels become a Set lookup
+ * and two identical progress dots stop being indistinguishable.
+ */
+const IDENTITY = ["id", "cursor", "seq", "sequence", "offset", "uuid"];
 
 let token = "";
 
@@ -139,65 +115,57 @@ async function post<T>(query: string, variables?: Record<string, unknown>) {
   return body.data ?? null;
 }
 
-/** Step 1 and 2: what the fields take, and what they give back. */
-async function probeShape(field: "buildLogs" | "deploymentLogs") {
-  const data = await post<{
-    __schema: {
-      queryType: { fields: Field[] } | null;
-      subscriptionType: { fields: Field[] } | null;
-    };
-  }>(ROOT_FIELDS);
-  if (!data) {
-    console.log(bad("introspection returned nothing — cannot read the field shapes."));
-    return null;
-  }
+/**
+ * Steps 1 and 2, off disk: what the fields take, and what they give back.
+ *
+ * Reads the committed SDL rather than introspecting. It is the same artifact codegen
+ * generates the operation types from, so anything printed here is what the app's documents
+ * were type-checked against — and it costs no token, which means these two answers can be
+ * re-read at any time without a live deployment to point at.
+ */
+function describeShape(field: "buildLogs" | "deploymentLogs") {
+  const schema = buildSchema(readFileSync(SCHEMA_PATH, "utf8"));
 
-  console.log("\nArguments");
+  console.log("\nArguments (from the committed schema)");
   const roots = {
-    Query: data.__schema.queryType?.fields ?? [],
-    Subscription: data.__schema.subscriptionType?.fields ?? [],
+    Query: schema.getQueryType(),
+    Subscription: schema.getSubscriptionType(),
   };
   let returned: string | null = null;
 
-  for (const [root, fields] of Object.entries(roots)) {
-    const found = fields.find((f) => f.name === field);
+  for (const [root, type] of Object.entries(roots)) {
+    const found = type?.getFields()[field];
     if (!found) {
       console.log(bad(`${root}.${field} does not exist`));
       continue;
     }
-    const args = (found.args ?? [])
-      .map((a) => `${a.name}: ${typeName(a.type ?? null)}`)
-      .join(", ");
-    console.log(
-      ok(`${root}.${field}(${args || "none"}) → ${typeName(found.type ?? null)}`),
-    );
-    returned ??= unwrap(found.type ?? null);
+    const args = found.args.map((a) => `${a.name}: ${a.type}`).join(", ");
+    console.log(ok(`${root}.${field}(${args || "none"}) → ${found.type}`));
+    returned ??= getNamedType(found.type).name;
   }
 
   /*
-   * The app sends `deploymentId` and, on the query only, `limit`. Anything else listed
-   * above is capability this app is not using — `startDate` in particular, which would
-   * end the within-attach overlap at the source rather than guarding against it.
+   * The app sends `deploymentId`, plus `limit` on the query. Anything else above is
+   * capability it is not using, and one of them bears directly on this work: the QUERY
+   * takes `startDate`, so a re-attach could ask for lines since the newest one already
+   * held instead of re-fetching two hundred and cancelling the overlap afterwards. The
+   * SUBSCRIPTION takes no such argument, so the within-attach replay can only be guarded
+   * against, never avoided.
    */
   console.log(dim("  the app sends: deploymentId, and limit on the query"));
 
-  if (!returned) return null;
+  if (!returned) return;
 
+  const logType = schema.getType(returned);
   console.log(`\nWhat a log line carries (${returned})`);
-  const type = await post<{
-    __type: {
-      name: string;
-      fields: Array<{ name: string; type: TypeRef }> | null;
-    } | null;
-  }>(OBJECT_TYPE, { name: returned });
-  const fields = type?.__type?.fields ?? null;
-  if (!fields) {
-    console.log(bad(`could not read ${returned}`));
-    return returned;
+  if (!isObjectType(logType)) {
+    console.log(bad(`${returned} is not an object type in the committed schema`));
+    return;
   }
-  for (const f of fields) console.log(`  ${f.name}: ${typeName(f.type)}`);
 
-  const IDENTITY = ["id", "cursor", "seq", "sequence", "offset", "tag", "uuid"];
+  const fields = Object.values(logType.getFields());
+  for (const f of fields) console.log(`  ${f.name}: ${f.type}`);
+
   const identity = fields.filter((f) => IDENTITY.includes(f.name.toLowerCase()));
   console.log(
     identity.length
@@ -209,7 +177,6 @@ async function probeShape(field: "buildLogs" | "deploymentLogs") {
           "no identity field — the positional design in src/lib/log-overlap.ts stands",
         ),
   );
-  return returned;
 }
 
 async function fetchLines(
@@ -347,32 +314,57 @@ async function listen(field: "buildLogs" | "deploymentLogs", id: string) {
 async function main() {
   const cookie = process.env.RC_SESSION;
   const secret = process.env.SESSION_SECRET;
-  const deploymentId = process.argv[2];
-  const phaseFlag = process.argv.indexOf("--phase");
-  const phase = phaseFlag === -1 ? "deploy" : process.argv[phaseFlag + 1];
+  /*
+   * The id is the first argument that is neither a flag nor a flag's value. Reading
+   * argv[2] positionally was enough while an id was mandatory; now that the schema half
+   * runs without one, `pnpm probe:logs --phase build` would otherwise report its own flag
+   * as the deployment it was about to read.
+   */
+  const args = process.argv.slice(2);
+  const phaseFlag = args.indexOf("--phase");
+  const phase = phaseFlag === -1 ? "deploy" : args[phaseFlag + 1];
+  const deploymentId = args.find(
+    (arg, index) => !arg.startsWith("--") && index !== phaseFlag + 1,
+  );
+
+  if (phase !== "build" && phase !== "deploy") {
+    console.error(bad(`--phase must be build or deploy, not ${String(phase)}`));
+    process.exit(1);
+  }
+
+  const field = phase === "build" ? "buildLogs" : "deploymentLogs";
+
+  console.log(`\nEndpoint:   ${ENDPOINT}`);
+  console.log(`Socket:     ${WS_ENDPOINT}`);
+  console.log(`Deployment: ${deploymentId ?? dim("(none given)")}`);
+  console.log(`Field:      ${field}`);
+
+  /*
+   * The schema half runs before anything is required of the caller, because it needs
+   * nothing from them: no token, no deployment, no network. A stale cookie or a deployment
+   * whose logs have aged out should not be able to withhold the two answers that are
+   * already sitting in the repository.
+   */
+  describeShape(field);
 
   if (!secret) {
-    console.error(bad("SESSION_SECRET is not set."));
+    console.error(bad("SESSION_SECRET is not set — stopping before the live half."));
     console.error("  Run through the package script, which loads .env:");
     console.error("    RC_SESSION=… pnpm probe:logs <deployment-id>\n");
     process.exit(1);
   }
   if (!cookie) {
-    console.error(bad("RC_SESSION is not set."));
+    console.error(bad("RC_SESSION is not set — stopping before the live half."));
     console.error("  Sign in, then copy the `rc_session` cookie value:");
     console.error("    DevTools → Application → Cookies → rc_session\n");
     console.error("    RC_SESSION='<value>' pnpm probe:logs <deployment-id>\n");
     process.exit(1);
   }
   if (!deploymentId) {
-    console.error(bad("No deployment id given."));
+    console.error(bad("No deployment id given — stopping before the live half."));
     console.error("  Take it from a deployment's URL on Railway. A build with a few");
     console.error("  hundred lines of output says more than a quiet one:\n");
     console.error("    RC_SESSION='…' pnpm probe:logs 1a2b3c4d-… --phase build\n");
-    process.exit(1);
-  }
-  if (phase !== "build" && phase !== "deploy") {
-    console.error(bad(`--phase must be build or deploy, not ${String(phase)}`));
     process.exit(1);
   }
 
@@ -384,15 +376,6 @@ async function main() {
     process.exit(1);
   }
   token = session.accessToken;
-
-  const field = phase === "build" ? "buildLogs" : "deploymentLogs";
-
-  console.log(`\nEndpoint:   ${ENDPOINT}`);
-  console.log(`Socket:     ${WS_ENDPOINT}`);
-  console.log(`Deployment: ${deploymentId}`);
-  console.log(`Field:      ${field}\n`);
-
-  await probeShape(field);
 
   const small = await fetchLines(field, deploymentId, SMALL_LIMIT);
   const backfill = await fetchLines(field, deploymentId, STREAM.BACKFILL_LINES);
@@ -473,16 +456,25 @@ async function main() {
   console.log(`
 ${dim("Decision table — what each finding changes")}
 
-  identity field on the line   throw the positional design away; add it to all four
-                               documents, to LogLine and to the fixture, and key on it
-  subscription takes startDate pass the newest backfilled timestamp and delete
-                               expectReplay; add the arg to REQUIRED_FIELDS
-  only limit/filter            the positional design stands as written
+  ${dim("Settled by the schema above, before this ran:")}
+  identity on the line         none in the committed schema, so both cancels stay
+                               positional. If one ever appears, throw log-overlap.ts away
+                               and key on it — that is strictly better.
+  startDate on the query       exists, and only on the QUERY. A re-attach could fetch from
+                               the newest line it holds rather than cancelling afterwards.
+                               The subscription has no such argument, so the within-attach
+                               replay can only ever be guarded against.
+
+  ${dim("Settled by the run above:")}
   no replay observed           keep the guard at REPLAY_SCAN_LINES: 1 — createLogClient
                                retries the socket, and a re-subscribe is a replay
   replay predates backfill     set REPLAY_SCAN_LINES from the count above, with headroom
+  a re-attach cancels to ~200  Overlap 2 is real; dropReattachOverlap on \`ready\` is the fix
   newest-first, or first-N     STOP — the backfill is wrong before any of this matters
 `);
 }
 
-await main();
+main().catch((error: unknown) => {
+  console.error(bad(`probe crashed: ${String(error)}`));
+  process.exit(1);
+});
