@@ -193,3 +193,27 @@ describe("what it carries", () => {
     expect(JSON.stringify(failure.describe())).not.toContain("volumes");
   });
 });
+
+/*
+ * Moved here from actions.integration.test.ts, which it had been sitting at the bottom
+ * of without ever calling an action: it constructs a RailwayApiError and asserts on what
+ * describe() returns, which is this module's job and no Server Action's.
+ */
+describe("the user-facing descriptor", () => {
+  it("keeps RailwayApiError's user-facing descriptor free of its internal message", () => {
+    const error = new RailwayApiError("HTTP 429 from backboard", {
+      kind: "rate_limit",
+      retryAfterSeconds: 30,
+    });
+
+    const descriptor = error.describe();
+    expect(descriptor).toEqual({
+      key: "errors.api.rateLimitRetry",
+      // The id travels with every descriptor now: it was already being written to the
+      // log for these kinds, and a sentence that cannot name it points at nothing.
+      values: { seconds: 30, incident: error.incidentId },
+    });
+    // The upstream text names an internal host; it must not travel with the message.
+    expect(JSON.stringify(descriptor)).not.toContain("backboard");
+  });
+});
