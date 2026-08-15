@@ -311,28 +311,32 @@
     "failedTitle": "Could not change this container"
   },
   "destroy": {
-    "trigger": "Destroy",
-    "title": "Destroy {name}?",
-    "description": "This permanently deletes the service and its deployment history from Railway. It cannot be undone.",
-    "deleteDataLabel": "Also delete the stored data ({size})",
-    "deleteDataHint": "Unchecked, the volume is kept on Railway and continues to be billed.",
-    "confirmLabel": "Type “{name}” to confirm",
-    "submit": "Destroy permanently",
-    "submitPending": "Destroying…",
-    "announce": "Destroying {name}…",
     "refreshPending": "Removing…",
-    "failedTitle": "Could not destroy container",
-    "bulkTrigger": "Destroy selected",
-    "bulkTitle": "Destroy {count, plural, one {# container} other {# containers}}?",
-    "bulkDescription": "This permanently deletes these services and their deployment history from Railway. It cannot be undone.",
-    "bulkListLabel": "Containers about to be destroyed",
-    "bulkConfirmLabel": "Type {count, number} to confirm",
-    "bulkSubmit": "Destroy {count, plural, one {# container} other {# containers}} permanently",
-    "bulkSubmitPending": "Destroying…",
-    "bulkAnnounce": "Destroying {count, plural, one {# container} other {# containers}}…",
-    "bulkFailedTitle": "Could not destroy the selected containers",
-    "bulkDeleteDataLabel": "Also delete {count, plural, one {the volume} other {the # volumes}} attached to these containers",
-    "bulkDeleteDataHint": "A container without a volume is unaffected. Data on a deleted volume cannot be recovered."
+    "confirmLabel": "Type “{token}” to confirm",
+    "one": {
+      "trigger": "Destroy",
+      "title": "Destroy {name}?",
+      "description": "This permanently deletes the service and its deployment history from Railway. It cannot be undone.",
+      "deleteDataLabel": "Also delete the stored data ({size})",
+      "deleteDataHint": "Unchecked, the volume is kept on Railway and continues to be billed.",
+      "submit": "Destroy permanently",
+      "submitPending": "Destroying…",
+      "announce": "Destroying {name}…",
+      "failedTitle": "Could not destroy container"
+    },
+    "many": {
+      "trigger": "Destroy selected",
+      "title": "Destroy {count, plural, one {# container} other {# containers}}?",
+      "description": "This permanently deletes these services and their deployment history from Railway. It cannot be undone.",
+      "listLabel": "Containers about to be destroyed",
+      "confirmToken": "destroy {count, plural, one {# container} other {# containers}}",
+      "deleteDataLabel": "Also delete {count, plural, one {the volume} other {the # volumes}} attached to these containers",
+      "deleteDataHint": "A container without a volume is unaffected. Data on a deleted volume cannot be recovered.",
+      "submit": "Destroy {count, plural, one {# container} other {# containers}} permanently",
+      "submitPending": "Destroying…",
+      "announce": "Destroying {count, plural, one {# container} other {# containers}}…",
+      "failedTitle": "Could not destroy the selected containers"
+    }
   },
   "editContainer": {
     "trigger": "Edit",

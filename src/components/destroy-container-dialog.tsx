@@ -1,37 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useToast } from "./ui/toast";
-import { Button } from "./ui/button";
-import { DestroyContainerForm } from "./destroy-container-form";
-import {
-  AlertDialogContent,
-  AlertDialogRoot,
-  AlertDialogTrigger,
-} from "./ui/alert-dialog";
-
-/*
- * The form is imported statically, deliberately.
- *
- * Loading it with `next/dynamic` saved ~10 kB gzip, but it broke the focus trap: Radix
- * traps focus in whatever AlertDialogContent contains at the moment it opens, and for
- * the tick before the chunk arrived that was nothing — so Tab walked straight out of
- * the dialog and into the page behind it. e2e/keyboard.spec.ts caught it.
- *
- * Radix already defers the *mounting* of this subtree until the dialog opens, so the
- * runtime cost was never the issue; only the module weight was, and a working focus
- * trap is worth more than 10 kB.
- */
+import { spinDown } from "@/app/dashboard/actions";
+import { ConfirmDestroyDialog } from "./confirm-destroy-dialog";
 
 /**
- * Destroy confirmation.
+ * Destroy confirmation for one container.
  *
- * Radix AlertDialog rather than an inline form: it traps focus, restores it to the
- * trigger on close, and is announced as `alertdialog` so the consequence is read before
- * the buttons.
+ * Everything structural lives in `ConfirmDestroyDialog`; this decides what the copy says
+ * and what makes the button safe to press.
  */
 export function DestroyContainerDialog({
   serviceId,
@@ -45,61 +22,60 @@ export function DestroyContainerDialog({
   displayName: string;
   projectId: string;
   environmentId: string;
-  /** Formatted size of this container's volume; undefined when it has none. */
+  /**
+   * Rendered size of this container's volume, or undefined when it has none.
+   *
+   * A formatted string rather than a number, because the figure and its unit are composed
+   * from the catalog one level up — see the row's readout. Undefined renders no checkbox at
+   * all: no field is posted, and the action keeps whatever it finds.
+   */
   volumeSize?: string;
   disabled?: boolean;
 }) {
   const t = useTranslations("destroy");
-  const router = useRouter();
-  const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  /*
-   * The destroy succeeded but the row is still on screen until the refreshed list
-   * arrives, and its trigger was still live — a second click hit a service that no
-   * longer exists and answered with an error. The transition makes that window visible
-   * and closes it; Button derives aria-busy and disabled from `pending` already.
-   */
-  const [refreshing, startRefresh] = useTransition();
+  const tOne = useTranslations("destroy.one");
 
   return (
-    <AlertDialogRoot open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="danger"
-          size="sm"
-          disabled={disabled}
-          pending={refreshing}
-          pendingLabel={t("refreshPending")}
-        >
-          <Trash2 aria-hidden />
-          {t("trigger")}
-        </Button>
-      </AlertDialogTrigger>
-
-      <AlertDialogContent>
-        {/* Mounted only while open, which is also what resets the typed confirmation. */}
-        {open && (
-          <DestroyContainerForm
-            serviceId={serviceId}
-            displayName={displayName}
-            projectId={projectId}
-            environmentId={environmentId}
-            volumeSize={volumeSize}
-            onDone={(message) => {
-              toast({ title: message, tone: "success" });
-              setOpen(false);
-              startRefresh(() => router.refresh());
-            }}
-            onError={(message) =>
-              toast({
-                title: t("failedTitle"),
-                description: message,
-                tone: "error",
-              })
+    <ConfirmDestroyDialog
+      action={spinDown}
+      hiddenFields={{ projectId, environmentId, serviceId }}
+      /*
+       * The container's own name, matched exactly. It is an identifier the reader is
+       * looking at while they type it, so case is not a guess — and this app's managed
+       * names are lowercase slugs, so there is nothing to trip over.
+       */
+      confirmToken={displayName}
+      matchCase
+      checkbox={
+        volumeSize === undefined
+          ? undefined
+          : {
+              label: tOne("deleteDataLabel", { size: volumeSize }),
+              hint: tOne("deleteDataHint"),
+              /*
+               * Checked by default, which is the decision worth defending. The volume was
+               * created by this app as part of creating this container, it holds only what
+               * that container wrote, and leaving it behind is billable storage that
+               * vanishes from this UI the moment its service does — the app lists
+               * containers, and an orphan volume is not one. So the default is the outcome
+               * with no invisible remainder, and the friction guarding it is the same typed
+               * name that guards the service.
+               */
+              defaultChecked: true,
             }
-          />
-        )}
-      </AlertDialogContent>
-    </AlertDialogRoot>
+      }
+      triggerDisabled={disabled}
+      copy={{
+        trigger: tOne("trigger"),
+        title: tOne("title", { name: displayName }),
+        description: tOne("description"),
+        confirmLabel: t("confirmLabel", { token: displayName }),
+        submit: tOne("submit"),
+        submitPending: tOne("submitPending"),
+        announce: tOne("announce", { name: displayName }),
+        failedTitle: tOne("failedTitle"),
+        refreshPending: t("refreshPending"),
+      }}
+    />
   );
 }

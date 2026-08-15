@@ -58,6 +58,10 @@ const open = async (user: ReturnType<typeof userEvent.setup>) => {
 
 const submitButton = () => screen.getByRole("button", { name: /permanently$/ });
 
+/** The phrase the confirmation demands for a two-container batch, and its field's label. */
+const CONFIRM_TOKEN = "destroy 2 containers";
+const CONFIRM_LABEL = `Type \u201c${CONFIRM_TOKEN}\u201d to confirm`;
+
 beforeEach(() => {
   spinDownMany.mockReset();
   spinDownMany.mockResolvedValue({ ok: true, message: "Destroyed 2 containers" });
@@ -100,20 +104,51 @@ describe("BulkDestroyDialog", () => {
     ).toBeInTheDocument();
   });
 
-  it("holds the submit until the count is typed", async () => {
+  it("holds the submit until the whole phrase is typed", async () => {
     const user = userEvent.setup();
     renderDialog();
     await open(user);
 
+    const field = () => screen.getByLabelText(CONFIRM_LABEL);
+    const retype = async (text: string) => {
+      await user.clear(field());
+      await user.type(field(), text);
+    };
+
     expect(submitButton()).toBeDisabled();
 
-    // The number is the one fact about this batch a person can get wrong by miscounting
-    // ticked boxes, which is why it is the thing they are made to read.
-    await user.type(screen.getByLabelText("Type 2 to confirm"), "3");
+    /*
+     * The bare count is what this used to accept — one keystroke on a numeric keypad for
+     * an irreversible action on the whole selection, where destroying a single container
+     * demands its full name. It is refused now.
+     */
+    await retype("2");
     expect(submitButton()).toBeDisabled();
 
-    await user.clear(screen.getByLabelText("Type 2 to confirm"));
-    await user.type(screen.getByLabelText("Type 2 to confirm"), "2");
+    // The count still lives inside the phrase, so a miscounted selection is still the one
+    // fact this confirmation catches.
+    await retype("destroy 3 containers");
+    expect(submitButton()).toBeDisabled();
+
+    // The verb alone is not the phrase either.
+    await retype("destroy");
+    expect(submitButton()).toBeDisabled();
+
+    await retype(CONFIRM_TOKEN);
+    expect(submitButton()).toBeEnabled();
+  });
+
+  it("does not make them hold shift as well", async () => {
+    /*
+     * Case-insensitive, where the single destroy matches a container name exactly. A name
+     * is an identifier the reader is copying; this is prose, and the friction is meant to
+     * come from typing twenty characters rather than from the first one.
+     */
+    const user = userEvent.setup();
+    renderDialog();
+    await open(user);
+
+    await user.type(screen.getByLabelText(CONFIRM_LABEL), "Destroy 2 Containers");
     expect(submitButton()).toBeEnabled();
   });
 
@@ -122,7 +157,7 @@ describe("BulkDestroyDialog", () => {
     renderDialog();
     await open(user);
 
-    await user.type(screen.getByLabelText("Type 2 to confirm"), "2");
+    await user.type(screen.getByLabelText(CONFIRM_LABEL), CONFIRM_TOKEN);
     await user.click(submitButton());
 
     await waitFor(() => expect(spinDownMany).toHaveBeenCalledOnce());
@@ -161,7 +196,7 @@ describe("BulkDestroyDialog", () => {
     renderDialog();
     await open(user);
 
-    await user.type(screen.getByLabelText("Type 2 to confirm"), "2");
+    await user.type(screen.getByLabelText(CONFIRM_LABEL), CONFIRM_TOKEN);
     await user.click(submitButton());
 
     await waitFor(() => expect(onDestroyed).toHaveBeenCalledOnce());
@@ -178,7 +213,7 @@ describe("BulkDestroyDialog", () => {
     renderDialog();
     await open(user);
 
-    await user.type(screen.getByLabelText("Type 2 to confirm"), "2");
+    await user.type(screen.getByLabelText(CONFIRM_LABEL), CONFIRM_TOKEN);
     await user.click(submitButton());
 
     expect(

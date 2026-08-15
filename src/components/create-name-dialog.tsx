@@ -97,7 +97,7 @@ export function CreateNameDialog({
 
   /*
    * The action is awaited inside a transition rather than driven by useActionState, for
-   * the reason destroy-container-form.tsx gives: the dialog has to close on success, and
+   * the reason confirm-destroy-dialog.tsx gives: the dialog has to close on success, and
    * reacting to a result in an effect means calling setState from an effect body.
    */
   const submit = (formData: FormData) => {

@@ -425,9 +425,19 @@ test.describe("container lifecycle", () => {
     });
     await expect(confirm).toBeDisabled();
 
-    // The count, not two names: friction proportionate to the batch rather than multiplied
-    // by it, and the one fact a miscount of ticked boxes would get wrong.
-    await dialog.getByLabel("Type 2 to confirm").fill("2");
+    /*
+     * A phrase carrying the count, not two names: friction proportionate to the batch
+     * rather than multiplied by it, and the count is the one fact a miscount of ticked
+     * boxes would get wrong.
+     *
+     * The bare number is refused first. It is what this field used to accept — one
+     * keystroke for an irreversible action on the whole selection.
+     */
+    const field = dialog.getByLabel(/to confirm/i);
+    await field.fill("2");
+    await expect(confirm).toBeDisabled();
+
+    await field.fill("destroy 2 containers");
     await expect(confirm).toBeEnabled();
     await confirm.click();
 
