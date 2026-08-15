@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   filterContainers,
@@ -9,9 +9,9 @@ import {
   orderContainers,
 } from "@/lib/container-filters";
 import { sumContainerMetrics } from "@/lib/container-metrics";
-import { LIMITS } from "@/lib/constants";
 import { formatMemoryGb, formatVcpu } from "@/lib/format";
 import type { Container, ContainerMetrics, ContainerVolume } from "@/lib/railway/types";
+import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useContainerFilters } from "@/hooks/use-container-filters";
 import { useIncrementalList } from "@/hooks/use-incremental-list";
 import { BulkDestroyDialog } from "./bulk-destroy-dialog";
@@ -25,18 +25,6 @@ import { Checkbox } from "./ui/checkbox";
 import { EmptyState } from "./ui/misc";
 import { Text } from "./ui/text";
 import { LiveRegion } from "./ui/live-region";
-
-/**
- * A stable empty set, for the one render between the list key changing and the reset
- * below landing.
- *
- * Module scope rather than `useMemo(() => new Set(), [])`, which is machinery for a value
- * with no dependencies — `spin-up-form.tsx`'s NO_NAMES is the same thing done right. What
- * it must not be is a fresh `new Set()` per render: it feeds the `selected` memo, and an
- * inline literal would give that memo a new dependency identity every time and turn it
- * into a no-op.
- */
-const EMPTY_SELECTION: ReadonlySet<string> = new Set();
 
 /**
  * The filtered, paged container list.
@@ -100,69 +88,16 @@ export function ContainerList({
   const selectable = useMemo(() => matched.filter((c) => c.managed), [matched]);
   const managed = selectable.length;
 
-  /*
-   * Which rows are ticked, and deliberately not in the URL.
-   *
-   * ADR-7 puts the list's filters there because a filtered list is worth sharing; a set of
-   * containers somebody is about to destroy is the opposite of that. It is also the one piece
-   * of state here that must not survive a reload — a link that arrives with six services
-   * pre-selected for deletion is a link worth being suspicious of.
-   *
-   * Reset on the list key, using the derive-during-render pattern useIncrementalList uses for
-   * the page count and for the same reason: an effect would commit one render on the old
-   * selection first. Changing what you are looking at clears what you had picked, which is
-   * both predictable and what keeps a row hidden by a filter out of the batch.
-   */
-  const [selection, setSelection] = useState({ key: listKey, ids: new Set<string>() });
-  if (selection.key !== listKey) setSelection({ key: listKey, ids: new Set() });
-  /*
-   * The stale set, for the one render between the key changing and the update above
-   * landing. Memoised rather than a fresh `new Set()` per render, because it feeds the
-   * `selected` memo below — an inline literal would give that memo a new dependency
-   * identity every time and turn it into a no-op.
-   */
-  const selectedIds = selection.key === listKey ? selection.ids : EMPTY_SELECTION;
-
-  /*
-   * The selection as containers, derived rather than stored.
-   *
-   * Intersected with `selectable` on every render, so a row that has been destroyed, filtered
-   * away or turned out not to be ours cannot reach the confirmation — the set of ids is a
-   * record of what was ticked, and this is the answer to what that currently means. Ordered
-   * by the list rather than by click order, so the dialog reads in the order on screen.
-   */
-  const selected = useMemo(
-    () => selectable.filter((c) => selectedIds.has(c.serviceId)),
-    [selectable, selectedIds],
-  );
-
-  const setSelected = (serviceId: string, checked: boolean) => {
-    setSelection((current) => {
-      const ids = new Set(current.ids);
-      if (checked) ids.add(serviceId);
-      else ids.delete(serviceId);
-      return { key: listKey, ids };
-    });
-  };
-
-  /*
-   * Select-all reaches the matched set, not the page on screen.
-   *
-   * That is the set the summary sentence counts and the set the filters describe, so it is
-   * the set "all" means here — a checkbox that silently meant "the twenty rows rendered so
-   * far" would depend on how far the reader had scrolled.
-   *
-   * Capped at what one request may carry. The count line says so when it bites, because a
-   * tick that quietly selected fifty of eighty is the list telling the user something untrue
-   * about their own selection.
-   */
-  const capped = selectable.slice(0, LIMITS.BULK_DESTROY_MAX);
-  const allSelected = capped.length > 0 && selected.length === capped.length;
-  const selectAll = (checked: boolean) =>
-    setSelection({
-      key: listKey,
-      ids: new Set(checked ? capped.map((c) => c.serviceId) : []),
-    });
+  // `clear` is already the filter bar's reset, so this one says what it clears.
+  const {
+    selected,
+    setSelected,
+    selectAll,
+    allSelected,
+    capped,
+    isSelected,
+    clear: clearSelection,
+  } = useBulkSelection(selectable, listKey);
 
   const selectedVolumeCount = selected.filter(
     (c) => volumes[c.serviceId] !== undefined,
@@ -322,8 +257,8 @@ export function ContainerList({
                   <LiveRegion as="p" className="mr-auto">
                     {selected.length === 0
                       ? t("selectionNone")
-                      : selected.length === LIMITS.BULK_DESTROY_MAX &&
-                          selectable.length > LIMITS.BULK_DESTROY_MAX
+                      : selected.length === capped.length &&
+                          selectable.length > capped.length
                         ? t("selectionCapped", { count: selected.length })
                         : t("selectionCount", { count: selected.length })}
                   </LiveRegion>
@@ -334,7 +269,7 @@ export function ContainerList({
                   projectId={projectId}
                   environmentId={environmentId}
                   volumeCount={selectedVolumeCount}
-                  onDestroyed={() => setSelection({ key: listKey, ids: new Set() })}
+                  onDestroyed={clearSelection}
                 />
               </div>
             )}
@@ -354,7 +289,7 @@ export function ContainerList({
                   environmentId={environmentId}
                   metrics={metrics[container.serviceId]}
                   volume={volumes[container.serviceId]}
-                  selected={selectedIds.has(container.serviceId)}
+                  selected={isSelected(container.serviceId)}
                   /*
                    * Handed only to the rows that can be acted on. An unmanaged row gets no
                    * handler and therefore no checkbox — the decision is made once, here,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -16,8 +16,8 @@ import {
   type ContainerVolume,
   type LogPhase,
 } from "@/lib/railway/types";
-import { UI } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
+import { useCollapsiblePanel } from "@/hooks/use-collapsible-panel";
 import { useVolumeSize } from "@/hooks/use-memory-figure";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
@@ -116,62 +116,7 @@ export function ContainerRow({
   const locale = useLocale();
   const refresh = useThrottledRefresh();
   const sized = useVolumeSize();
-  const [expanded, setExpanded] = useState(false);
-  /*
-   * Outlives `expanded` by one transition, because `hidden` is `display: none` and
-   * nothing can be transitioned out of that — while it is also the only thing keeping a
-   * collapsed panel out of the tab order and the a11y tree, so it cannot simply be
-   * dropped. `expanded` is the user's intent and drives aria-expanded and the grid rows;
-   * `mounted` is whether there is still something on screen to collapse.
-   */
-  const [mounted, setMounted] = useState(false);
-  const panelId = useId();
-
-  /*
-   * Which way the panel is currently travelling.
-   *
-   * `mounted && !expanded` is TWO different states — one frame into opening, and one
-   * transition away from closed — and without this ref the backstop below could not tell
-   * them apart. It assumed closing, so a machine that delayed the frames past the timer
-   * ran `setMounted(false)` on a panel that was opening; the rAF then set `expanded`
-   * true against an unmounted panel and the row stuck there, `aria-expanded="true"` over
-   * a `hidden` region with no way back short of a reload. A ref rather than state
-   * because it must be readable inside the frame callback without re-running it.
-   */
-  const intent = useRef<"open" | "closed">("closed");
-
-  const toggle = () => {
-    if (expanded) {
-      intent.current = "closed";
-      setExpanded(false);
-      return;
-    }
-    intent.current = "open";
-    setMounted(true);
-    /*
-     * Two frames, not one. The first commits `mounted` — `hidden` comes off at
-     * grid-rows 0fr — and the second flips to 1fr with a start value the transition can
-     * interpolate from. Collapsing needs no equivalent: the panel is already laid out.
-     */
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        // A close that landed while these frames were queued wins; opening now would
-        // re-expand a panel the user has already dismissed.
-        if (intent.current === "open") setExpanded(true);
-      }),
-    );
-  };
-
-  /*
-   * Backstop for an interrupted transition. Toggling faster than the animation means
-   * `transitionend` may never fire, which would leave a zero-height panel mounted and
-   * therefore in the tab order — invisible, and focusable.
-   */
-  useEffect(() => {
-    if (expanded || !mounted || intent.current === "open") return;
-    const timer = setTimeout(() => setMounted(false), UI.TRANSITION_BACKSTOP_MS);
-    return () => clearTimeout(timer);
-  }, [expanded, mounted]);
+  const { expanded, mounted, triggerProps, panelProps } = useCollapsiblePanel();
 
   /*
    * Stream while the deployment is moving, or whenever the log pane is open. A settled
@@ -295,9 +240,7 @@ export function ContainerRow({
 
           <button
             type="button"
-            onClick={toggle}
-            aria-expanded={expanded}
-            aria-controls={panelId}
+            {...triggerProps}
             // p-1.5 around a 16px icon is a 28px target; p-1 would sit exactly on the
             // 24px floor, with nothing left for the next person who nudges the icon.
             className="focus-ring hover:bg-subtle -ml-1 shrink-0 rounded-md p-1.5"
@@ -496,14 +439,7 @@ export function ContainerRow({
         two behaviours to test for a 200ms flourish.
       */}
       <div
-        id={panelId}
-        hidden={!mounted}
-        data-panel-open={expanded}
-        onTransitionEnd={(event) => {
-          if (event.propertyName === "grid-template-rows" && !expanded) {
-            setMounted(false);
-          }
-        }}
+        {...panelProps}
         className={cn(
           "duration-base grid transition-[grid-template-rows] ease-out",
           "data-[panel-open=false]:grid-rows-[0fr] data-[panel-open=true]:grid-rows-[1fr]",
