@@ -193,7 +193,16 @@
     "memoryValueMb": "{value} MB",
     "memoryOf": "{used} of {limit}",
     "volumeLabel": "Volume",
-    "volumeValue": "{mountPath} · {used} of {size}"
+    "volumeValue": "{mountPath} · {used} of {size}",
+    "historyLabel": "Earlier deployments of {name}",
+    "historyLoading": "Reading this service's deployments…",
+    "historyFailed": "This service's earlier deployments could not be read, so there is nothing to roll back to here. Railway's own page for the service still lists them.",
+    "historyEmpty": "Railway has no deployments recorded for this service.",
+    "historyOnlyCurrent": "This is the only deployment this service has had, so there is nothing to roll back to.",
+    "historyCurrent": "Running now",
+    "historyNotRollbackable": "Railway will not roll back to this one",
+    "historyWhen": "Deployed {when}",
+    "historyRollbackLabel": "Roll back to the deployment from {when}"
   },
   "containerDetail": {
     "trigger": "Details",
@@ -310,6 +319,14 @@
       "submitPending": "Redeploying…",
       "announce": "Redeploying {name}…"
     },
+    "rollback": {
+      "trigger": "Roll back",
+      "title": "Roll {name} back to the deployment from {when}?",
+      "description": "Railway redeploys that earlier deployment. The current one stops and its logs stay on Railway, and Redeploy brings the newest image back.",
+      "submit": "Roll back container",
+      "submitPending": "Rolling back…",
+      "announce": "Rolling {name} back…"
+    },
     "refreshPending": "Updating…",
     "failedTitle": "Could not change this container"
   },
@@ -405,6 +422,9 @@
     "stopped": "Stopped {name}",
     "restarted": "Restarting {name}",
     "redeployed": "Redeploying {name}",
+    "rolledBack": "Rolling {name} back",
+    "rollbackIsCurrent": "{name} is already running that deployment.",
+    "rollbackUnavailable": "That deployment is no longer one {name} can go back to. Reload the page to see what it has.",
     "projectCreated": "Created {name}",
     "environmentCreated": "Created {name}",
     "destroyedMany": "Destroyed {count, plural, one {# container} other {# containers}}",
@@ -420,6 +440,7 @@
     "projectRequired": "Select a project before continuing",
     "environmentRequired": "Select an environment before continuing",
     "serviceRequired": "Missing container reference.",
+    "deploymentRequired": "Missing deployment reference.",
     "referenceInvalid": "That reference is not one Railway could have issued. Reload the page and try again.",
     "variableNameRequired": "Give this variable a name, or clear the row",
     "variableNameTooLong": "Keep the name under {max, plural, one {# character} other {# characters}}",

@@ -98,6 +98,23 @@
     "first-load chunk, something has imported lib/validation or the parser from a client",
     "component, and that is a defect rather than a budget question.",
     "",
+    "/dashboard 229 -> 237: the deployment history behind the rollback control. Measured",
+    "229.6 against a budget of 229, so 0.6 kB over — which is the whole cost of the feature",
+    "in the browser: deployment-history.tsx, its fetch-on-expand, and three props on the",
+    "lifecycle dialog. No new dependency. Radix AlertDialog is already in the graph via the",
+    "row's own stop/restart/redeploy and destroy dialogs, so the confirmation is free, and",
+    "the list reuses StatusBadge, Text and relativeTime. Re-seeded at actual + ~3%.",
+    "",
+    "Rejected, and this one is worth recording because it is counterintuitive: next/dynamic",
+    "with ssr:false around DeploymentHistory, the same treatment LogPane gets a few lines",
+    "above it in container-row.tsx. It works — the component genuinely leaves /dashboard's",
+    "first load, checked against route-bundle-stats.json rather than assumed — and the route",
+    "gets BIGGER: 229.6 -> 230.8. A second dynamic boundary plus the loading component the",
+    "panel needs to avoid a two-step reflow costs more than the 0.6 kB it defers. LogPane's",
+    "boundary earns itself because Radix ScrollArea sits behind it; there is nothing of that",
+    "size behind this one. Deferring a small component is not free, and this file is where",
+    "that number now lives.",
+    "",
     "Rejected: next/dynamic with ssr:false, which would keep / under the old number by",
     "splitting the yard into a second request. The canvas is absolutely positioned and",
     "contributes no layout, so it would cost nothing in stability — but it would make the",
@@ -106,7 +123,7 @@
   ],
   "routes": {
     "/": 179,
-    "/dashboard": 229,
+    "/dashboard": 237,
     "/_not-found": 171
   }
 }

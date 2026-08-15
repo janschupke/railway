@@ -106,6 +106,7 @@ const KEYS = {
   projectRequired: "validation.projectRequired",
   environmentRequired: "validation.environmentRequired",
   serviceRequired: "validation.serviceRequired",
+  deploymentRequired: "validation.deploymentRequired",
   referenceInvalid: "validation.referenceInvalid",
   variableNameRequired: "validation.variableNameRequired",
   variableNameTooLong: "validation.variableNameTooLong",
@@ -595,14 +596,33 @@ export const environmentCreateSchema = z.object({
  * One container, named by the three ids every lifecycle action posts.
  *
  * Was `spinDownSchema`, when destroy was the only thing that could be done to a container
- * that already exists. Stop, restart and redeploy send exactly the same three fields —
- * nothing about a lifecycle request is per-verb, because the deployment id is read back
- * from Railway rather than accepted from the browser.
+ * that already exists. Stop, restart, redeploy and destroy send exactly these three fields —
+ * for those verbs nothing about a lifecycle request is per-verb, because the deployment id is
+ * read back from Railway rather than accepted from the browser.
  */
 export const containerActionSchema = z.object({
   projectId: railwayId(KEYS.projectRequired),
   environmentId: railwayId(KEYS.environmentRequired),
   serviceId: railwayId(KEYS.serviceRequired),
+});
+
+/**
+ * The one lifecycle request that carries a fourth field, and the reason it has to.
+ *
+ * Every other verb acts on whatever deployment the service is running now, which the action
+ * reads off Railway's own answer. A rollback names a deployment in the *past*, so there is no
+ * current field to read it from and the browser is the only thing that knows which row was
+ * clicked.
+ *
+ * **This schema proves the shape and nothing else.** It says the value is a Railway
+ * identifier; it cannot say the deployment belongs to this service, or that Railway would
+ * allow a rollback to it. Both of those are answered in `rollback`, against a deployment list
+ * scoped to the service the ownership guard has already proved — the same division
+ * `containerBulkActionSchema` states below, where the list says which services and only
+ * Railway's answer says whether this app may touch them.
+ */
+export const containerRollbackSchema = containerActionSchema.extend({
+  deploymentId: railwayId(KEYS.deploymentRequired),
 });
 
 /**

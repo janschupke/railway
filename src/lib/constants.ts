@@ -713,6 +713,19 @@ export const LIST = {
   SENTINEL_ROOT_MARGIN_PX: 200,
   /** Scroll depth past which returning to the top stops being a flick of the wrist. */
   SCROLL_TOP_AFTER_PX: 640,
+  /**
+   * Deployments offered in an expanded row's history, newest first.
+   *
+   * A bound on the panel rather than on Railway: a service redeployed all week has a history
+   * this app has no paging control for, and a list longer than the log pane it sits above
+   * turns the row into the page. Ten covers "the one before the one that broke it", which is
+   * what a rollback is actually reaching for, and every entry past that is better answered by
+   * Railway's own deployment list — which the row already links to.
+   *
+   * It is also the read's cost. One request per expanded managed row, so the figure is what
+   * a panel costs against the rate limit that shapes every read here.
+   */
+  DEPLOYMENT_HISTORY: 10,
 } as const;
 
 /**

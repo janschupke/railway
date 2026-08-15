@@ -180,6 +180,33 @@ export type Container = {
 };
 
 /**
+ * One entry in a service's deployment history, as offered by the rollback control.
+ *
+ * Four fields, and the absent fifth is the point: **there is no image here**.
+ * `Deployment.meta` is an opaque `scalar`, so Railway will not say what a given deployment
+ * ran, and a row therefore identifies itself by when it happened and how it ended — "the
+ * deployment from 14:32 that succeeded". That is the honest form of the choice, and it is a
+ * narrower limitation than the one the README used to state.
+ *
+ * `canRollback` is Railway's answer, not a rule derived here, in the same way `canRedeploy`
+ * is. The panel renders an entry it says no to rather than dropping it, so the absence of the
+ * control is visible instead of the entry being missing.
+ *
+ * Not a field on `Container` and not keyed beside the list: this is read once, when someone
+ * opens a panel, and it must stay out of `fingerprint()` for the reason `ContainerMetrics`
+ * gives below — a history that grows on every redeploy would announce a change to every open
+ * tab.
+ */
+export type DeploymentHistoryEntry = {
+  id: string;
+  state: ContainerState;
+  /** Railway's own enum member, for the badge's title — see StatusBadge. */
+  rawStatus: string | null;
+  createdAt: string | null;
+  canRollback: boolean;
+};
+
+/**
  * What one container is currently using, as of the newest sample Railway returned.
  *
  * Deliberately NOT a field on `Container`, and the reason is load-bearing rather than

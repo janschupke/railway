@@ -131,8 +131,9 @@ against it, so PKCE, token exchange and refresh rotation are all genuinely exerc
 - Every spec resets it: the `test` fixture in `e2e/support.ts` posts to `/__test/reset`
   before the page is used.
 - Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
-  and supports twenty-six knobs — `rateLimit`, `unauthorized`, `refreshFails`,
+  and supports twenty-seven knobs — `rateLimit`, `unauthorized`, `refreshFails`,
   `accessTokenTtl`, `deploymentsFail`, `logPhase`, `failureField`, `deploymentEventsFail`,
+  `deploymentListFail`,
   `variablesFail`, `domainFails`, `settingsFail`, `limitsFail`, `volumeCreateFail`,
   `volumesFail`, `metricsFail`, `workspaceFail`, `noWorkspace`, `projectsSource`,
   `rejectWorkspaces`, `rejectPersonal`, `projectsEmpty`, `slowMs` and `registryStatus`.

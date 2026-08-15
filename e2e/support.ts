@@ -31,6 +31,7 @@ export async function injectFaults(
     logPhase: LogPhaseFault;
     failureField: FailureFieldFault;
     deploymentEventsFail: boolean;
+    deploymentListFail: boolean;
     variablesFail: boolean;
     domainFails: boolean;
     volumeCreateFail: boolean;
@@ -301,6 +302,49 @@ export async function runRowAction(
     name: new RegExp(`^${action} container$`, "i"),
   });
   await expect(confirm).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+}
+
+/**
+ * The deployment history inside an expanded row, as a list of its entries.
+ *
+ * Named by its own heading rather than by position: the panel holds a metrics `<dl>` and a
+ * log pane too, and `getByRole("list")` would pick whichever came first.
+ */
+export function deploymentHistory(page: Page, name: string) {
+  return onlyVisible(
+    row(page, name).getByRole("list", {
+      name: new RegExp(`Earlier deployments of ${name}`),
+    }),
+  );
+}
+
+/**
+ * Rolls a container back to one entry of its history, from the trigger to the confirmation.
+ *
+ * Separate from `runRowAction` rather than a fourth member of its union, because the control
+ * is not in the row's action cluster: there is one per eligible deployment, inside the
+ * expanded panel, so a caller has to say *which* — and the trigger reads "Roll back" on every
+ * one of them. `index` is into the visible history, newest first, so 1 is the entry directly
+ * before the one running.
+ *
+ * The panel has to be open already; expanding is what starts the read this depends on.
+ */
+export async function rollBackTo(page: Page, name: string, index: number) {
+  const entries = deploymentHistory(page, name).getByRole("listitem");
+  const trigger = entries.nth(index).getByRole("button", { name: /^Roll back/ });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+
+  const dialog = onlyVisible(page.getByRole("alertdialog"));
+  await expect(dialog).toBeVisible();
+  const confirm = dialog.getByRole("button", { name: /^Roll back container$/i });
+  await expect(confirm).toBeVisible();
+  // The layer gate, for the reason runRowAction states: a dialog one render from ready
+  // swallows the click rather than the confirmation happening.
   await expect(dialog).toHaveCSS("pointer-events", "auto");
 
   await confirm.click();

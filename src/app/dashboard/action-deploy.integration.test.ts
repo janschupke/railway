@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { railwayApiUrl } from "@/lib/railway/client";
+import { rawLogLines } from "@/test/log-capture";
 import { projectWith, form, record } from "@/test/dashboard-fixtures";
 
 const revalidatePath = vi.fn();
@@ -32,8 +33,13 @@ vi.mock("@/lib/auth/server", () => ({
   requireSession: () => requireSession(),
 }));
 
-const { stopContainer, restartContainer, redeployContainer, generateDomain } =
-  await import("./actions");
+const {
+  stopContainer,
+  restartContainer,
+  redeployContainer,
+  rollbackContainer,
+  generateDomain,
+} = await import("./actions");
 const { __resetIdempotency } = await import("@/lib/idempotency");
 
 const api = graphql.link(railwayApiUrl());
@@ -345,6 +351,201 @@ describe("container lifecycle", () => {
 
       expect(result).toEqual({ ok: false, error: "That container no longer exists." });
       expect(deployCalls).toBe(0);
+    });
+  });
+
+  describe("rollbackContainer", () => {
+    /**
+     * The service's own deployment history: the one running now, and an older one to
+     * return to.
+     *
+     * `dep_svc_managed` is what `projectWith` reports as the current deployment, so the two
+     * halves of every case below agree about which row is which.
+     */
+    const history = (
+      entries: Array<{ id: string; canRollback?: boolean; status?: string }> = [
+        { id: "dep_svc_managed" },
+        { id: "dep_older" },
+      ],
+    ) =>
+      api.query("Deployments", () =>
+        HttpResponse.json({
+          data: {
+            deployments: {
+              edges: entries.map((entry, index) => ({
+                node: {
+                  id: entry.id,
+                  status: entry.status ?? "SUCCESS",
+                  createdAt: `2026-08-0${index + 1}T00:00:00.000Z`,
+                  canRollback: entry.canRollback ?? true,
+                },
+              })),
+            },
+          },
+        }),
+      );
+
+    const rollbackForm = (deploymentId: string, serviceId = "svc_managed") => {
+      const data = actionForm(serviceId);
+      data.append("deploymentId", deploymentId);
+      return data;
+    };
+
+    it("rolls back to a deployment of this service and records both ids", async () => {
+      const rolled: string[] = [];
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        history(),
+        api.mutation("DeploymentRollback", ({ variables }) => {
+          rolled.push(variables.id as string);
+          return HttpResponse.json({ data: { deploymentRollback: true } });
+        }),
+      );
+
+      const result = await rollbackContainer(null, rollbackForm("dep_older"));
+
+      expect(result).toEqual({ ok: true, message: "Rolling cache back" });
+      expect(rolled).toEqual(["dep_older"]);
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+      /*
+       * `from_deployment_id` beside `deployment_id`, which no other verb's record carries:
+       * a rollback is the one after which what was running before appears nowhere else in
+       * the trail.
+       */
+      expect(record("container.rolled_back")).toMatchObject({
+        service_id: "svc_managed",
+        service_name: "spun-cache",
+        deployment_id: "dep_older",
+        from_deployment_id: "dep_svc_managed",
+      });
+    });
+
+    it("refuses a deployment id that belongs to another service", async () => {
+      /*
+       * The case the whole design turns on. Every other verb reads its deployment id off
+       * the container the guard just re-derived; this one accepts it from the browser, so
+       * the list read — scoped by the serviceId on the resolved target rather than by the
+       * one posted — is what stands in for that. No DeploymentRollback handler is
+       * registered: `onUnhandledRequest: "error"` is what proves the mutation never left.
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        history(),
+      );
+
+      const result = await rollbackContainer(
+        null,
+        rollbackForm("dep_someone_elses_service"),
+      );
+
+      expect(result).toMatchObject({ ok: false });
+      expect(record("container.rollback_refused")).toMatchObject({
+        reason: "not_in_service",
+        service_id: "svc_managed",
+      });
+    });
+
+    it("does not log the deployment id it refused", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        history(),
+      );
+
+      await rollbackContainer(null, rollbackForm("dep_forged_and_unbounded"));
+
+      /*
+       * Caller-chosen and unbounded, which is the call the stream route already makes about
+       * a deploymentId it rejects. `reason` carries the diagnostic content instead.
+       */
+      expect(rawLogLines().join("\n")).not.toContain("dep_forged_and_unbounded");
+    });
+
+    it("refuses a deployment Railway will not roll back to", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        history([
+          { id: "dep_svc_managed" },
+          { id: "dep_older", canRollback: false, status: "FAILED" },
+        ]),
+      );
+
+      const result = await rollbackContainer(null, rollbackForm("dep_older"));
+
+      expect(result).toMatchObject({ ok: false });
+      expect(record("container.rollback_refused")).toMatchObject({
+        reason: "not_rollbackable",
+      });
+    });
+
+    it("refuses to roll back to the deployment already running", async () => {
+      // Refused before the list is even read, so no Deployments handler is registered.
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+      );
+
+      const result = await rollbackContainer(null, rollbackForm("dep_svc_managed"));
+
+      expect(result).toEqual({
+        ok: false,
+        error: "cache is already running that deployment.",
+      });
+      expect(record("container.rollback_skipped")).toMatchObject({ reason: "current" });
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
+    });
+
+    it("fails closed when Railway refuses the deployment list", async () => {
+      /*
+       * `Deployments` is a degrading read, so a refusal returns an empty list rather than
+       * throwing — and an empty list contains nothing, so the posted id matches nothing and
+       * the mutation is never sent. The direction this fails in is the point.
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.query("Deployments", () =>
+          HttpResponse.json({
+            data: null,
+            errors: [{ message: "Not Authorized", path: ["deployments"] }],
+          }),
+        ),
+      );
+
+      const result = await rollbackContainer(null, rollbackForm("dep_older"));
+
+      expect(result).toMatchObject({ ok: false });
+      expect(record("container.rollback_refused")).toMatchObject({
+        reason: "not_in_service",
+      });
+    });
+
+    it("refuses to roll back a service it did not create", async () => {
+      // Neither handler registered: the ownership guard runs before the list is read, so a
+      // request that reached either one would fail this case rather than be asserted for.
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+      );
+
+      const result = await rollbackContainer(
+        null,
+        rollbackForm("dep_older", "svc_foreign"),
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        error: "This service was not created here, so this app cannot act on it.",
+      });
+      expect(record("container.rollback_refused")).toMatchObject({
+        reason: "unmanaged",
+      });
+    });
+
+    it("refuses a request carrying no deployment id at all", async () => {
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+      );
+
+      const result = await rollbackContainer(null, actionForm("svc_managed"));
+
+      expect(result).toEqual({ ok: false, error: "Missing container reference." });
     });
   });
 

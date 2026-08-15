@@ -184,6 +184,7 @@ const mutationImportBan = {
     "deleteVolume",
     "stopDeployment",
     "restartDeployment",
+    "rollbackDeployment",
     "deployService",
     "createServiceDomain",
   ],
@@ -346,6 +347,13 @@ const eslintConfig = defineConfig([
             "deleteVolume",
             "stopDeployment",
             "restartDeployment",
+            /*
+             * The one mutation whose *argument* the browser chose. Being inside the guard
+             * is necessary here and not sufficient — `rollback` also has to resolve the
+             * posted deployment id against the service's own list, which no rule can see.
+             * Its docblock is where that obligation is written down.
+             */
+            "rollbackDeployment",
             "updateContainer",
           ],
           guard: "withManagedContainer",

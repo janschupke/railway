@@ -227,6 +227,15 @@ export type Faults = {
    * this describes what the API will answer, not what a deployment did.
    */
   deploymentEventsFail: boolean;
+  /**
+   * `Query.deployments` is refused, as it would be for a token without the scope.
+   *
+   * The rollback control's whole supply. Read at request time like `deploymentEventsFail`
+   * above and for the same reason — it describes what the API will answer rather than
+   * anything a deployment did — and it is the fault that proves the panel degrades to a
+   * sentence instead of an empty list that would read as "this service has never deployed".
+   */
+  deploymentListFail: boolean;
   /** variableCollectionUpsert is refused, stranding a service before its deploy. */
   variablesFail: boolean;
   /**
@@ -346,6 +355,7 @@ const DEFAULT_FAULTS: Faults = {
   logPhase: "both",
   failureField: "error",
   deploymentEventsFail: false,
+  deploymentListFail: false,
   projectsSource: "personal",
   variablesFail: false,
   domainFails: false,
@@ -587,6 +597,86 @@ export class Store {
     return deployment;
   }
 
+  /**
+   * One service's deployments, oldest first.
+   *
+   * Oldest first because that is the order Railway's connections arrive in — the app asks
+   * for `last: N` and slices the tail, which is the Relay semantics `DeploymentEvents`
+   * already established here. A fixture that answered newest-first would let a document
+   * using `last` pass while returning the ten *oldest* deployments against the real API.
+   *
+   * Insertion order is creation order, since `addDeployment` only ever appends, so the Map
+   * carries the ordering without a sort. `createdAt` is a real timestamp on these — unlike
+   * the `Deployment` handler's epoch-zero — because it is what the panel renders and what
+   * the app sorts on.
+   */
+  deploymentsForService(serviceId: string): Deployment[] {
+    return [...this.deployments.values()].filter(
+      (deployment) => deployment.serviceId === serviceId,
+    );
+  }
+
+  /**
+   * Whether the app is offered a rollback to this deployment, which is Railway's answer
+   * rather than a rule the app derives.
+   *
+   * Modelled as "settled successfully, and not the one running now". The second half is what
+   * gives a spec both kinds of row in one list: the current deployment is rendered with
+   * "Running now" and no control, and a failed one with the sentence saying Railway will not
+   * go back to it. Without a false case the panel's own promise — that an ineligible entry is
+   * shown rather than dropped — would be untestable.
+   */
+  canRollback(deployment: Deployment): boolean {
+    const service = this.services.get(deployment.serviceId);
+    return deployment.status === "SUCCESS" && service?.deploymentId !== deployment.id;
+  }
+
+  /**
+   * What `deploymentRollback` does here: a NEW deployment, carrying the chosen one's outcome.
+   *
+   * **Which of the two possible behaviours this is has never been observed.** Railway answers
+   * the mutation with a Boolean, so the response says nothing, and settling it would mean
+   * performing a real rollback on a real account — every probe in this repo is read-only. The
+   * fixture picks the harder case on purpose: a new id is the one the browser has to notice,
+   * because the row re-keys its log stream on whatever `deploymentId` the refreshed list
+   * reports. A fixture that reused the id would pass whether or not that mechanism worked.
+   *
+   * Nothing in the app depends on the answer, which is why picking one here is safe rather
+   * than a guess baked into a test — see DEPLOYMENT_ROLLBACK_MUTATION.
+   *
+   * It starts at DEPLOYING rather than QUEUED: a rollback goes to an image Railway already
+   * built, so there is nothing to build, and starting one step from SUCCESS keeps the
+   * transition observable without a spec waiting out a build it would not see in production
+   * either.
+   */
+  rollbackDeployment(deploymentId: string): Deployment | null {
+    const previous = this.deployments.get(deploymentId);
+    if (!previous) return null;
+
+    const deployment: Deployment = {
+      id: this.id("dep"),
+      serviceId: previous.serviceId,
+      status: "DEPLOYING",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      logs: { build: [], deploy: [] },
+      events: [],
+      step: PROGRESSION.indexOf("DEPLOYING"),
+      /*
+       * Not `this.faults.deploymentsFail`, unlike `addDeployment`. A rollback returns to an
+       * image that already deployed once, so the fault that makes the *next build* fail has
+       * nothing to act on — and a rollback that failed for that reason would be the fixture
+       * inventing a Railway behaviour rather than reproducing one.
+       */
+      failing: false,
+      logPhase: previous.logPhase,
+    };
+    this.deployments.set(deployment.id, deployment);
+    const service = this.services.get(previous.serviceId);
+    if (service) service.deploymentId = deployment.id;
+    return deployment;
+  }
+
   /** Advances every in-flight deployment one step and appends a log line. */
   tick(): void {
     for (const deployment of this.deployments.values()) {
@@ -691,6 +781,22 @@ export class Store {
     this.services.clear();
     this.deployments.clear();
     this.volumes.clear();
+    /*
+     * The id counter goes back to zero with everything else, and leaving it out was a
+     * latent trap rather than an oversight nobody paid for.
+     *
+     * `metricsFor` is a deterministic function of the numeric half of a service id —
+     * `0.25 * ((n % 4) + 1)` — which is what lets a spec assert "0.25 of 2 vCPU" instead of
+     * a regex. That determinism is only real if a spec's ids depend on what that spec did,
+     * and `#seq` survived reset, so they depended on how many services every spec BEFORE it
+     * had created. Adding a test anywhere earlier in the run shifted the arithmetic for
+     * every test after it: the metrics spec started reading "1.00 of 2 vCPU" — n % 4 === 3 —
+     * because three specs were added above it, and nothing about metrics had changed.
+     *
+     * Safe because reset clears every map that holds an id, so nothing outlives the run
+     * that could collide with a reused one, and `workers: 1` means no second store exists.
+     */
+    this.#seq = 0;
     this.projects = seedProjects();
     this.workspaces = seedWorkspaces();
     this.faults = { ...DEFAULT_FAULTS };

@@ -257,6 +257,22 @@ export type LogEvent =
   | "container.stop_skipped"
   | "container.stopped"
   /*
+   * Rollback, in the same three shapes, and the one verb where `refused` and `skipped` carry
+   * reasons the other five do not. `withManagedContainer` writes them for a service that has
+   * gone or is not ours; these two are written afterwards, about the *deployment* the browser
+   * chose — `not_in_service` for an id this service has never had, `not_rollbackable` for one
+   * it has and Railway will not return to, and `current` for the one already running. The
+   * first is the record that matters: it is the only line that says someone posted a
+   * deployment id belonging to somewhere else.
+   *
+   * `container.rolled_back` carries `from_deployment_id` beside `deployment_id`, which no
+   * other `.done` line needs — a rollback is the one verb after which what was running before
+   * appears nowhere else in the trail.
+   */
+  | "container.rollback_refused"
+  | "container.rollback_skipped"
+  | "container.rolled_back"
+  /*
    * Giving a container a public address. The same three shapes, and `domain_skipped` carries
    * a second reason the others do not: `exists`, for a stale page asking twice — Railway
    * mints a second domain rather than refusing, so that branch is the app declining rather
@@ -318,6 +334,12 @@ export type LogEvent =
   | "railway.deployment.poll_failed"
   | "railway.deployment.poll_recovered"
   | "railway.deployment.unsettled"
+  /*
+   * A service's deployment history refused. Debug beside `railway.metrics.refused` and for
+   * the same reason: `Deployments` is a degrading read, so a token that cannot make it costs
+   * one control and nothing else, and a warn per opened panel would train people past it.
+   */
+  | "railway.deployments.refused"
   | "railway.logBackfill"
   | "railway.logStream"
   | "railway.logStream.truncated"
@@ -356,6 +378,13 @@ export type LogEvent =
   | "railway.volume_created"
   | "railway.volume_failed"
   | "railway.volumes.refused"
+  /*
+   * The panel reading a service's deployment history, for the rollback control. `deployment_
+   * count` and never the ids, on the same argument `variables.read` makes below about names:
+   * the answer to "did this panel get a history to choose from" is the number.
+   */
+  | "deployments.read"
+  | "deployments.read_rejected"
   | "render.failed"
   | "stream.closed"
   | "stream.opened"

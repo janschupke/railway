@@ -7,18 +7,24 @@ import type { ActionResult } from "@/lib/action-result";
 import {
   createServiceDomain,
   deployService,
+  listServiceDeployments,
   restartDeployment,
+  rollbackDeployment,
   stopDeployment,
 } from "@/lib/railway/api";
 import { httpPortFor } from "@/lib/presets";
+import { containerRollbackSchema } from "@/lib/validation";
+import { formField } from "./action-form";
 import { LIFECYCLE_EVENTS, logLifecycle, withManagedContainer } from "./action-managed";
 
 /**
  * The lifecycle verbs that act on a deployment rather than on the service around it —
- * stop, restart, redeploy — and the one that gives a running container an address.
+ * stop, restart, redeploy, rollback — and the one that gives a running container an address.
  *
- * All four are reversible, which is why none of them asks for a typed name, and all four
- * read the deployment id off the target the guard resolved rather than off the form.
+ * All five are reversible, which is why none of them asks for a typed name. Four read the
+ * deployment id off the target the guard resolved rather than off the form; `rollback` is the
+ * exception, and resolves the posted one against Railway instead — see its docblock, and the
+ * paragraph `withManagedContainer` devotes to it.
  */
 
 /**
@@ -106,6 +112,111 @@ export async function redeploy(formData: FormData): Promise<ActionResult> {
       ok: true,
       message: t("actions.redeployed", { name: context.target.displayName }),
     };
+  });
+}
+
+/**
+ * Roll a container back to one of its own earlier deployments.
+ *
+ * The sixth lifecycle verb, and the only one whose request carries a fourth field. Every
+ * other verb acts on the deployment the service is running now, which `withManagedContainer`
+ * has already read off Railway; a rollback names one in the past, so the browser is the only
+ * thing that knows which row was clicked and the id has to travel with the form.
+ *
+ * **Three refusals stand between that posted id and the mutation, and each answers a
+ * different question.** The schema says it is shaped like a Railway identifier. The list read
+ * — scoped by `context.target.serviceId`, which is Railway's answer to this request rather
+ * than the form's — says it is one of *this* service's deployments, which is what makes a
+ * forged id no more useful than a forged service id. And `canRollback` is Railway's own
+ * judgement about whether the rollback would do anything, asked rather than guessed at, the
+ * same way `canRedeploy` is.
+ *
+ * The list is `gqlPartial` and degrades to empty, so a refused read lands on the first of
+ * those refusals. That is the direction it must fail in: no history means no member, means no
+ * mutation.
+ *
+ * Rolling back to the deployment already running is refused separately, and for the user
+ * rather than for safety — Railway would accept it, and the row would show a redeploy nobody
+ * asked for. The panel does not offer it either; this is the stale-page case.
+ *
+ * What the response says about the result: nothing. `deploymentRollback` answers a Boolean,
+ * and whether it reuses the deployment id or mints a new one is unobserved — see
+ * DEPLOYMENT_ROLLBACK_MUTATION. `revalidatePath` and the row's own re-read are what settle it,
+ * exactly as they do for redeploy.
+ */
+export async function rollback(formData: FormData): Promise<ActionResult> {
+  return withManagedContainer("rollback", formData, async (context) => {
+    const t = await getTranslations();
+
+    const parsed = containerRollbackSchema.safeParse({
+      projectId: context.projectId,
+      environmentId: context.environmentId,
+      serviceId: context.target.serviceId,
+      deploymentId: formField(formData, "deploymentId"),
+    });
+    if (!parsed.success) {
+      return { ok: false, error: t("actions.missingReference") };
+    }
+
+    const { deploymentId } = parsed.data;
+    const name = context.target.displayName;
+
+    if (deploymentId === context.target.deploymentId) {
+      log.info(LIFECYCLE_EVENTS.rollback.skipped, {
+        reason: "current",
+        project_id: context.projectId,
+        service_id: context.target.serviceId,
+      });
+      revalidatePath("/dashboard");
+      return { ok: false, error: t("actions.rollbackIsCurrent", { name }) };
+    }
+
+    /*
+     * `refused` is deliberately ignored here, unlike in the panel. A refused read and a
+     * service with no history mean the same thing to this check — the posted id is not a
+     * member of anything — and branching on the difference could only ever be a way of
+     * treating one of them more permissively.
+     */
+    const { entries } = await listServiceDeployments(context.accessToken, {
+      projectId: context.projectId,
+      environmentId: context.environmentId,
+      serviceId: context.target.serviceId,
+    });
+    const chosen = entries.find((entry) => entry.id === deploymentId);
+
+    if (!chosen || !chosen.canRollback) {
+      /*
+       * At warn, and for the same reason the ownership refusal above it is: the panel only
+       * renders a control for an entry Railway said yes to, so reaching here means a stale
+       * page or a request nobody's browser composed. `reason` separates the two cases that
+       * look identical from outside — an id this service has never had, and one it has that
+       * Railway will not roll back to.
+       *
+       * The rejected id is not logged. It is caller-chosen and unbounded, which is the call
+       * the stream route already makes about a deploymentId it refuses.
+       */
+      log.warn(LIFECYCLE_EVENTS.rollback.refused, {
+        reason: chosen ? "not_rollbackable" : "not_in_service",
+        project_id: context.projectId,
+        service_id: context.target.serviceId,
+      });
+      return { ok: false, error: t("actions.rollbackUnavailable", { name }) };
+    }
+
+    await rollbackDeployment(context.accessToken, deploymentId);
+
+    logLifecycle("rollback", context, {
+      deployment_id: deploymentId,
+      /*
+       * The deployment being left, beside the one being returned to. A rollback is the one
+       * verb where "what was running before" is not recoverable from the next record — the
+       * row moves on and the previous id appears nowhere else in the trail.
+       */
+      from_deployment_id: context.target.deploymentId,
+    });
+
+    revalidatePath("/dashboard");
+    return { ok: true, message: t("actions.rolledBack", { name }) };
   });
 }
 

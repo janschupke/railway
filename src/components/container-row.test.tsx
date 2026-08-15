@@ -10,6 +10,7 @@ vi.mock("@/app/dashboard/actions", () => ({
   stopContainer: vi.fn(async () => ({ ok: true, message: "Stopped" })),
   restartContainer: vi.fn(async () => ({ ok: true, message: "Restarting" })),
   redeployContainer: vi.fn(async () => ({ ok: true, message: "Redeploying" })),
+  rollbackContainer: vi.fn(async () => ({ ok: true, message: "Rolling back" })),
   generateDomain: vi.fn(async () => ({
     ok: true,
     message: "cache is now at https://x",
@@ -163,6 +164,34 @@ describe("ContainerRow", () => {
 
     renderRow({ managed: false });
     expect(screen.queryByRole("button", { name: /^destroy$/i })).toBeNull();
+  });
+
+  it("reads a deployment history only for containers this app created", async () => {
+    /*
+     * The read costs a Railway round trip per expanded row, and an unmanaged service cannot
+     * be rolled back from here at all (ADR-5) — so a list of deployments none of which can
+     * be acted on would be a request spent rendering something to look at. The stub is what
+     * proves it: an unmanaged panel must not call fetch even once.
+     */
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ deployments: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const { unmount } = renderRow({ managed: true });
+    await expand(user);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/service-deployments");
+    unmount();
+
+    fetchMock.mockClear();
+    renderRow({ managed: false });
+    await expand(user);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 
   it("gives an unmanaged container the one action it does have", () => {

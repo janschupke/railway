@@ -24,6 +24,7 @@ import { ContainerActions } from "./container-actions";
 import { ContainerDetailDialog } from "./container-detail-dialog";
 import { ContainerMetricsReadout } from "./container-metrics";
 import { ContainerUrl } from "./container-url";
+import { DeploymentHistory } from "./deployment-history";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
@@ -51,6 +52,15 @@ const LogPane = dynamic(() => import("./log-pane").then((m) => m.LogPane), {
   // own first frame, so expanding a row shows one continuous region rather than a gap.
   loading: () => <LogPaneSkeleton />,
 });
+
+/*
+ * The deployment history is imported statically, unlike the pane above, and that was
+ * measured rather than assumed — see bundle-budgets.json. Deferring it did move it out of
+ * /dashboard's first load and made the route *bigger*: 229.6 kB became 230.8 kB, because a
+ * second `next/dynamic` boundary and its loading component cost more than the 0.6 kB of
+ * component they defer. The log pane's boundary earns itself by keeping Radix ScrollArea out
+ * of the graph; this one had nothing of that size behind it.
+ */
 
 /** Which of Railway's two log subscriptions a given state should be reading. */
 function phaseFor(state: ContainerState): LogPhase {
@@ -578,6 +588,35 @@ export function ContainerRow({
                   deployedAt={container.deployedAt}
                   name={container.displayName}
                 />
+                {/*
+                  Below the readout and above the pane, which is where it belongs on the same
+                  argument the readout makes: this is what the app knows about the container,
+                  and the pane is what the container is saying. Its own request, made on
+                  expand — see DeploymentHistory for why it is not read with the row.
+
+                  Managed rows only, and not for want of the data. An unmanaged service's
+                  history is perfectly readable with the visitor's own token; what it cannot
+                  have is the control, because this app does not change infrastructure it did
+                  not create (ADR-5). A list of deployments none of which can be acted on
+                  would be a round trip per expand spent rendering something to look at.
+                */}
+                {container.managed && (
+                  <DeploymentHistory
+                    serviceId={container.serviceId}
+                    displayName={container.displayName}
+                    projectId={projectId}
+                    environmentId={environmentId}
+                    /*
+                     * From the container, not the stream: the stream is keyed on this very
+                     * id and reports a status rather than an identity, so it has nothing
+                     * newer to say. A rollback that lands re-renders the row through
+                     * `router.refresh()` with whatever id Railway now reports, which is what
+                     * moves the marker — and is the same mechanism the log pane re-attaches
+                     * by.
+                     */
+                    currentDeploymentId={container.deploymentId}
+                  />
+                )}
                 {container.deploymentId ? (
                   <LogPane
                     lines={stream.logs}

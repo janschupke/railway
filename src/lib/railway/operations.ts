@@ -27,6 +27,10 @@ import type {
   DeploymentQueryVariables,
   DeploymentRestartMutation,
   DeploymentRestartMutationVariables,
+  DeploymentRollbackMutation,
+  DeploymentRollbackMutationVariables,
+  DeploymentsQuery,
+  DeploymentsQueryVariables,
   DeploymentStopMutation,
   DeploymentStopMutationVariables,
   EnvironmentCreateMutation,
@@ -732,7 +736,7 @@ export const DEPLOYMENT_STOP_MUTATION: TypedDocument<
  * pane is subscribed to that id, so a restart continues in the pane the user is already
  * watching. A redeploy would make a new deployment and leave them watching the old one.
  *
- * Three neighbouring mutations are deliberately absent, and none of them is an oversight:
+ * Two neighbouring mutations are deliberately absent, and neither is an oversight:
  *
  *   - `deploymentRedeploy(id)` returns a fresh `Deployment!` from an existing one, and is
  *     what "redeploy" would obviously be built on. The app redeploys through
@@ -740,12 +744,13 @@ export const DEPLOYMENT_STOP_MUTATION: TypedDocument<
  *     a service with NO deployment — the orphan `createContainer` leaves behind when
  *     Railway refuses the first deploy, which is exactly the row that most needs the
  *     control. One path, one document, one code branch.
- *   - `deploymentRollback(id)` deploys a previous deployment. Choosing which one is a UI
- *     this app does not have, and rolling back to an image tag the user cannot see would
- *     be the least legible thing on the dashboard.
  *   - `deploymentRemove(id)` erases a stopped deployment's record. Nothing in the UI offers
  *     it, and it is the one lifecycle call that destroys something `serviceDelete` does not
  *     already take.
+ *
+ * `deploymentRollback` used to be a third entry here, argued out on the grounds that
+ * choosing a deployment was a UI this app did not have. It is DEPLOYMENT_ROLLBACK_MUTATION
+ * below now — see DEPLOYMENTS_QUERY for what made the choice presentable.
  */
 export const DEPLOYMENT_RESTART_MUTATION: TypedDocument<
   DeploymentRestartMutation,
@@ -753,6 +758,82 @@ export const DEPLOYMENT_RESTART_MUTATION: TypedDocument<
 > = /* GraphQL */ `
   mutation DeploymentRestart($id: String!) {
     deploymentRestart(id: $id)
+  }
+`;
+
+/**
+ * Roll a service back to one of its earlier deployments.
+ *
+ * Reversible, like stop and restart and unlike `serviceDelete`: rolling forward again is
+ * Redeploy, which is why the confirmation is a sentence and two buttons rather than the
+ * destroy dialog's typed name.
+ *
+ * Railway answers a Boolean, so this says nothing about what the rollback produced — in
+ * particular, whether it reuses the deployment id or mints a new one is **unobserved**, and
+ * cannot be settled by a read-only probe. Nothing here depends on the answer: the row
+ * re-reads the container list and `use-deployment-stream` keys on whatever `deploymentId`
+ * comes back, which is the same mechanism redeploy already relies on.
+ *
+ * The id it takes is the one thing in this app a browser posts and the server does not read
+ * back off the container first — a rollback target is by definition a *historical*
+ * deployment the user chose. `rollbackContainer` closes that by re-reading
+ * DEPLOYMENTS_QUERY scoped to the service the ownership guard just proved, and refusing any
+ * id that is not a member of it. See architecture.md.
+ */
+export const DEPLOYMENT_ROLLBACK_MUTATION: TypedDocument<
+  DeploymentRollbackMutation,
+  DeploymentRollbackMutationVariables
+> = /* GraphQL */ `
+  mutation DeploymentRollback($id: String!) {
+    deploymentRollback(id: $id)
+  }
+`;
+
+/**
+ * One service's recent deployments, which is what makes rollback a choice a person can make.
+ *
+ * `Query.deployments` rather than `service.deployments` or `project.deployments`: both of
+ * those are `@deprecated` — "Use environment.deployments for properly scoped access
+ * control" — and `environment.deployments` takes pagination and nothing else, so it cannot
+ * be narrowed to one service. The root field takes `DeploymentListInput`, is not deprecated,
+ * and is the only one of the four that answers for a single service in a single request.
+ *
+ * **`last`, not `first`.** The one thing this app has observed about Railway's connection
+ * ordering is in DEPLOYMENT_EVENTS_QUERY: the edges arrive oldest-first and `last` slices
+ * the newest. The mapper still sorts rather than trusting that, because an ordering that
+ * changed would silently offer the wrong ten deployments; `pnpm probe:deployments` is what
+ * checks the assumption against the live API.
+ *
+ * The selection is minimal for the reason DEPLOYMENT_EVENTS_QUERY states — each field is one
+ * more whose withdrawal takes the whole document — and two obvious candidates are left out
+ * on top of that. `statusUpdatedAt` says nothing `status` and `createdAt` do not. `creator`
+ * is a name and an email, and an email is a value this app has rules about; on a dashboard
+ * showing one account's own containers it would identify every row identically.
+ *
+ * **There is no image here, and there cannot be.** `Deployment.meta` is an opaque `scalar`,
+ * like `diagnosis`, so a deployment cannot say what it ran. A row is "the deployment from
+ * 14:32 that succeeded", which is the honest form of the choice and a narrower limitation
+ * than "no UI is possible".
+ *
+ * In DEGRADING_OPERATIONS: read with `gqlPartial`, and a refusal costs the rollback control
+ * rather than the panel. The action fails closed on the same refusal — an empty list has no
+ * member matching the posted id.
+ */
+export const DEPLOYMENTS_QUERY: TypedDocument<
+  DeploymentsQuery,
+  DeploymentsQueryVariables
+> = /* GraphQL */ `
+  query Deployments($input: DeploymentListInput!, $last: Int) {
+    deployments(input: $input, last: $last) {
+      edges {
+        node {
+          id
+          status
+          createdAt
+          canRollback
+        }
+      }
+    }
   }
 `;
 

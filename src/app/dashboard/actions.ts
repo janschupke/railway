@@ -5,13 +5,18 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import { create } from "@/app/dashboard/action-spin-up";
 import { addEnvironment, addProject } from "@/app/dashboard/action-projects";
 import { destroy, destroyMany } from "@/app/dashboard/action-destroy";
-import { deploymentAction, mintDomain, redeploy } from "@/app/dashboard/action-deploy";
+import {
+  deploymentAction,
+  mintDomain,
+  redeploy,
+  rollback,
+} from "@/app/dashboard/action-deploy";
 import { edit } from "@/app/dashboard/action-edit";
 
 /**
  * Every Server Action this app has, and nothing else.
  *
- * The only `"use server"` file in the repo, and now only the surface: ten exports, each
+ * The only `"use server"` file in the repo, and now only the surface: eleven exports, each
  * opening a request scope and handing straight off to a module that is not itself an
  * action. What a verb actually does lives in `action-<verb>.ts` beside this.
  *
@@ -101,6 +106,15 @@ export async function redeployContainer(
 ): Promise<ActionResult> {
   return withRequestScope("redeployContainer", { trustInboundId: true }, () =>
     redeploy(formData),
+  );
+}
+
+export async function rollbackContainer(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("rollbackContainer", { trustInboundId: true }, () =>
+    rollback(formData),
   );
 }
 

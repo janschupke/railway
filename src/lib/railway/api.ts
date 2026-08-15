@@ -1,6 +1,6 @@
 import "server-only";
 
-import { METRICS } from "@/lib/constants";
+import { LIST, METRICS } from "@/lib/constants";
 import { log } from "@/lib/logger";
 // The one rule this layer shares with the form: a name the schema refuses on the way in is
 // a name there is no point drawing a row for on the way out.
@@ -10,7 +10,9 @@ import { presetVolumeFor } from "@/lib/presets";
 import { gql, gqlPartial } from "./client";
 import { RailwayApiError } from "./errors";
 import {
+  DEPLOYMENTS_QUERY,
   DEPLOYMENT_RESTART_MUTATION,
+  DEPLOYMENT_ROLLBACK_MUTATION,
   DEPLOYMENT_STOP_MUTATION,
   ENVIRONMENT_CREATE_MUTATION,
   ENVIRONMENT_VOLUMES_QUERY,
@@ -52,15 +54,17 @@ import {
   toWorkspaces,
   type ViewerNode,
 } from "./mappers";
-import type {
-  Container,
-  ContainerMetrics,
-  ContainerVolume,
-  RailwayEnvironment,
-  RailwayProject,
-  RailwayWorkspace,
-  RegionOption,
-  WorkspaceSpend,
+import {
+  toContainerState,
+  type Container,
+  type ContainerMetrics,
+  type ContainerVolume,
+  type DeploymentHistoryEntry,
+  type RailwayEnvironment,
+  type RailwayProject,
+  type RailwayWorkspace,
+  type RegionOption,
+  type WorkspaceSpend,
 } from "./types";
 import type { RestartPolicyType } from "./graphql.generated";
 import type { Refusable, TypedDocument } from "./typed-document";
@@ -1135,6 +1139,96 @@ export async function restartDeployment(
   signal?: AbortSignal,
 ): Promise<void> {
   await gql(DEPLOYMENT_RESTART_MUTATION, { id: deploymentId }, { accessToken, signal });
+}
+
+/**
+ * One service's recent deployments, newest first — what the rollback control chooses from.
+ *
+ * Here rather than in deployment-reads.ts, on that file's own test: these run for the life of
+ * an open stream, this runs once when someone opens a panel or presses a button.
+ *
+ * **Partial, and degrading.** `Deployments` is in DEGRADING_OPERATIONS, so a refusal comes
+ * back as no entries rather than a throw. That is what makes it safe for `rollback` to check
+ * a posted deployment id against this list: a refused read yields no members, so it refuses,
+ * and the failure mode is a rollback that does not happen rather than one aimed at an id
+ * nobody verified.
+ *
+ * **`refused` is returned beside the entries, and collapsing the two was a real defect.**
+ * A refusal and a service that has genuinely never deployed both produce an empty list, and
+ * the panel has a different sentence for each — one says the history could not be read, the
+ * other says Railway has none. With only the array to go on, the panel told anyone whose
+ * token cannot make this read that their service had never deployed, which is both wrong and
+ * unactionable. The caller that does not care may ignore the flag; `rollback` is one, because
+ * both cases mean the same thing to it.
+ *
+ * Sorted here rather than trusted from the connection. `last` is asked for on the strength of
+ * the one thing this app has observed about Railway's Relay ordering — DEPLOYMENT_EVENTS_QUERY
+ * — and an ordering that changed would otherwise silently offer the wrong ten. `pnpm
+ * probe:deployments` is what checks the assumption against the live API.
+ */
+export async function listServiceDeployments(
+  accessToken: string,
+  params: { projectId: string; environmentId: string; serviceId: string },
+  signal?: AbortSignal,
+): Promise<{ entries: DeploymentHistoryEntry[]; refused: boolean }> {
+  const { data, errors } = await gqlPartial(
+    DEPLOYMENTS_QUERY,
+    {
+      input: {
+        projectId: params.projectId,
+        environmentId: params.environmentId,
+        serviceId: params.serviceId,
+      },
+      last: LIST.DEPLOYMENT_HISTORY,
+    },
+    { accessToken, signal },
+  );
+
+  for (const error of errors) {
+    /*
+     * Debug, and only the service id. The same call `getDeploymentFailure` makes: a feed
+     * this token cannot read is a capability the app degrades out of rather than an
+     * incident, and a warn per opened panel would train people to ignore warns.
+     */
+    log.debug("railway.deployments.refused", {
+      service_id: params.serviceId,
+      error,
+    });
+  }
+
+  const entries = nodes(data?.deployments)
+    .map((node) => ({
+      id: node.id,
+      state: toContainerState(node.status),
+      rawStatus: node.status,
+      createdAt: node.createdAt,
+      canRollback: node.canRollback,
+    }))
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+  return { entries, refused: errors.length > 0 };
+}
+
+/**
+ * Roll a service back to one of its earlier deployments.
+ *
+ * The deployment id is the one value in this app that a browser posts and the server does not
+ * read off the container first — a rollback target is by definition historical, so there is no
+ * "current" field to take it from. `rollback` in action-deploy.ts closes that by re-reading
+ * `listServiceDeployments` for the service the ownership guard just proved, and refusing an id
+ * that is not one of its own. Checks nothing itself, exactly as `stopDeployment` checks
+ * nothing; the guard is the caller's, and the lint rules are what hold it there.
+ */
+export async function rollbackDeployment(
+  accessToken: string,
+  deploymentId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await gql(
+    DEPLOYMENT_ROLLBACK_MUTATION,
+    { id: deploymentId },
+    { accessToken, signal },
+  );
 }
 
 export async function destroyContainer(

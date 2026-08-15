@@ -152,7 +152,7 @@ forge the prefix by renaming a service in Railway's own dashboard; that is an ac
 trade, because the blast radius is bounded by the OAuth scopes they granted and the prefix
 is visible in Railway's UI rather than hidden metadata.
 
-That is five verbs now — destroy, stop, restart, redeploy, edit — and they share **one** guard:
+That is six verbs now — destroy, stop, restart, redeploy, rollback, edit — and they share **one** guard:
 `withManagedContainer` in `src/app/dashboard/action-managed.ts` parses the three ids,
 re-reads the container list from Railway, and refuses before the verb's own callback runs. A second copy
 of that check is the thing to refuse in review, because the weaker copy is the one that
@@ -172,6 +172,20 @@ false. The rule recognises a function that calls a resolver as having done the c
 container it just re-derived ownership from, so a forged deployment id is refused by the
 same mechanism a forged service id is. **So is the volume id**: destroy posts a boolean
 (`deleteData`) and reads the volume back from Railway inside the action.
+
+**Rollback is the single exception, and it names its own condition.** A rollback target is a
+deployment in the _past_, so there is no current field to derive it from and the browser is
+the only thing that knows which entry was clicked — the id travels on the form. What replaces
+the derivation is the shape destroy already uses for the volume: inside the guard's callback,
+`rollback` in `action-deploy.ts` re-reads the service's deployment list — scoped by the
+serviceId on the resolved `target`, which is Railway's answer rather than the form's — and
+refuses any id that is not a member of it with `canRollback` set. The list read is degrading,
+so a refusal yields an empty list and refuses too; **the only direction this may fail in is
+closed.** Being inside the guard is necessary and not sufficient here, which is why
+`local/mutation-inside-ownership-guard` listing `rollbackDeployment` does not discharge the
+obligation — no rule can see the membership check, and its docblock is where it is written
+down. Do not read this as permission to accept a deployment id anywhere else: a new verb that
+wants one has to make the same argument in full.
 
 **A volume's owner is the service it is mounted on, not its own name.** This app creates a
 volume only as a step of creating a service, and the prefix check above has already proved
@@ -258,6 +272,20 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
 - `pnpm probe:deployment <deploymentId>` — prints a failed deployment's events verbatim and
   what `pickFailureReason` chose from them, which is the only way to check the order in
   `failure-reason.ts` against a real failure.
+- `pnpm probe:deployments <projectId> <environmentId> <serviceId>` — what a delegated grant
+  actually gets from `Query.deployments`, which the rollback control rests on. Three
+  questions introspection cannot answer: whether an OAuth session may call the field at all,
+  which order the edges arrive in, and what `canRollback` says about a running deployment
+  versus a finished one. The ordering is the one with teeth — `DEPLOYMENTS_QUERY` asks for
+  `last: N` on the strength of the single observation in `DEPLOYMENT_EVENTS_QUERY`, and if
+  deployments arrive newest-first instead it silently offers the ten oldest.
+
+  **Still open, and deliberately unanswerable here:** whether `deploymentRollback` reuses a
+  deployment id or mints a new one. It returns a Boolean, so observing it would mean
+  performing a real rollback — and these are all read-only. Nothing depends on the answer;
+  the row re-keys its stream on whatever the refreshed list reports, as it does after a
+  redeploy.
+
 - `pnpm probe:logs <deploymentId> [--phase build]` — settles what the two log feeds
   actually return: whether a line carries an id, whether `limit` means the most recent N,
   and how far back a subscription replays. `src/lib/log-overlap.ts` is built on the

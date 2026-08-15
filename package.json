@@ -26,6 +26,7 @@
     "cursor:check": "node --no-warnings --experimental-strip-types scripts/generate-cursor-rules.ts --check",
     "probe:projects": "tsx --env-file-if-exists=.env scripts/probe-projects.ts",
     "probe:deployment": "tsx --env-file-if-exists=.env scripts/probe-deployment.ts",
+    "probe:deployments": "tsx --env-file-if-exists=.env scripts/probe-deployments.ts",
     "probe:logs": "tsx --env-file-if-exists=.env scripts/probe-logs.ts",
     "probe:metrics": "tsx --env-file-if-exists=.env scripts/probe-metrics.ts",
     "probe:subscription": "tsx --env-file-if-exists=.env scripts/probe-subscription.ts",

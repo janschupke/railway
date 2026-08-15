@@ -58,6 +58,11 @@ export const LIFECYCLE_EVENTS = {
     refused: "container.redeploy_refused",
     done: "container.redeployed",
   },
+  rollback: {
+    skipped: "container.rollback_skipped",
+    refused: "container.rollback_refused",
+    done: "container.rolled_back",
+  },
   edit: {
     skipped: "container.edit_skipped",
     refused: "container.edit_refused",
@@ -117,6 +122,15 @@ export function resolveManagedTarget(
  * The deployment id is deliberately not a form field. It comes off `target`, which is
  * Railway's answer to this request — the client posts a service id and nothing else is
  * trusted, exactly as ownership is not.
+ *
+ * **Rollback is the one exception, and it names its own condition.** A rollback target is a
+ * deployment in the past, so there is no current field to read it from and the browser is the
+ * only thing that knows which row was clicked. It therefore posts the id, and `rollback` in
+ * action-deploy.ts re-reads the service's own deployment list — scoped by the serviceId on
+ * `target`, which is Railway's answer rather than the form's — and refuses an id that is not
+ * a member of it. That is the same shape destroy uses for the volume id: posted as a choice,
+ * resolved against Railway inside the guard. Do not read it as permission to accept a
+ * deployment id anywhere else.
  */
 export async function withManagedContainer(
   verb: LifecycleVerb,

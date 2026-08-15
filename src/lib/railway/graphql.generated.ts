@@ -17,6 +17,14 @@ export type DeploymentEventStep =
   | "SNAPSHOT_CODE"
   | "WAIT_FOR_DEPENDENCIES";
 
+export type DeploymentListInput = {
+  environmentId?: string | null | undefined;
+  includeDeleted?: boolean | null | undefined;
+  projectId?: string | null | undefined;
+  serviceId?: string | null | undefined;
+  status?: DeploymentStatusInput | null | undefined;
+};
+
 export type DeploymentStatus =
   | "BUILDING"
   | "CRASHED"
@@ -31,6 +39,11 @@ export type DeploymentStatus =
   | "SLEEPING"
   | "SUCCESS"
   | "WAITING";
+
+export type DeploymentStatusInput = {
+  in?: Array<DeploymentStatus> | null | undefined;
+  notIn?: Array<DeploymentStatus> | null | undefined;
+};
 
 export type EnvironmentCreateInput = {
   /** If true, the changes will be applied in the background and the mutation will return immediately. If false, the mutation will wait for the changes to be applied before returning. */
@@ -423,6 +436,30 @@ export type DeploymentRestartMutationVariables = Exact<{
 }>;
 
 export type DeploymentRestartMutation = { deploymentRestart: boolean };
+
+export type DeploymentRollbackMutationVariables = Exact<{
+  id: string;
+}>;
+
+export type DeploymentRollbackMutation = { deploymentRollback: boolean };
+
+export type DeploymentsQueryVariables = Exact<{
+  input: DeploymentListInput;
+  last?: number | null | undefined;
+}>;
+
+export type DeploymentsQuery = {
+  deployments: {
+    edges: Array<{
+      node: {
+        id: string;
+        status: DeploymentStatus;
+        createdAt: string;
+        canRollback: boolean;
+      };
+    }>;
+  };
+};
 
 export type DeploymentQueryVariables = Exact<{
   id: string;

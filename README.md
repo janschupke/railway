@@ -398,19 +398,61 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   validated against Railway's schema, `payload { error reason detail skipped }` included, and
   `pnpm codegen` refuses to generate a type for a selection Railway no longer offers.
 
-- **A container can be stopped, restarted, redeployed and destroyed — and never rolled
-  back.** Stop is `deploymentStop`, restart is `deploymentRestart`, and redeploy is
-  `serviceInstanceDeployV2` rather than the obvious `deploymentRedeploy`: that one takes a
-  deployment id, and a service whose first deploy Railway refused has none — which is
-  exactly the row most in need of the control. `deploymentRollback` and `deploymentRemove`
-  stay in `OPTIONAL_FIELDS`, reported by `verify:schema` and sent by nothing. Rollback needs
-  a UI for choosing which deployment to go back to, over image tags the user cannot see
-  here; `deploymentRemove` erases a stopped deployment's record, which is the one lifecycle
-  call that destroys something `serviceDelete` does not already take. The three that are
-  built are all reversible, so they confirm with a sentence and two buttons rather than the
-  destroy dialog's typed name — friction is priced in what it protects. What "spin up" does
-  to a stopped service is nothing: it creates, the duplicate-name check refuses a second
-  container by that name, and the row's own **Redeploy** is the way back.
+- **A container can be stopped, restarted, redeployed, rolled back and destroyed.** Stop is
+  `deploymentStop`, restart is `deploymentRestart`, rollback is `deploymentRollback`, and
+  redeploy is `serviceInstanceDeployV2` rather than the obvious `deploymentRedeploy`: that
+  one takes a deployment id, and a service whose first deploy Railway refused has none —
+  which is exactly the row most in need of the control. The four reversible verbs confirm
+  with a sentence and two buttons rather than the destroy dialog's typed name — friction is
+  priced in what it protects. What "spin up" does to a stopped service is nothing: it
+  creates, the duplicate-name check refuses a second container by that name, and the row's
+  own **Redeploy** is the way back.
+
+  `deploymentRemove` is the one lifecycle call still in `OPTIONAL_FIELDS`, reported by
+  `verify:schema` and sent by nothing: it erases a stopped deployment's record, which is the
+  one thing it destroys that `serviceDelete` does not already take.
+
+- **Rolling back names a time, not an image — because Railway will not say what a deployment
+  ran.** This entry used to read "rollback needs a UI for choosing which deployment to go
+  back to, over image tags the user cannot see here", and half of that is still true.
+  `Deployment.meta` is an opaque `SCALAR` like `diagnosis`, so no request this app can make
+  will tell it which image a past deployment used. What the app _can_ read is
+  `createdAt`, `status` and `canRollback` — enough for "the deployment from 14:32 that
+  succeeded", which is a choice a person can make. So an expanded row on a managed container
+  lists its recent deployments, marks the one running now, and offers a rollback on each
+  entry Railway itself says it would accept. An entry it says no to is shown without a
+  control rather than left out, because the deployment that broke things is usually beside
+  the one someone is looking for.
+
+  Three things worth knowing about how it is wired:
+
+  **The list comes from `Query.deployments`,** not `service.deployments` or
+  `project.deployments` — both are `@deprecated` in favour of `environment.deployments`,
+  which takes pagination only and cannot be narrowed to one service. The root field takes
+  `DeploymentListInput` and is the only one of the four that answers for a single service in
+  a single request. It is read when a panel is opened, never with the list, on the same cost
+  argument the variables read makes: twenty rows would otherwise be twenty requests for
+  panels nobody has opened.
+
+  **It is the one request in this app that posts a deployment id.** Every other lifecycle
+  verb reads that id off the container the ownership guard just re-derived from Railway's own
+  answer; a rollback target is by definition in the past, so there is nothing current to read
+  it from. What replaces the derivation is the same shape destroy uses for a volume: the
+  action re-reads the deployment list, scoped by the service id Railway returned rather than
+  the one posted, and refuses any id that is not a member of it with `canRollback` set. The
+  list read is in `DEGRADING_OPERATIONS`, so a refusal yields an empty list — and an empty
+  list contains nothing, which is the direction this has to fail in.
+
+  **Whether a rollback mints a new deployment id is unobserved, and nothing depends on it.**
+  `deploymentRollback` answers a Boolean, so the response says nothing, and finding out would
+  mean performing a real rollback on a real account — every probe here is read-only. The row
+  re-reads the container list afterwards and re-keys its log stream on whatever id comes
+  back, exactly as it does after a redeploy, so both behaviours look the same from here. The
+  e2e fixture mints a new one deliberately, because that is the case the browser has to
+  notice. `pnpm probe:deployments` settles the questions that _are_ answerable read-only:
+  whether a delegated OAuth grant may call the field at all, which order the edges arrive in,
+  and what `canRollback` answers for a running deployment versus a finished one.
+
 - **SSE pins a client to one replica**, so this is a single-replica app today. Two pieces
   of module state say so out loud: the stream cap in `lib/stream-slots.ts` and the
   idempotency map in `lib/idempotency.ts`. See below.
@@ -949,16 +991,20 @@ those objects in TypeScript.
 _root_ fields, and said nothing about the selections underneath them. Two declarations
 survive, because neither is derivable from a document:
 
-- `DEGRADING_OPERATIONS` — `ProjectMetrics`, `DeploymentEvents`, `EnvironmentVolumes` and
-  `Regions`, the four documents whose
+- `DEGRADING_OPERATIONS` — `ProjectMetrics`, `DeploymentEvents`, `EnvironmentVolumes`,
+  `Regions` and `Deployments`, the five documents whose
   refusal degrades a readout rather than breaking the app. A validation error inside those is
   reported and does not fail the run. That is a product decision, not a fact about the schema.
+  `DeploymentRollback` is deliberately not among them although it is the mutation
+  `Deployments` supplies: a control that is honestly unavailable is fine, and a control still
+  rendered over a mutation Railway has withdrawn is a control that lies.
 - `OPTIONAL_FIELDS` — capabilities Railway does not document and this app does not use, with
-  what the app cannot do without each. Seven entries as of 2026-08-15 — `deploymentRemove`,
-  `deploymentRollback`, `variableUpsert`, `volumeUpdate`, `volumeInstanceUpdate`,
-  `customDomainCreate` and `tcpProxyCreate` — all of which exist and none of which is sent;
-  see Limitations for why. No document mentions them, so no derivation can find them. `deploymentStop` and
-  `serviceInstanceUpdate` were both listed here and are documents now, which is the whole
+  what the app cannot do without each. Six entries as of 2026-08-15 — `deploymentRemove`,
+  `variableUpsert`, `volumeUpdate`, `volumeInstanceUpdate`, `customDomainCreate` and
+  `tcpProxyCreate` — all of which exist and none of which is sent;
+  see Limitations for why. No document mentions them, so no derivation can find them. `deploymentStop`,
+  `serviceInstanceUpdate` and `deploymentRollback` were all listed here and are documents now,
+  which is the whole
   distinction this list draws: a capability the app wants is reported, a capability it
   depends on fails the run.
 

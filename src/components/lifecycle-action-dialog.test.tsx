@@ -3,14 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
-import type { ContainerAction } from "@/lib/container-actions";
+import type { LifecycleDialogAction } from "@/lib/container-actions";
 
 const run = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
 
 const { LifecycleActionDialog } = await import("./lifecycle-action-dialog");
 const { ToastProvider } = await import("./ui/toast");
 
-function renderDialog(action: ContainerAction = "stop") {
+function renderDialog(
+  action: LifecycleDialogAction = "stop",
+  extra: {
+    fields?: Record<string, string>;
+    values?: Record<string, string>;
+    triggerLabel?: string;
+  } = {},
+) {
   return render(
     <ToastProvider>
       <LifecycleActionDialog
@@ -21,6 +28,7 @@ function renderDialog(action: ContainerAction = "stop") {
         environmentId="e1"
         icon={<span data-testid="icon" />}
         run={run}
+        {...extra}
       />
     </ToastProvider>,
   );
@@ -88,6 +96,58 @@ describe("LifecycleActionDialog", () => {
     expect(formData?.get("environmentId")).toBe("e1");
     // No deployment id: the server reads that off Railway's own answer, never the form.
     expect(formData?.get("deploymentId")).toBeNull();
+  });
+
+  it("posts a verb's own field alongside the three ids", async () => {
+    /*
+     * Rollback is the one verb that names something the container cannot be asked for — a
+     * deployment in the past — so its choice travels on the form. The three ids are still
+     * what ownership is re-derived from; this is an argument to a call the guard has already
+     * authorised, and the action resolves it against the service's own list before sending
+     * anything.
+     */
+    const user = userEvent.setup();
+    run.mockResolvedValue({ ok: true, message: "Rolling cache back" });
+    renderDialog("rollback", {
+      fields: { deploymentId: "dep_older" },
+      values: { when: "2 hours ago" },
+    });
+    await open(user, /^roll back$/i);
+
+    await user.click(screen.getByRole("button", { name: /roll back container/i }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const formData = run.mock.calls[0]?.[1];
+    expect(formData?.get("deploymentId")).toBe("dep_older");
+    expect(formData?.get("serviceId")).toBe("svc_1");
+  });
+
+  it("names the deployment in the sentence it asks about", async () => {
+    /*
+     * Four entries in a history confirm through four dialogs whose only difference is this
+     * value. Without it every one of them would ask the same question.
+     */
+    const user = userEvent.setup();
+    renderDialog("rollback", { values: { when: "2 hours ago" } });
+    const dialog = await open(user, /^roll back$/i);
+
+    expect(dialog).toHaveTextContent(
+      "Roll cache back to the deployment from 2 hours ago?",
+    );
+  });
+
+  it("takes an accessible name that still contains its visible label", async () => {
+    // WCAG 2.5.3: every button in a deployment list reads "Roll back", so the name has to
+    // say which row — and has to keep the words a speech user would say aloud.
+    renderDialog("rollback", {
+      values: { when: "2 hours ago" },
+      triggerLabel: "Roll back to the deployment from 2 hours ago",
+    });
+
+    const trigger = screen.getByRole("button", {
+      name: "Roll back to the deployment from 2 hours ago",
+    });
+    expect(trigger).toHaveTextContent("Roll back");
   });
 
   it("closes, reports success and pulls the fresh list", async () => {

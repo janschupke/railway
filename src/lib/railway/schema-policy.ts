@@ -84,6 +84,24 @@ export const DEGRADING_OPERATIONS: Array<{ operationName: string; note: string }
     operationName: "Regions",
     note: "the spin-up form offers no region choice, and Railway picks",
   },
+  /*
+   * The deployment history behind the rollback control.
+   *
+   * Degrading, and it degrades safely twice over: the expanded panel says the history could
+   * not be read and offers no rollback, and `rollback` — which re-reads this same document to
+   * check the posted deployment id is one of the service's own — refuses, because an empty
+   * list contains nothing. Losing this cannot roll a container back to a deployment nobody
+   * chose; it can only stop offering the choice.
+   *
+   * `DeploymentRollback` is deliberately NOT here, and the pair is the distinction this list
+   * draws. A control that is honestly unavailable is fine. A control that is still rendered
+   * over a mutation Railway has withdrawn is a control that lies, which is what the Regions
+   * entry above says about `ServiceInstanceLimitsUpdate`.
+   */
+  {
+    operationName: "Deployments",
+    note: "an expanded row lists no earlier deployments, and rollback is not offered",
+  },
 ];
 
 /**
@@ -112,12 +130,13 @@ export const OPTIONAL_FIELDS: Array<{
     field: "deploymentRemove",
     note: "a stopped deployment's record cannot be erased, only the whole service",
   },
-  {
-    root: "Mutation",
-    field: "deploymentRollback",
-    note: "a container can be restarted and redeployed, but never rolled back",
-  },
   /*
+   * `deploymentRollback` used to sit here too, with the note "a container can be restarted
+   * and redeployed, but never rolled back", and the reason given was that choosing a
+   * deployment needed a UI over image tags nobody could see. `Deployment.canRollback` and
+   * `Query.deployments` turned out to make the choice presentable without the image — see
+   * DEPLOYMENTS_QUERY — so it is a document now and its withdrawal fails the run.
+   *
    * `serviceInstanceUpdate` used to sit here too, with the note "a service cannot be edited
    * in place". It is a document now — see SERVICE_INSTANCE_UPDATE_MUTATION — so its
    * withdrawal fails the schema job rather than being reported as a capability the app might

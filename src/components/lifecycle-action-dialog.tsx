@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { ActionResult } from "@/lib/action-result";
-import type { ContainerAction } from "@/lib/container-actions";
+import type { LifecycleDialogAction } from "@/lib/container-actions";
 import { useToast } from "./ui/toast";
 import { Button } from "./ui/button";
 import { PendingStatus } from "./ui/misc";
@@ -21,19 +21,19 @@ import {
 /**
  * The second confirm path: one sentence and two buttons.
  *
- * Stop, restart and redeploy are all reversible — the service, its variables and its
- * history survive every one of them — so they must not carry the destroy dialog's
+ * Stop, restart, redeploy and rollback are all reversible — the service, its variables and
+ * its history survive every one of them — so they must not carry the destroy dialog's
  * type-the-name friction. Friction is priced in what it protects: typing a container's
  * name to stop it for ten minutes would teach people to type container names, which is the
  * habit the destroy dialog depends on them not having.
  *
- * They do still confirm, because all three interrupt a running service and the row they
+ * They do still confirm, because all four interrupt a running service and the row they
  * sit on is one of many. AlertDialog is what makes that cheap and correct: focus trapped,
  * returned to the trigger on close, and announced as `alertdialog` so the sentence is read
  * before the buttons.
  *
- * One component for three verbs rather than three components, because nothing differs
- * between them except the copy and the mutation — and a per-verb component is three places
+ * One component for four verbs rather than four components, because nothing differs
+ * between them except the copy and the mutation — and a per-verb component is four places
  * for the refresh, the toast and the pending window to drift apart.
  *
  * The body is imported statically, like the destroy dialog's: Radix traps focus in whatever
@@ -48,8 +48,11 @@ export function LifecycleActionDialog({
   environmentId,
   icon,
   run,
+  fields,
+  values,
+  triggerLabel,
 }: {
-  action: ContainerAction;
+  action: LifecycleDialogAction;
   serviceId: string;
   displayName: string;
   projectId: string;
@@ -58,6 +61,31 @@ export function LifecycleActionDialog({
   icon: React.ReactNode;
   /** The Server Action this dialog confirms. */
   run: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
+  /**
+   * Anything this verb posts beyond the three ids, as hidden inputs.
+   *
+   * Empty for the three verbs that act on whatever deployment the service is running, which
+   * the action reads off Railway. Rollback is the one that names a deployment in the past —
+   * see `containerRollbackSchema`, and the paragraph `withManagedContainer` devotes to why
+   * that is an exception rather than a precedent.
+   */
+  fields?: Record<string, string>;
+  /**
+   * ICU values for this verb's copy beyond `name`, which every verb has.
+   *
+   * Rollback's title names the deployment it is going back to, and it has to: four entries
+   * in a history confirm through four dialogs whose only difference is that timestamp, and a
+   * sentence that omitted it would be the same sentence for all four.
+   */
+  values?: Record<string, string>;
+  /**
+   * Accessible name for the trigger, when the visible label is not enough on its own.
+   *
+   * The three row controls sit beside a container name and read fine as "Stop". A rollback
+   * trigger sits in a list of deployments where every row's button says "Roll back", so the
+   * name has to say which one — WCAG 2.5.3 is why it must still *contain* the visible label.
+   */
+  triggerLabel?: string;
 }) {
   const t = useTranslations("lifecycle");
   const tCommon = useTranslations("common");
@@ -72,6 +100,13 @@ export function LifecycleActionDialog({
    * aria-busy and disabled from `pending` already. Same reasoning as the destroy dialog.
    */
   const [refreshing, startRefresh] = useTransition();
+
+  /*
+   * `name` is every verb's, and a verb's own values are merged over it rather than under —
+   * so a future verb that needed to say something else about the container could, and the
+   * default is not silently unreachable.
+   */
+  const copyValues = { name: displayName, ...values };
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
@@ -98,6 +133,7 @@ export function LifecycleActionDialog({
           size="sm"
           pending={refreshing}
           pendingLabel={t("refreshPending")}
+          aria-label={triggerLabel}
         >
           {icon}
           {t(`${action}.trigger`)}
@@ -108,9 +144,7 @@ export function LifecycleActionDialog({
         {/* Mounted only while open, which is also what resets the pending state. */}
         {open && (
           <>
-            <AlertDialogTitle>
-              {t(`${action}.title`, { name: displayName })}
-            </AlertDialogTitle>
+            <AlertDialogTitle>{t(`${action}.title`, copyValues)}</AlertDialogTitle>
             <AlertDialogDescription>
               {t(`${action}.description`)}
             </AlertDialogDescription>
@@ -119,12 +153,17 @@ export function LifecycleActionDialog({
               <input type="hidden" name="projectId" value={projectId} />
               <input type="hidden" name="environmentId" value={environmentId} />
               <input type="hidden" name="serviceId" value={serviceId} />
+              {/*
+                After the three ids, never before, so a verb's own field cannot shadow one of
+                them: FormData keeps both entries and `formField` reads the first.
+              */}
+              {Object.entries(fields ?? {}).map(([name, value]) => (
+                <input key={name} type="hidden" name={name} value={value} />
+              ))}
 
               <PendingStatus
                 className="sr-only"
-                label={
-                  pending ? t(`${action}.announce`, { name: displayName }) : undefined
-                }
+                label={pending ? t(`${action}.announce`, copyValues) : undefined}
               />
 
               <AlertDialogFooter>

@@ -527,12 +527,27 @@ export function execute(
       return { data: { deploymentRestart: true } };
     }
 
+    case "DeploymentRollback": {
+      const deployment = store.rollbackDeployment(variables.id as string);
+      if (!deployment) return { errors: [{ message: "Deployment not found" }] };
+      return { data: { deploymentRollback: true } };
+    }
+
     case "ServiceDelete": {
       const id = variables.id as string;
       const service = store.services.get(id);
       if (!service) return { errors: [{ message: "Service not found" }] };
       store.services.delete(id);
-      if (service.deploymentId) store.deployments.delete(service.deploymentId);
+      /*
+       * Every deployment of this service, not only the current one. It used to delete
+       * `service.deploymentId` alone, which was harmless while nothing could read a
+       * service's history — a spun-down container's earlier deployments simply sat in the
+       * Map until the next reset. `Deployments` reads by serviceId, so those orphans would
+       * now answer for a service that no longer exists.
+       */
+      for (const deployment of store.deploymentsForService(id)) {
+        store.deployments.delete(deployment.id);
+      }
       /*
        * Detached, NOT deleted. Railway does not cascade — probed, not assumed — and that
        * single fact is why destroy has a checkbox at all. A fixture that removed the volume
@@ -607,6 +622,41 @@ export function execute(
                 updatedAt: deployment.updatedAt,
               }
             : null,
+        },
+      };
+    }
+
+    /*
+     * The rollback control's supply: one service's deployments, oldest first.
+     *
+     * `input.serviceId` is the only member read, although the app sends all three. The other
+     * two narrow nothing here — the fixture's ids are globally unique and a deployment knows
+     * its own service — and honouring them would make this filter agree with the app by
+     * construction rather than by the app sending the right thing. What matters upstream is
+     * that they are sent, which `verify:schema` checks against the real input type.
+     *
+     * `last` slices the tail, matching DeploymentEvents below and the Relay ordering the
+     * app's document assumes. `createdAt` is the deployment's real one rather than the
+     * epoch-zero the single-deployment handler above answers with, because it is what the
+     * panel renders and what the app sorts on.
+     */
+    case "Deployments": {
+      if (store.faults.deploymentListFail) return notAuthorized(["deployments"]);
+
+      const input = variables.input as { serviceId?: string };
+      const all = store.deploymentsForService(input.serviceId ?? "");
+      const last = Number(variables.last ?? 10);
+
+      return {
+        data: {
+          deployments: edges(
+            all.slice(-last).map((deployment) => ({
+              id: deployment.id,
+              status: deployment.status,
+              createdAt: deployment.createdAt,
+              canRollback: store.canRollback(deployment),
+            })),
+          ),
         },
       };
     }

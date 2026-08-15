@@ -10,6 +10,18 @@ import { isTransitioning, type Container } from "@/lib/railway/types";
 export type ContainerAction = "stop" | "restart" | "redeploy";
 
 /**
+ * What `LifecycleActionDialog` will confirm, which is one more than the row offers.
+ *
+ * Rollback is deliberately not a `ContainerAction`. That list answers "which controls does
+ * this row put in its action cluster", and a rollback is not a property of the container —
+ * it is a property of one entry in its deployment history, so there is one control per
+ * eligible entry and they live in the expanded panel rather than beside Destroy. Every
+ * member here is still reversible, which is what makes them all the two-button confirm
+ * rather than the typed-name one.
+ */
+export type LifecycleDialogAction = ContainerAction | "rollback";
+
+/**
  * Which of them apply to a container in this state.
  *
  * Derived rather than stored, because there is nowhere to store it: this app has no

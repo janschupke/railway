@@ -1,6 +1,7 @@
 import {
   addVariable,
   button,
+  deploymentHistory,
   disclosure,
   dismissWithEscape,
   expect,
@@ -14,6 +15,7 @@ import {
   openDetailDialog,
   openEditDialog,
   railwayLink,
+  rollBackTo,
   row,
   runRowAction,
   seedServices,
@@ -367,6 +369,128 @@ test.describe("container lifecycle", () => {
     await expect(toast(page, "Restarting cache")).toBeVisible();
     await expect(cache.getByRole("log")).toBeVisible();
     await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("rolls a container back to the deployment before the current one", async ({
+    page,
+  }) => {
+    /*
+     * The round trip the feature exists for, and the only place it can be proven end to
+     * end: the history arrives over its own request when the panel opens, and the entry a
+     * person can act on is decided by `canRollback` coming back from Railway rather than by
+     * anything this app derives.
+     *
+     * A second deployment has to come from somewhere, and the edit verb is the honest way
+     * to get one: it changes the image and issues its own deploy, so the service ends up
+     * with two deployments that both succeeded — which is what a rollback needs. Redeploy
+     * cannot be used here, because a *running* row does not offer it (`availableActions`
+     * gives a running container Stop and Restart); and stopping first would leave the older
+     * deployment at REMOVED, which Railway's `canRollback` would decline.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    const dialog = await openEditDialog(page, "cache");
+    await dialog.getByLabel("Image reference").fill("redis:8-alpine");
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+    /*
+     * The toast first, then the dialog closing — the order the edit spec below uses, and it
+     * is load-bearing rather than cosmetic. The image field is a combobox whose popover is
+     * itself a `role="dialog"`, so asserting the edit dialog is hidden while that is still
+     * animating out matches two elements and fails strict mode.
+     */
+    await expect(toast(page, "Updating cache")).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "cache").click();
+
+    const entries = deploymentHistory(page, "cache").getByRole("listitem");
+    await expect(entries).toHaveCount(2, { timeout: 20_000 });
+
+    /*
+     * Newest first, and the newest is the one running — so it carries the marker and no
+     * control. That pairing is the panel's whole claim about which row is which, and it is
+     * what stops someone rolling back to where they already are.
+     */
+    await expect(entries.nth(0)).toContainText("Running now");
+    await expect(
+      entries.nth(0).getByRole("button", { name: /^Roll back/ }),
+    ).toHaveCount(0);
+
+    await rollBackTo(page, "cache", 1);
+
+    await expect(toast(page, "Rolling cache back")).toBeVisible();
+
+    /*
+     * Collapsed, and then waited on — the wait is the point rather than a settle. An open
+     * panel renders a StatusBadge per history entry, so "Running" inside this row matches the
+     * row's own badge and one per successful deployment, which is a strict-mode violation
+     * rather than a weaker assertion. The history going away is what leaves exactly one.
+     */
+    await disclosure(page, "cache").click();
+    await expect(deploymentHistory(page, "cache")).toBeHidden();
+
+    /*
+     * The fixture mints a new deployment for a rollback, which is the harder of the two
+     * behaviours Railway might have — the row has to notice an id it was not watching and
+     * re-attach. Arriving back at Running is what says it did.
+     */
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("shows a deployment Railway will not go back to, without offering it", async ({
+    page,
+  }) => {
+    /*
+     * The absence is the point. A failed deployment is often the one immediately beside the
+     * one someone is reaching for, so dropping it would leave a history with holes in it —
+     * the entry is rendered, and the sentence where its button would be is the answer.
+     */
+    await injectFaults(page, { deploymentsFail: true });
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Failed")).toBeVisible({ timeout: 20_000 });
+
+    // The next deployment succeeds, so the row ends up with one of each.
+    await injectFaults(page, { deploymentsFail: false });
+    await runRowAction(page, "cache", "Redeploy");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await disclosure(page, "cache").click();
+
+    const entries = deploymentHistory(page, "cache").getByRole("listitem");
+    await expect(entries).toHaveCount(2, { timeout: 20_000 });
+    await expect(entries.nth(1)).toContainText(
+      "Railway will not roll back to this one",
+    );
+    await expect(
+      entries.nth(1).getByRole("button", { name: /^Roll back/ }),
+    ).toHaveCount(0);
+  });
+
+  test("says the history could not be read rather than showing an empty one", async ({
+    page,
+  }) => {
+    /*
+     * `Deployments` is a degrading read, so a token that cannot make it must not be told
+     * its service has never deployed — which is what an empty list would say. The rollback
+     * action re-reads the same document behind the ownership guard and refuses on the same
+     * emptiness, so nothing is offered here that the server would then have to catch.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await injectFaults(page, { deploymentListFail: true });
+    await disclosure(page, "cache").click();
+
+    await expect(cache.getByText(/earlier deployments could not be read/i)).toBeVisible(
+      { timeout: 20_000 },
+    );
+    // The panel still works: the log pane beside it is unaffected by the refused read.
+    await expect(cache.getByRole("log")).toBeVisible();
   });
 
   test("confirms a reversible action without asking for the container name", async ({
@@ -1426,10 +1550,22 @@ test.describe("usage and spend", () => {
      * The fixture's usage is a deterministic function of the service id, so this asserts a
      * rendered figure rather than a shape. A regex here would pass against a readout that
      * had lost its units or its decimals.
+     *
+     * The exact figure, and it is arithmetic rather than a magic number: `metricsFor` is
+     * `0.25 * ((n % 4) + 1)` over the numeric half of the service id, and the first service a
+     * spec spins up is `svc_3` — the seeded postgres takes svc_1 and its deployment dep_2 —
+     * so `3 % 4 === 3` and the container reports a full vCPU against a ceiling of two.
+     *
+     * It used to read `/0\.\d\d of 2 vCPU/` and passed on a different number, because the
+     * fixture's id counter survived `reset()`: every spec's ids depended on how many services
+     * every spec before it had created, so this assertion was really a claim about test
+     * order. Adding three tests earlier in the file moved it to 1.00 with nothing about
+     * metrics having changed. `Store.reset` now zeroes the counter, which is what makes the
+     * figure below a property of this spec.
      */
     const readout = cache.getByLabel(/Resource use for cache/);
     await expect(readout).toBeVisible();
-    await expect(readout).toContainText(/0\.\d\d of 2 vCPU/);
+    await expect(readout).toContainText("1.00 of 2 vCPU");
     /*
      * "of 1.0 GB", exactly. The fixture reports the ceiling as Railway does — 0.99999744 —
      * and that used to render "1,000 MB": the wrong unit, one digit longer than the figure
