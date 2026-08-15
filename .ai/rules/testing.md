@@ -45,6 +45,15 @@ mean. That is the paragraph above happening again, one directory over, and nothi
 distinguished a directory left out on purpose from one left out by accident. A new
 top-level directory under `src/` needs a floor in the same commit that creates it.
 
+**A directory floor did not save `subscribe.ts` either**, which is worth knowing before
+reaching for one as the answer to a single thin module. It is the file named above as the
+reason the floors were added, and it still read 33% functions afterwards: `src/lib/**`
+aggregates forty-odd files, so a fifteen-line module cannot move that mean any more than it
+could move the global one. It now carries a **file-level** threshold at 100 — the only one
+in the config — because it is small enough for that to cost nothing and it is the single
+place in the app that puts a bearer token on an upgrade request. Reach for a file entry
+when the module is both small and load-bearing; the directory floor is for everything else.
+
 When the real number rises, raise these. Lowering one is the same class of edit as raising
 a bundle budget: permitted, and argued for in the commit that does it.
 

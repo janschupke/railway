@@ -125,6 +125,24 @@ export default defineConfig({
          * floors put the pressure where the logic is without inviting that.
          */
         "src/lib/**": { lines: 98, branches: 93, functions: 97, statements: 97 },
+        /*
+         * The one file with a threshold of its own, and it earns it by name.
+         *
+         * `subscribe.ts` is the module the paragraph above cites as the reason directory
+         * floors exist — and it sat at 33% functions afterwards regardless, because
+         * `src/lib/**` aggregates 40-odd files and a 15-line module cannot move that mean.
+         * The remedy was chosen for this file and then did not defend it.
+         *
+         * It is at 100% now and pinned there. Small enough that the ratchet costs nothing,
+         * and the one place in the app that puts a bearer token on an upgrade request, so
+         * the next uncovered line here is worth a red build on its own.
+         */
+        "src/lib/railway/subscribe.ts": {
+          lines: 100,
+          branches: 100,
+          functions: 100,
+          statements: 100,
+        },
         "src/hooks/**": { lines: 98, branches: 91, functions: 98, statements: 97 },
         /*
          * The rail yard. It gets a floor of its own for the same reason lib and hooks do:
