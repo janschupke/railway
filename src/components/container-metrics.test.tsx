@@ -7,10 +7,18 @@ import type {
 } from "@/lib/railway/types";
 import { ContainerMetricsReadout } from "./container-metrics";
 
+/*
+ * The ceilings are the figures a live probe returned off a real Railway service: a whole 2
+ * for CPU, and 0.99999744 for the gigabyte of memory. The second one is not tidied up on
+ * purpose — it is the value that used to render "1,000 MB", and keeping it here means the
+ * readout is asserted against what Railway actually sends.
+ */
 const usage = (over: Partial<ContainerMetrics> = {}): ContainerMetrics => ({
   serviceId: "svc_1",
   cpuCores: 0.25,
   memoryGb: 0.21,
+  cpuLimitCores: 2,
+  memoryLimitGb: 0.99999744,
   sampledAt: 1_760_000_000,
   ...over,
 });
@@ -36,14 +44,51 @@ describe("ContainerMetricsReadout", () => {
     // Real catalog copy through setup-intl, not a key — a renamed message should fail here
     // rather than render a missing-message marker at the user.
     expect(screen.getByText("CPU")).toBeInTheDocument();
-    expect(screen.getByText("0.25 vCPU")).toBeInTheDocument();
+    expect(screen.getByText("0.25 of 2 vCPU")).toBeInTheDocument();
     expect(screen.getByText("Memory")).toBeInTheDocument();
-    expect(screen.getByText("210 MB")).toBeInTheDocument();
+    expect(screen.getByText("210 MB of 1.0 GB")).toBeInTheDocument();
+  });
+
+  it("reads the ceiling as Railway enforces it, not as a round number", () => {
+    /*
+     * Railway reports the gigabyte limit as 0.99999744, which the readout used to render as
+     * "1,000 MB" — wrong in its unit and a digit longer than the figure it means. The
+     * denominator is also what makes the numerator legible: "0.25" alone answers nothing
+     * about whether the container is near its limit, and the limit is the number the user
+     * typed into the spin-up form and then never saw again.
+     */
+    renderReadout();
+    expect(screen.queryByText(/1,000 MB/)).not.toBeInTheDocument();
+    expect(screen.queryByText("2.00")).not.toBeInTheDocument();
   });
 
   it("switches memory to gigabytes once there is a gigabyte to show", () => {
-    renderReadout({ metrics: usage({ memoryGb: 3.14 }) });
-    expect(screen.getByText("3.1 GB")).toBeInTheDocument();
+    renderReadout({ metrics: usage({ memoryGb: 3.14, memoryLimitGb: 4 }) });
+    expect(screen.getByText("3.1 GB of 4.0 GB")).toBeInTheDocument();
+  });
+
+  it("drops the denominator when only the reading arrived", () => {
+    // A service whose limit series was empty still has a usage figure worth showing, and it
+    // reads exactly as it did before ceilings existed.
+    renderReadout({
+      metrics: usage({ cpuLimitCores: null, memoryLimitGb: null }),
+    });
+
+    expect(screen.getByText("0.25 vCPU")).toBeInTheDocument();
+    expect(screen.getByText("210 MB")).toBeInTheDocument();
+  });
+
+  it("shows an em dash for a ceiling with no reading beside it", () => {
+    /*
+     * The limit series is constant and outlives the usage one, so a stopped container can
+     * answer with a ceiling and no sample. "— of 2 vCPU" would state what it COULD use while
+     * saying nothing about whether it is running, and would weaken the em dash, which means
+     * one specific thing here: Railway reported nothing.
+     */
+    renderReadout({ metrics: usage({ cpuCores: null, memoryGb: null }) });
+
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.queryByText(/of 2 vCPU/)).not.toBeInTheDocument();
   });
 
   it("shows an em dash when Railway said nothing about this container", () => {
@@ -62,9 +107,27 @@ describe("ContainerMetricsReadout", () => {
     // container is running and costing money, and an em dash is no claim at all.
     renderReadout({ metrics: usage({ cpuCores: 0, memoryGb: 0 }) });
 
-    expect(screen.getByText("0.00 vCPU")).toBeInTheDocument();
-    expect(screen.getByText("0 MB")).toBeInTheDocument();
+    expect(screen.getByText("0.00 of 2 vCPU")).toBeInTheDocument();
+    expect(screen.getByText("0 MB of 1.0 GB")).toBeInTheDocument();
     expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+
+  it("marks a container doing a little work as doing a little, not as doing none", () => {
+    /*
+     * The defect this ticket exists for. 0.00019975 is what a live probe read off an idle
+     * container, and two decimals rendered it "0.00 vCPU" — the same string an exact zero
+     * gets, so a column of rows all reported nothing and read as a broken readout.
+     */
+    renderReadout({ metrics: usage({ cpuCores: 0.00019975 }) });
+
+    const trace = screen.getByText("< 0.01 of 2 vCPU");
+    expect(trace).toBeInTheDocument();
+
+    renderReadout({ metrics: usage({ cpuCores: 0 }) });
+    expect(screen.getByText("0.00 of 2 vCPU")).toBeInTheDocument();
+    // Asserted directly rather than implied by the two lookups above: the point of the whole
+    // discriminant is that these two containers do not read the same.
+    expect(trace.textContent).not.toBe("0.00 of 2 vCPU");
   });
 
   it("shows uptime for a running container", () => {

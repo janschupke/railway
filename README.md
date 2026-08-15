@@ -210,6 +210,14 @@ SSE route multiplexes deployment status and log output into the open tab.
   blank values for a service that is already running, and blank means "unset it" — so an edit
   path can only carry them once it reads the current values back off `ServiceInstance` first.
 
+  **The CPU and memory ones are readable, though — from the metrics query rather than from
+  the service.** Each expanded row reads "0.25 of 2 vCPU", and the denominator is
+  `CPU_LIMIT`/`MEMORY_LIMIT_GB`, which arrive beside the usage in the same request. That is
+  what Railway is _enforcing_, which is not always what the form asked for: the size mutation
+  is gated by the plan behind the token, so a clamped request shows the clamped figure here —
+  the more useful of the two numbers, and the only one with a bearing on the bill. The other
+  five controls have no such route back and remain write-only.
+
 - **Ports, healthchecks and app sleep are not on that panel.** The target port is on the form
   already, because it belongs to the public address rather than to sizing. The healthcheck
   path is deliberately absent and follows it: Railway probes the path against the service's
@@ -253,8 +261,9 @@ SSE route multiplexes deployment status and log output into the open tab.
   project belongs to has spent this billing period, and says so in the same sentence, because
   that is the only monetary number Railway exposes: `Customer.currentUsage` and
   `CustomerSubscription.nextInvoiceCurrentTotal`, both workspace-wide. `estimatedUsage`
-  sounds like the answer and is not — it returns GB and vCPU, not money, and there is no
-  dollar measurement anywhere in `MetricMeasurement`. So this app cannot tell you what the
+  sounds like the answer and is not — asked against a real project it answered
+  `CPU_USAGE: 1.27` and `MEMORY_USAGE_GB: 494.8`, magnitudes rather than money, and there is
+  no dollar measurement anywhere in `MetricMeasurement`. So this app cannot tell you what the
   containers it created cost, only what the workspace they live in has spent, and the usage
   total beside the list is in vCPU and GB for exactly that reason. Three cases have no figure
   at all: a personal project, which belongs to no workspace; a token without
@@ -264,7 +273,10 @@ SSE route multiplexes deployment status and log output into the open tab.
 billingPeriod { start end } }` as part of the document. All three render a link to Railway's own billing
   page rather than a number this app would have to caveat further. The one record of what was
   asked for is the `container.created` log line, which carries the region, the replica count
-  and the size — Railway keeps nothing once a service is destroyed.
+  and the size — Railway keeps nothing once a service is destroyed. The per-row ceiling is
+  the one figure here that is capacity rather than consumption, which is why the total under
+  the list does not sum it: Railway bills measured usage, and "6 vCPU provisioned" beside a
+  dollar amount would read as a claim about the bill that is not true.
 - **Uptime is derived, and it counts the build.** There is no started-at anywhere in the
   schema, so it is measured from `latestDeployment.createdAt` — when the deployment was
   _queued_. For a Docker image source, which is all this app creates (ADR-6), that overstates
@@ -272,7 +284,10 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 - **The readouts are a snapshot, not a graph.** One point per service per measurement, sized
   to the request budget rather than to what `Query.metrics` will return: a wider window and a
   faster `sampleRateSeconds` would give a sparkline at no extra _request_ cost but a much
-  larger response, and the readout is deliberately the cheap half. `Query.metrics` is in
+  larger response, and the readout is deliberately the cheap half. Four measurements are
+  asked for — two usage, two ceilings — which doubled the response and left the request count
+  exactly where it was, because `measurements` is a variable on one document rather than a
+  query per measurement. `Query.metrics` is in
   `DEGRADING_OPERATIONS`, so losing it costs the readouts and the usage total and nothing
   else — the row falls back to the same em dash it shows for a container with no samples yet.
 - **Projects and environments can be created here but never deleted here.** `projectCreate`

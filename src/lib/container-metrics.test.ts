@@ -23,6 +23,8 @@ const usage = (over: Partial<ContainerMetrics> = {}): ContainerMetrics => ({
   serviceId: "svc_1",
   cpuCores: 0.25,
   memoryGb: 0.5,
+  cpuLimitCores: 2,
+  memoryLimitGb: 0.99999744,
   sampledAt: 1_760_000_000,
   ...over,
 });

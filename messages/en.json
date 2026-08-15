@@ -18,6 +18,7 @@
     "themeDark": "Dark",
     "themeSystem": "System",
     "noValue": "—",
+    "lessThan": "< {value}",
     "close": "Close"
   },
   "footer": {
@@ -184,8 +185,10 @@
     "memoryLabel": "Memory",
     "uptimeLabel": "Uptime",
     "cpuValue": "{value} vCPU",
+    "cpuValueOf": "{value} of {limit} vCPU",
     "memoryValueGb": "{value} GB",
     "memoryValueMb": "{value} MB",
+    "memoryOf": "{used} of {limit}",
     "volumeLabel": "Volume",
     "volumeValue": "{mountPath} · {used} of {size}"
   },

@@ -277,6 +277,15 @@ export type Faults = {
    * spend figure must leave the per-row readouts on screen.
    */
   metricsFail: boolean;
+  /**
+   * Every running service reports CPU below what two decimals can show.
+   *
+   * The figure a live probe read off a real idle container. `metricsFor`'s ordinary formula
+   * cannot produce one, and lowering it would move every other rendered assertion in the
+   * suite — so the state that used to render "0.00 vCPU" on a container doing real work gets
+   * a knob rather than a rewritten fixture.
+   */
+  idleMetrics: boolean;
   /** `project.workspace` is refused, as it is for a token without `workspace:viewer`. */
   workspaceFail: boolean;
   /** The project belongs to no workspace, as a personal Railway project does. */
@@ -341,6 +350,7 @@ const DEFAULT_FAULTS: Faults = {
   variablesFail: false,
   domainFails: false,
   metricsFail: false,
+  idleMetrics: false,
   workspaceFail: false,
   noWorkspace: false,
   rejectWorkspaces: false,
@@ -712,21 +722,46 @@ export class Store {
   }
 
   /**
-   * Current usage for one service.
+   * Current usage for one service, and the ceilings Railway enforces on it.
    *
    * A deterministic function of the service id rather than Math.random, so a spec can
    * assert the rendered figure instead of a regex — the same reason the log lines are built
    * from the deployment id. A service that is not running reports nothing at all, which is
    * the case that has to reach the UI as an em dash rather than as a zero.
+   *
+   * The ceilings are the figures a live probe returned, `0.99999744` included and not
+   * rounded off. That value is the one that used to render "1,000 MB", so encoding it here
+   * is what makes the unit-boundary fix a real end-to-end regression test rather than a
+   * unit-test detail.
+   *
+   * `idleMetrics` reports CPU below what two decimals can show. The formula above can never
+   * produce a sub-0.01 figure, and changing it to would perturb every existing assertion —
+   * so the trace case gets a fault knob of its own.
    */
-  metricsFor(service: Service): { cpu: number; memory: number } | null {
+  metricsFor(service: Service): {
+    cpu: number;
+    memory: number;
+    cpuLimit: number;
+    memoryLimit: number;
+  } | null {
     const deployment = service.deploymentId
       ? this.deployments.get(service.deploymentId)
       : undefined;
     if (deployment?.status !== "SUCCESS") return null;
 
     const n = Number(service.id.split("_")[1] ?? 0);
-    return { cpu: 0.25 * ((n % 4) + 1), memory: 0.5 * ((n % 3) + 1) };
+    return {
+      /*
+       * Both stay under the ceilings below, which they did not have to before the row
+       * rendered a denominator: the memory formula used to reach 1.5 GB against a 1 GB
+       * limit, a container Railway would have killed. A fixture that cannot happen is one
+       * whose assertions describe a page no user sees.
+       */
+      cpu: this.faults.idleMetrics ? 0.00019975 : 0.25 * ((n % 4) + 1),
+      memory: this.faults.idleMetrics ? 0.0353 : 0.25 * ((n % 3) + 1),
+      cpuLimit: 2,
+      memoryLimit: 0.99999744,
+    };
   }
 
   /** The workspace's billing state, as `Customer` exposes it. */

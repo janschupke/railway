@@ -1676,6 +1676,10 @@ describe("getProjectMetrics", () => {
     extensions: { code: "INTERNAL_SERVER_ERROR" },
   });
 
+  /*
+   * The shape a live probe returned: usage and ceilings for each service, plus the one
+   * aggregate row Railway adds per measurement with no `serviceId` on it.
+   */
   const metricsData = [
     {
       measurement: "CPU_USAGE",
@@ -1688,9 +1692,24 @@ describe("getProjectMetrics", () => {
       values: [{ ts: 1_760_000_000, value: 0.5 }],
     },
     {
+      measurement: "CPU_LIMIT",
+      tags: { serviceId: "svc_1" },
+      values: [{ ts: 1_760_000_000, value: 2 }],
+    },
+    {
+      measurement: "MEMORY_LIMIT_GB",
+      tags: { serviceId: "svc_1" },
+      values: [{ ts: 1_760_000_000, value: 0.99999744 }],
+    },
+    {
       measurement: "CPU_USAGE",
       tags: { serviceId: "svc_2" },
       values: [{ ts: 1_760_000_000, value: 1.25 }],
+    },
+    {
+      measurement: "CPU_USAGE",
+      tags: { serviceId: null },
+      values: [{ ts: 1_760_000_000, value: 0 }],
     },
   ];
 
@@ -1719,15 +1738,51 @@ describe("getProjectMetrics", () => {
       serviceId: "svc_1",
       cpuCores: 0.25,
       memoryGb: 0.5,
+      cpuLimitCores: 2,
+      memoryLimitGb: 0.99999744,
       sampledAt: 1_760_000_000,
     });
     expect(metrics.svc_2?.cpuCores).toBe(1.25);
+    // The aggregate row Railway sends with no serviceId does not become a service.
+    expect(Object.keys(metrics)).toEqual(["svc_1", "svc_2"]);
     expect(spend).toEqual({
       currentUsage: 18.4,
       periodStart: "2026-08-01T00:00:00Z",
       periodEnd: "2026-08-31T00:00:00Z",
       workspaceName: "Acme",
     });
+  });
+
+  it("asks for the two usage measurements and the two ceilings, in one request", async () => {
+    /*
+     * `measurements` is a query variable, so the ceilings each row now shows cost no second
+     * round trip — which is the only reason they fit inside ADR-10's request budget. The
+     * assertion is on the variable rather than on the response, because that budget is about
+     * what leaves this process.
+     *
+     * CPU_USAGE, never CPU_USAGE_2. The higher-numbered member exists on the schema and reads
+     * like the newer of the two; a live probe showed it returning an empty array, so an
+     * "upgrade" to it would silently blank the CPU column. This is where that is pinned.
+     */
+    let sent: Record<string, unknown> | undefined;
+    server.use(
+      api.query("ProjectMetrics", ({ variables }) => {
+        sent = variables;
+        return HttpResponse.json({
+          data: { metrics: metricsData, project: projectData },
+        });
+      }),
+    );
+
+    await getProjectMetrics(TOKEN, "p1", "e1");
+
+    expect(sent?.measurements).toEqual([
+      "CPU_USAGE",
+      "MEMORY_USAGE_GB",
+      "CPU_LIMIT",
+      "MEMORY_LIMIT_GB",
+    ]);
+    expect(sent?.measurements).not.toContain("CPU_USAGE_2");
   });
 
   it("keeps the usage when the workspace half is refused", async () => {

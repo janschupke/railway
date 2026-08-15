@@ -264,7 +264,17 @@ export async function getProjectMetrics(
     {
       projectId,
       environmentId,
-      measurements: ["CPU_USAGE", "MEMORY_USAGE_GB"],
+      /*
+       * Four measurements, one request. `measurements` is a query variable, so the two
+       * ceilings cost no second round trip and no change to the document — which is what
+       * makes the denominator on each row free against ADR-10's budget. The response
+       * roughly doubles in size; METRICS.SAMPLE_RATE_SECONDS states that arithmetic.
+       *
+       * CPU_USAGE, not CPU_USAGE_2. The higher-numbered member exists on the schema and
+       * `pnpm probe:metrics` showed it returning an empty array — api.integration.test.ts
+       * pins that so an "upgrade" to it cannot land silently.
+       */
+      measurements: ["CPU_USAGE", "MEMORY_USAGE_GB", "CPU_LIMIT", "MEMORY_LIMIT_GB"],
       startDate: new Date(Date.now() - METRICS.WINDOW_MS).toISOString(),
       sampleRateSeconds: METRICS.SAMPLE_RATE_SECONDS,
       averagingWindowSeconds: METRICS.AVERAGING_WINDOW_SECONDS,

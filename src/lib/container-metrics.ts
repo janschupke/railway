@@ -12,6 +12,14 @@ import type { Container, ContainerMetrics } from "./railway/types";
  * `managed` flag the owner filter and the destroy gate already key on. A total that quietly
  * included services someone else made would be the exact misreading the copy around it is
  * written to prevent.
+ *
+ * **The ceilings are deliberately not summed here, and this will be proposed again.** Each
+ * row now reads "0.25 of 2 vCPU", and totalling the denominators to "6 vCPU provisioned"
+ * fails twice. Railway bills measured usage, and this sentence renders inches from
+ * `workspaceSpend` — the app's only monetary figure — where a provisioned total reads as
+ * "you are paying for 6", which is false. And summing changes what the number is: per row a
+ * ceiling is an enforced limit on one container, where a sum of ceilings is a capacity claim
+ * with nothing to compare it against. A limit belongs beside the reading it bounds.
  */
 export type MetricsTotals = {
   /** Null when nothing answered — see below on why that is not zero. */

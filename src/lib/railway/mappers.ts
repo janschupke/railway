@@ -224,8 +224,16 @@ export function toContainerMetrics(
 
   for (const result of results) {
     const serviceId = result.tags?.serviceId;
-    // Narrowed, not asserted. `MetricTags.serviceId` is nullable on the live schema, and a
-    // result that names no service is one this app has no row to put anywhere.
+    /*
+     * Dropped, and this is observed behaviour rather than defensive narrowing:
+     * `pnpm probe:metrics` showed Railway returning one extra result per measurement
+     * alongside the per-service ones, with `tags.serviceId: null` and a single `{ts, value}`
+     * point. It is an aggregate across the grouping, and this app has no row to put it in —
+     * keeping it would attribute the whole project's usage to a service under the empty key.
+     *
+     * `tags` being absent entirely is the separate, schema-derived case: `MetricTags` is
+     * nullable and nothing has been seen to return it that way.
+     */
     if (!serviceId) continue;
 
     const point = newest(result.values);
@@ -241,15 +249,31 @@ export function toContainerMetrics(
       serviceId,
       cpuCores: null,
       memoryGb: null,
+      cpuLimitCores: null,
+      memoryLimitGb: null,
       sampledAt: null,
     };
 
     switch (result.measurement) {
       case "CPU_USAGE":
         existing.cpuCores = point.value;
+        existing.sampledAt = Math.max(existing.sampledAt ?? 0, point.ts);
         break;
       case "MEMORY_USAGE_GB":
         existing.memoryGb = point.value;
+        existing.sampledAt = Math.max(existing.sampledAt ?? 0, point.ts);
+        break;
+      /*
+       * The ceilings do not advance `sampledAt`. They are constant series — the same figure
+       * at every timestamp — and the field is documented as when the usage was read. A
+       * service whose limits arrived but whose usage did not still reports `sampledAt: null`,
+       * which is the truthful answer to "how current is this reading".
+       */
+      case "CPU_LIMIT":
+        existing.cpuLimitCores = point.value;
+        break;
+      case "MEMORY_LIMIT_GB":
+        existing.memoryLimitGb = point.value;
         break;
       default:
         // Ignored rather than thrown, for the reason toContainerState gives for
@@ -258,7 +282,6 @@ export function toContainerMetrics(
         continue;
     }
 
-    existing.sampledAt = Math.max(existing.sampledAt ?? 0, point.ts);
     byService[serviceId] = existing;
   }
 

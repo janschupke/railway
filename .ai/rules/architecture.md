@@ -226,6 +226,20 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
   `estimatedUsage` and the `project.workspace.customer` chain answer for a real OAuth
   session. Introspection says what the schema declares; only this says what the token is
   permitted to read, which is a different question and the one the readouts depend on.
+
+  **It has been run, and these are settled — do not spend a live session re-asking them.**
+  `metrics` and the workspace chain are both readable on a `project:admin` +
+  `workspace:viewer` session. `CPU_USAGE` is populated and `CPU_USAGE_2` answers with an
+  empty array. `CPU_LIMIT` and `MEMORY_LIMIT_GB` are populated per service, in the same
+  request, which is what each row's denominator is built on. `sampleRateSeconds: 60` over a
+  five-minute window returns exactly five points per series. `estimatedUsage` returns
+  magnitudes, not money. Railway adds one aggregate result per measurement with
+  `tags.serviceId: null`, which `toContainerMetrics` drops.
+
+  **Still open:** whether passing `environmentId` alongside `projectId` narrows the result.
+  The probe project has services in one environment only, so both shapes returned the same
+  rows and proved nothing. A project with two populated environments would settle it.
+
 - `pnpm probe:deployment <deploymentId>` — prints a failed deployment's events verbatim and
   what `pickFailureReason` chose from them, which is the only way to check the order in
   `failure-reason.ts` against a real failure.

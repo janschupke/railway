@@ -195,8 +195,39 @@ export function execute(
                 tags: { serviceId: service.id },
                 values: [{ ts: now, value: usage.memory }],
               },
+              /*
+               * The ceilings, in the same response and off the same `measurements` variable
+               * — which is what makes the denominator on each row cost no extra request.
+               * Constant series, and their timestamps deliberately run ahead of the usage
+               * ones so the mapper's rule that only usage advances `sampledAt` is exercised
+               * through the app rather than only in a unit test.
+               */
+              {
+                measurement: "CPU_LIMIT",
+                tags: { serviceId: service.id },
+                values: [{ ts: now + 60, value: usage.cpuLimit }],
+              },
+              {
+                measurement: "MEMORY_LIMIT_GB",
+                tags: { serviceId: service.id },
+                values: [{ ts: now + 60, value: usage.memoryLimit }],
+              },
             ];
           });
+
+        /*
+         * The aggregate row Railway sends beside the per-service ones, observed with
+         * `pnpm probe:metrics`: one per measurement, no serviceId, a single point. The
+         * mapper drops it, and emitting it here is what proves that through the app instead
+         * of filing the whole project's usage under an empty key.
+         */
+        if (metrics.length) {
+          metrics.push({
+            measurement: "CPU_USAGE",
+            tags: { serviceId: null },
+            values: [{ ts: now, value: 0 }],
+          });
+        }
       }
 
       let workspace: unknown = null;

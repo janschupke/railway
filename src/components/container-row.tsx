@@ -18,7 +18,7 @@ import {
 } from "@/lib/railway/types";
 import { railwayServiceUrl, UI } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
-import { useVolumeSize } from "@/hooks/use-volume-size";
+import { useVolumeSize } from "@/hooks/use-memory-figure";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
 import { ContainerDetailDialog } from "./container-detail-dialog";

@@ -45,25 +45,79 @@ export function relativeTime(
   return format.format(-Math.round(hours / 24), "day");
 }
 
+const VCPU_FRACTION_DIGITS = 2;
+
 /**
- * A vCPU figure.
+ * The smallest figure two decimals can show. Derived, never tuned.
+ *
+ * `10 ** -VCPU_FRACTION_DIGITS`, expressed against the same constant the format uses, so
+ * changing the resolution moves the floor with it. A hardcoded 0.01 beside a
+ * `maximumFractionDigits` someone later raised is how a "trace" marker starts appearing on
+ * values the format can render perfectly well.
+ */
+const VCPU_TRACE_FLOOR = 10 ** -VCPU_FRACTION_DIGITS;
+
+/**
+ * A vCPU figure, and whether it had to be rounded up to be shown at all.
  *
  * Two decimals because that is the resolution the number carries meaning at: a container
  * idling at 0.003 and one at 0.008 are both "doing nothing", and rendering three digits
  * would put a jittering final character on screen every two minutes for no information.
- * Small non-zero values are not floored to "0.00" for the same reason the mapper never turns
- * an absent sample into a zero — see `minimumFractionDigits` below.
+ *
+ * But two decimals alone made four different states render one string. A live probe returned
+ * 0.00019975, 0.00030493 and 0.0000028666 off real idle containers, and each of those, an
+ * exact zero, and a stopped container's zero all read "0.00 vCPU" — a column of them reads
+ * as a readout that is broken rather than one reporting that nothing is happening. So a
+ * value below what the format can show comes back as the floor with `trace` set, and the
+ * caller composes `common.lessThan` around it: "< 0.01" is true, "0.00" was not.
+ *
+ * The `trace` flag rather than a "<" in the string, for the reason every function in this
+ * file returns a bare number: the marker is copy, and a locale that writes it differently
+ * has to be able to reach it.
+ *
+ * Significant digits (`0.0002`) were the alternative and are rejected in the ticket: they
+ * make a 100× difference visible between two figures that are both 0.01% of the ceiling, at
+ * the cost of a variable-width string in a mono column, and they turn a genuine zero into
+ * "0" — one character away from the em dash that means Railway said nothing.
  */
-export function formatVcpu(cores: number | null, locale: string): string | null {
+export function formatVcpu(
+  cores: number | null,
+  locale: string,
+): { value: string; trace: boolean } | null {
+  if (cores === null) return null;
+
+  const trace = cores > 0 && cores < VCPU_TRACE_FLOOR;
+  return {
+    value: new Intl.NumberFormat(locale, {
+      minimumFractionDigits: VCPU_FRACTION_DIGITS,
+      maximumFractionDigits: VCPU_FRACTION_DIGITS,
+    }).format(trace ? VCPU_TRACE_FLOOR : cores),
+    trace,
+  };
+}
+
+/**
+ * The ceiling a container's CPU is measured against.
+ *
+ * No `minimumFractionDigits`, which is the whole difference from `formatVcpu` above: a
+ * ceiling of 2 reads "2", not "2.00". The numerator moves under the reader and wants a fixed
+ * width so the row does not shuffle; the denominator is whatever the service was created
+ * with and does not move at all, and padding it with zeros only makes the pair harder to
+ * read at a glance.
+ *
+ * A second entry point rather than an options argument, on the precedent `formatVolumeMb`
+ * sets: the call sites are different enough that a boolean at each of them would be a
+ * parameter nobody can read without coming here anyway.
+ */
+export function formatVcpuLimit(cores: number | null, locale: string): string | null {
   if (cores === null) return null;
   return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: VCPU_FRACTION_DIGITS,
   }).format(cores);
 }
 
-/** Below this, memory reads better in megabytes. Exactly 1 GB stays in gigabytes. */
-const GB_FLOOR = 1;
+/** Railway's own factor. `MEMORY_USAGE_GB` is decimal gigabytes, never 1024-based. */
+const MB_PER_GB = 1000;
 
 /**
  * A memory figure, and the unit key the caller should render it with.
@@ -74,6 +128,13 @@ const GB_FLOOR = 1;
  *
  * Returns the unit as a discriminant rather than a formatted string because the caller has
  * to pick a catalog key with it: a component that received "210 MB" could only concatenate.
+ *
+ * The unit is decided from the value AS DISPLAYED, which is a fix rather than a nicety. The
+ * previous version compared the raw gigabytes against 1 and rounded afterwards, so the
+ * 0.99999744 a live probe returned for a 1 GB limit chose megabytes and then rounded to
+ * "1,000 MB" — a figure that is both wrong in its unit and one digit longer than the "1.0 GB"
+ * it means. Rounding first and branching on the rounded integer keeps the number the decision
+ * was made on and the number printed the same number.
  */
 export function formatMemoryGb(
   gb: number | null,
@@ -81,11 +142,12 @@ export function formatMemoryGb(
 ): { value: string; unit: "gb" | "mb" } | null {
   if (gb === null) return null;
 
-  if (gb < GB_FLOOR) {
+  const megabytes = Math.round(gb * MB_PER_GB);
+  if (megabytes < MB_PER_GB) {
     return {
-      value: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(
-        gb * 1000,
-      ),
+      // The already-rounded integer, not `gb * MB_PER_GB` formatted again: re-rounding is
+      // where the two could disagree, which is exactly the defect above.
+      value: new Intl.NumberFormat(locale).format(megabytes),
       unit: "mb",
     };
   }
@@ -116,7 +178,7 @@ export function formatVolumeMb(
   mb: number | null,
   locale: string,
 ): { value: string; unit: "gb" | "mb" } | null {
-  return mb === null ? null : formatMemoryGb(mb / 1000, locale);
+  return mb === null ? null : formatMemoryGb(mb / MB_PER_GB, locale);
 }
 
 const SECOND = 1000;

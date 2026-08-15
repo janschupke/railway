@@ -14,21 +14,40 @@
  *
  * Read-only: every query below is a query, never a mutation.
  *
- * The four things it exists to settle, because the metrics feature is designed around the
- * answers:
+ * The four things it exists to settle, with what one run against a `project:admin` +
+ * `workspace:viewer` session answered. Three are closed; nothing here needs re-running to
+ * learn them again, and every source below is kept precisely so the fourth can be asked in
+ * the same context the first three were.
  *
- *   1. Whether `metrics` is readable at all. If it is not, the readout is dead and the
- *      whole per-row half of T-492 is a `note` on an OPTIONAL_FIELDS entry.
+ *   1. Whether `metrics` is readable at all. If it were not, the readout would be dead and
+ *      the whole per-row half of T-492 a `note` on an OPTIONAL_FIELDS entry.
+ *      **Answered: readable.** Five points per series over a five-minute window at
+ *      `sampleRateSeconds: 60`, which is what the METRICS constants are sized to. Railway
+ *      also returns one aggregate result per measurement carrying `tags.serviceId: null`,
+ *      which `toContainerMetrics` drops.
  *   2. Which CPU member carries data. `CPU_USAGE` and `CPU_USAGE_2` both exist and Railway
  *      documents neither; only a live response can say which one is populated.
+ *      **Answered: `CPU_USAGE`.** `CPU_USAGE_2` returned an empty array.
+ *      `CPU_LIMIT` and `MEMORY_LIMIT_GB` came back populated in the same request — which is
+ *      what each row's "0.25 of 2 vCPU" is built on — at 2 and 0.99999744 respectively.
  *   3. Whether `environmentId` alongside `projectId` actually narrows. If it does not, the
  *      mapper has to group by `[SERVICE_ID, ENVIRONMENT_ID]` and filter — one more branch,
  *      no more requests.
+ *      **Still open.** The project probed has services in one environment only, so both
+ *      shapes returned the same rows and proved nothing. Ask this against a project with two
+ *      populated environments.
  *   4. Whether the `project.workspace.customer` chain answers. That chain is the only
  *      monetary figure anywhere in Railway's schema. `verify:schema` does now validate it —
  *      the document selecting it is in `operations.ts` and is checked like any other — so
  *      what is left for this probe is the question introspection cannot answer: whether an
  *      OAuth grant is *permitted* to read it. Different question, same script.
+ *      **Answered: it does**, with `currentUsage` and a `billingPeriod`. `estimatedUsage`
+ *      answered too, in GB and vCPU — magnitudes, not money, which is why the dashboard's
+ *      only dollar figure is workspace-wide.
+ *
+ * The answers hold for one token on one plan. That is this file's own premise — introspection
+ * cannot tell you what a grant may read — so they are recorded rather than treated as
+ * permanent, and re-running against a different plan is a reasonable thing to do.
  */
 
 import { openSession } from "../src/lib/auth/session.ts";

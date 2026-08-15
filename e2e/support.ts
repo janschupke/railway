@@ -38,6 +38,7 @@ export async function injectFaults(
     settingsFail: boolean;
     limitsFail: boolean;
     metricsFail: boolean;
+    idleMetrics: boolean;
     workspaceFail: boolean;
     noWorkspace: boolean;
     projectsSource: ProjectsSource;

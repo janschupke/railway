@@ -59,6 +59,7 @@ export function ContainerList({
   const t = useTranslations("dashboard");
   const tFilters = useTranslations("filters");
   const tContainers = useTranslations("containers");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const {
     filters,
@@ -200,7 +201,14 @@ export function ContainerList({
   const totalsSentence =
     totalCpu && totalMemory
       ? t("containerTotals", {
-          cpu: totalCpu,
+          /*
+           * A summed trace is still a trace: twenty containers each below a hundredth of a
+           * core add up to something the two-decimal format still cannot show, and "0.00
+           * vCPU across 20 containers" is the same false reading the per-row figure had.
+           */
+          cpu: totalCpu.trace
+            ? tCommon("lessThan", { value: totalCpu.value })
+            : totalCpu.value,
           memory:
             totalMemory.unit === "gb"
               ? tContainers("memoryValueGb", { value: totalMemory.value })

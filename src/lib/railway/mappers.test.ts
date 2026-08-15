@@ -260,15 +260,89 @@ describe("toContainerMetrics", () => {
         serviceId: "svc_1",
         cpuCores: 0.25,
         memoryGb: 0.5,
+        cpuLimitCores: null,
+        memoryLimitGb: null,
         sampledAt: 1_760_000_000,
       },
       svc_2: {
         serviceId: "svc_2",
         cpuCores: 1.5,
         memoryGb: null,
+        cpuLimitCores: null,
+        memoryLimitGb: null,
         sampledAt: 1_760_000_000,
       },
     });
+  });
+
+  it("reads the ceilings out of the same response as the usage", () => {
+    /*
+     * All four figures a live probe returned for one real service. They arrive as ordinary
+     * measurement series beside the usage ones, which is what makes the denominator on each
+     * row free: one request, one `measurements` variable, no second round trip.
+     *
+     * 0.99999744 is Railway's own answer for a one-gigabyte limit. Not tidied up here, because
+     * that raw value is what the readout has to render as "1.0 GB".
+     */
+    const metrics = toContainerMetrics([
+      result({ values: [{ ts: 1_760_000_060, value: 0.00019975 }] }),
+      result({
+        measurement: "MEMORY_USAGE_GB",
+        values: [{ ts: 1_760_000_060, value: 0.0353 }],
+      }),
+      result({
+        measurement: "CPU_LIMIT",
+        values: [{ ts: 1_760_000_060, value: 2 }],
+      }),
+      result({
+        measurement: "MEMORY_LIMIT_GB",
+        values: [{ ts: 1_760_000_060, value: 0.99999744 }],
+      }),
+    ]);
+
+    expect(metrics.svc_1).toEqual({
+      serviceId: "svc_1",
+      cpuCores: 0.00019975,
+      memoryGb: 0.0353,
+      cpuLimitCores: 2,
+      memoryLimitGb: 0.99999744,
+      sampledAt: 1_760_000_060,
+    });
+  });
+
+  it("reports a ceiling with no reading beside it, rather than dropping the service", () => {
+    // The limit series is constant and outlives the usage one, so this pair is real rather
+    // than guarded against on principle. The component renders the em dash and omits the
+    // denominator — a ceiling alone says nothing about whether the container is running.
+    const metrics = toContainerMetrics([
+      result({ measurement: "CPU_LIMIT", values: [{ ts: 1_760_000_060, value: 2 }] }),
+    ]);
+
+    expect(metrics.svc_1).toEqual({
+      serviceId: "svc_1",
+      cpuCores: null,
+      memoryGb: null,
+      cpuLimitCores: 2,
+      memoryLimitGb: null,
+      sampledAt: null,
+    });
+  });
+
+  it("does not let a constant limit series advance the sample time", () => {
+    /*
+     * `sampledAt` says when the USAGE was read. A limit series carries timestamps too — and
+     * newer ones, since it is reported whether or not the container is running — so letting
+     * one move this would make the field quietly stop meaning what its docblock says.
+     */
+    const metrics = toContainerMetrics([
+      result({ values: [{ ts: 1_760_000_060, value: 0.25 }] }),
+      result({
+        measurement: "CPU_LIMIT",
+        values: [{ ts: 1_760_000_300, value: 2 }],
+      }),
+    ]);
+
+    expect(metrics.svc_1?.sampledAt).toBe(1_760_000_060);
   });
 
   it("takes the newest sample rather than the last one in the array", () => {
@@ -300,16 +374,49 @@ describe("toContainerMetrics", () => {
     expect(toContainerMetrics([result({ values: null })])).toEqual({});
   });
 
-  it("skips a result that names no service", () => {
-    // MetricTags.serviceId is nullable on the live schema, and a result with none is one
-    // this app has no row to put anywhere.
-    expect(toContainerMetrics([result({ tags: { serviceId: null } })])).toEqual({});
+  it("drops the aggregate row Railway sends beside the per-service ones", () => {
+    /*
+     * Observed, not defensive. `pnpm probe:metrics` showed one extra result per measurement
+     * with `tags.serviceId: null` and a single `{ts, value: 0}` point — an aggregate across
+     * the grouping. Kept, it would file the whole project's usage under the empty key.
+     *
+     * Mixed in with real rows rather than tested alone, because that is how it arrives, and
+     * the two services either side of it have to come through untouched.
+     */
+    const metrics = toContainerMetrics([
+      result({
+        tags: { serviceId: "svc_1" },
+        values: [{ ts: 1_760_000_060, value: 0.25 }],
+      }),
+      result({ tags: { serviceId: null }, values: [{ ts: 1_760_000_060, value: 0 }] }),
+      result({
+        tags: { serviceId: "svc_2" },
+        values: [{ ts: 1_760_000_060, value: 1.5 }],
+      }),
+    ]);
+
+    expect(Object.keys(metrics)).toEqual(["svc_1", "svc_2"]);
+    expect(metrics.svc_1?.cpuCores).toBe(0.25);
+    expect(metrics.svc_2?.cpuCores).toBe(1.5);
+  });
+
+  it("skips a result with no tags at all", () => {
+    // This one IS schema-derived rather than observed: `MetricTags` is nullable and nothing
+    // has been seen to return it that way. The honest split from the case above.
     expect(toContainerMetrics([result({ tags: null })])).toEqual({});
   });
 
   it("ignores a measurement it did not ask for", () => {
-    // Railway adds enum members without notice — the same reasoning toContainerState gives
-    // for DeploymentStatus. An unknown one must not take the readout down with it.
+    /*
+     * CPU_USAGE_2 first, because it is the one someone will reach for: it exists on the
+     * schema, sits beside CPU_USAGE, and reads like the newer of the two. A live probe showed
+     * it returning an empty array, and api.integration.test.ts pins the request accordingly —
+     * this asserts that even if one arrived, it would not be read as a CPU figure.
+     *
+     * Ignored rather than thrown, for the reason toContainerState gives for DeploymentStatus:
+     * Railway adds enum members without notice, and one must not take the readout down.
+     */
+    expect(toContainerMetrics([result({ measurement: "CPU_USAGE_2" })])).toEqual({});
     expect(toContainerMetrics([result({ measurement: "NETWORK_RX_GB" })])).toEqual({});
   });
 

@@ -3,6 +3,7 @@ import {
   formatMemoryGb,
   formatUptime,
   formatVcpu,
+  formatVcpuLimit,
   formatVolumeMb,
   relativeTime,
 } from "./format";
@@ -67,14 +68,56 @@ describe("formatVcpu", () => {
      * distinct from the em dash a container Railway said nothing about gets. The two are
      * different claims and this is the layer where they stop being confusable.
      */
-    expect(formatVcpu(0, "en")).toBe("0.00");
-    expect(formatVcpu(0.123456, "en")).toBe("0.12");
-    expect(formatVcpu(2, "en")).toBe("2.00");
+    expect(formatVcpu(0, "en")).toEqual({ value: "0.00", trace: false });
+    expect(formatVcpu(0.123456, "en")).toEqual({ value: "0.12", trace: false });
+    expect(formatVcpu(2, "en")).toEqual({ value: "2.00", trace: false });
+  });
+
+  it("marks a value too small to show rather than rounding it to nothing", () => {
+    /*
+     * The three figures a live probe returned off real idle containers. Before the trace
+     * flag every one of them rendered "0.00", the same string an exact zero gets — so a
+     * container doing a little work and one doing none were indistinguishable, and a column
+     * of "0.00" read as a broken readout rather than a quiet project.
+     */
+    for (const observed of [0.00019975, 0.00030493, 0.0000028666]) {
+      expect(formatVcpu(observed, "en")).toEqual({ value: "0.01", trace: true });
+    }
+  });
+
+  it("puts the boundary exactly where the format's own resolution is", () => {
+    // 0.01 is renderable, so it is not a trace. Anything under it is not, so it is. The
+    // floor is derived from maximumFractionDigits for precisely this reason.
+    expect(formatVcpu(0.01, "en")).toEqual({ value: "0.01", trace: false });
+    expect(formatVcpu(0.009, "en")).toEqual({ value: "0.01", trace: true });
+  });
+
+  it("keeps a genuine zero distinguishable from a trace", () => {
+    // The defect this whole discriminant exists for, asserted directly rather than implied.
+    expect(formatVcpu(0, "en")?.trace).toBe(false);
+    expect(formatVcpu(0.0002, "en")?.trace).toBe(true);
   });
 
   it("uses the locale's own decimal separator", () => {
     // The reason this goes through Intl at all: "0,12" is not a formatting preference.
-    expect(formatVcpu(0.12, "de")).toBe("0,12");
+    expect(formatVcpu(0.12, "de")).toEqual({ value: "0,12", trace: false });
+  });
+});
+
+describe("formatVcpuLimit", () => {
+  it("returns null for an absent ceiling", () => {
+    expect(formatVcpuLimit(null, "en")).toBeNull();
+  });
+
+  it("drops the padding the usage figure needs", () => {
+    /*
+     * A ceiling does not move, so it has no reason to hold a fixed width — and "0.25 of 2
+     * vCPU" is a pair someone can read at a glance where "0.25 of 2.00 vCPU" is two figures
+     * that look like they should be compared digit by digit.
+     */
+    expect(formatVcpuLimit(2, "en")).toBe("2");
+    expect(formatVcpuLimit(0.5, "en")).toBe("0.5");
+    expect(formatVcpuLimit(2, "de")).toBe("2");
   });
 });
 
@@ -88,12 +131,26 @@ describe("formatMemoryGb", () => {
     // caller has to pick a catalog key with it — a component handed "210 MB" could only
     // concatenate.
     expect(formatMemoryGb(0.21, "en")).toEqual({ value: "210", unit: "mb" });
-    expect(formatMemoryGb(0.9999, "en")).toEqual({ value: "1,000", unit: "mb" });
+    expect(formatMemoryGb(0.9994, "en")).toEqual({ value: "999", unit: "mb" });
   });
 
   it("stays in gigabytes at exactly one, and above", () => {
     expect(formatMemoryGb(1, "en")).toEqual({ value: "1.0", unit: "gb" });
     expect(formatMemoryGb(3.14, "en")).toEqual({ value: "3.1", unit: "gb" });
+  });
+
+  it("picks the unit from the value it is about to print, not the one it was given", () => {
+    /*
+     * The regression. Railway reports a 1 GB memory limit as 0.99999744, which is under a
+     * gigabyte raw — so the old version chose megabytes, rounded afterwards, and rendered
+     * "1,000 MB". Rounding first means the branch and the digits agree.
+     *
+     * 0.9994 above and 0.9995 here are the boundary pair: they differ by a ten-thousandth of
+     * a gigabyte and that is exactly where the unit changes.
+     */
+    expect(formatMemoryGb(0.9995, "en")).toEqual({ value: "1.0", unit: "gb" });
+    expect(formatMemoryGb(0.9999, "en")).toEqual({ value: "1.0", unit: "gb" });
+    expect(formatMemoryGb(0.99999744, "en")).toEqual({ value: "1.0", unit: "gb" });
   });
 
   it("renders a real zero in megabytes rather than as nothing", () => {
@@ -110,6 +167,12 @@ describe("formatVolumeMb", () => {
   it("reads Railway's megabytes and picks the same units as memory does", () => {
     expect(formatVolumeMb(500, "en")).toEqual({ value: "500", unit: "mb" });
     expect(formatVolumeMb(5000, "en")).toEqual({ value: "5.0", unit: "gb" });
+  });
+
+  it("crosses into gigabytes at a round thousand rather than reading 1,000 MB", () => {
+    // Railway's plan default volume is exactly this, so it is the size most rows show.
+    expect(formatVolumeMb(1000, "en")).toEqual({ value: "1.0", unit: "gb" });
+    expect(formatVolumeMb(999, "en")).toEqual({ value: "999", unit: "mb" });
   });
 
   it("renders an untouched volume as a real zero", () => {

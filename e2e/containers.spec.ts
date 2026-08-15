@@ -1386,12 +1386,38 @@ test.describe("usage and spend", () => {
      */
     const readout = cache.getByLabel(/Resource use for cache/);
     await expect(readout).toBeVisible();
-    await expect(readout).toContainText("vCPU");
-    await expect(readout).toContainText(/\d+ (MB|GB)/);
+    await expect(readout).toContainText(/0\.\d\d of 2 vCPU/);
+    /*
+     * "of 1.0 GB", exactly. The fixture reports the ceiling as Railway does — 0.99999744 —
+     * and that used to render "1,000 MB": the wrong unit, one digit longer than the figure
+     * it means. Asserted end to end rather than only in lib/format, because the value has to
+     * survive the mapper, the RSC payload and the catalog to get here.
+     */
+    await expect(readout).toContainText(/\d+ MB of 1\.0 GB/);
+    await expect(readout).not.toContainText("1,000 MB");
     // Uptime is derived from the deployment's own createdAt. The fixture used to report
     // epoch zero here, which would have rendered as fifty-six years.
     await expect(readout).toContainText("Uptime");
     await expect(readout).not.toContainText(/\d{4}d/);
+  });
+
+  test("says a barely-busy container is barely busy, not idle", async ({ page }) => {
+    /*
+     * The defect this follow-up exists for, proven through the whole stack. A live probe
+     * read 0.00019975 vCPU off a real container; two decimals rendered that "0.00 vCPU" —
+     * the same string an exact zero gets — so a column of rows all claimed to be doing
+     * nothing and read as a broken readout.
+     */
+    await injectFaults(page, { idleMetrics: true });
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+    await disclosure(page, "cache").click();
+
+    const readout = cache.getByLabel(/Resource use for cache/);
+    await expect(readout).toContainText("< 0.01 of 2 vCPU");
+    await expect(readout).not.toContainText("0.00 of 2 vCPU");
   });
 
   test("keeps the list usable when Railway refuses metrics", async ({ page }) => {

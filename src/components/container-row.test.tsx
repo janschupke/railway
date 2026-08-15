@@ -525,6 +525,8 @@ describe("ContainerRow", () => {
       serviceId: "svc_1",
       cpuCores: 0.25,
       memoryGb: 0.21,
+      cpuLimitCores: 2,
+      memoryLimitGb: 0.99999744,
       sampledAt: 1_760_000_000,
     };
 

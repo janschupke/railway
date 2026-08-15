@@ -249,11 +249,20 @@ export const METRICS = {
   /**
    * `sampleRateSeconds`. What actually bounds the response.
    *
-   * WINDOW_MS / 60 is five points per service per measurement, so a twenty-service
-   * environment is 200 points. Railway's own default resolution over the same window would
-   * be thousands, for data this app throws away on the next line — the app reads the newest
-   * point and nothing else. The rest is what a sparkline would need, and a sparkline is a
-   * different ticket that would pay for it deliberately.
+   * WINDOW_MS / 60 is five points per service per measurement, plus the one aggregate row
+   * Railway adds per measurement and the mapper drops. Four measurements — two usage, two
+   * ceilings — so a twenty-service environment is:
+   *
+   *     4 × (20 services × 5 points + 1 aggregate × 1 point) = 404 points, 84 results
+   *
+   * Twice what the two usage measurements alone cost, inside the SAME request: `measurements`
+   * is a query variable, so the ceilings changed the response weight and left the request
+   * count exactly where ADR-10's arithmetic has it.
+   *
+   * Railway's own default resolution over the same window would be thousands, for data this
+   * app throws away on the next line — the app reads the newest point and nothing else. The
+   * rest is what a sparkline would need, and a sparkline is a different ticket that would pay
+   * for it deliberately.
    */
   SAMPLE_RATE_SECONDS: 60,
   /**

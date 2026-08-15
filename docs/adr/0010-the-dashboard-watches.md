@@ -75,6 +75,12 @@ nudge       120s  → ≤ 30 renders/hour × 4 reqs = 120/hour
 against the rest of the budget, four concurrent log streams are ~270/hour on their own
 (see `STREAM.MAX_POLL_MS`), so a busy tab sits near 630.
 
+Adding the two ceilings each row now shows — `CPU_LIMIT` and `MEMORY_LIMIT_GB` — did not
+move a line of that table, and the number is worth stating rather than leaving to silence.
+`measurements` is a variable on the one document, so two became four inside the same
+request: 202 points across 42 results became 404 across 84 for a twenty-service
+environment, and 360/hour stayed 360/hour. Response weight is not what this budget counts.
+
 Both are env vars rather than constants because the right value depends on the plan behind
 the token, and both are floored at one second — a sanity bound rather than the quota
 protection, since a one-second watcher is already 3,600 requests an hour against 1,000.
@@ -92,7 +98,12 @@ and `watch-fingerprint.test.ts` pins both halves of it.
 It also never sees a metric value, and that is structural rather than remembered: usage
 lives in a `Record<serviceId, ContainerMetrics>` beside the container list, not on
 `Container`, so `fingerprint()` cannot hash a number it is never handed. A fluctuating CPU
-float in that hash would announce a change on every single tick, forever.
+float in that hash would announce a change on every single tick, forever. The two ceilings
+in the same structure are constant and would therefore be _safe_ in the hash — which is the
+argument for moving them onto `Container`, and the reason not to is a different one: they
+arrive in the metrics response beside the usage they qualify, so moving them would buy a
+second read off `ServiceInstance` for a value that changes only when someone edits the
+service.
 
 **The connection budget, which is what forced a change elsewhere.** Browsers allow six
 connections per origin over HTTP/1.1, and the server this app ships speaks HTTP/1.1. One is

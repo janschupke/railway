@@ -188,7 +188,30 @@ export type ContainerMetrics = {
   cpuCores: number | null;
   /** Gigabytes — Railway's own unit (MEMORY_USAGE_GB), never round-tripped through bytes. */
   memoryGb: number | null;
-  /** Unix seconds of the newest sample these values came from. */
+  /**
+   * The ceilings the two figures above are measured against, from `CPU_LIMIT` and
+   * `MEMORY_LIMIT_GB` in the same response.
+   *
+   * These do NOT move, so unlike the usage figures they would be safe inside `fingerprint()`
+   * — which is exactly why the reason they are here needs writing down rather than leaving
+   * to whoever reads the paragraph above and concludes they belong on `Container`. The
+   * reason is not the hash: they arrive in this response, beside the usage they qualify, and
+   * putting them on `Container` would mean a second read off `ServiceInstance` for a value
+   * that changes only when someone edits the service.
+   *
+   * What Railway is enforcing, which is not necessarily what the spin-up form asked for — a
+   * plan that clamps the request reports the clamped figure here, and that is the more useful
+   * number to show. README Limitations says so.
+   */
+  cpuLimitCores: number | null;
+  memoryLimitGb: number | null;
+  /**
+   * Unix seconds of the newest sample the USAGE values came from.
+   *
+   * Advanced off `CPU_USAGE` and `MEMORY_USAGE_GB` only. A limit series carries timestamps
+   * too, but a constant is not a sample of anything, and letting one move this would make the
+   * field silently stop meaning what this line says.
+   */
   sampledAt: number | null;
 };
 

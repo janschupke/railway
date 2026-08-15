@@ -252,6 +252,9 @@ describe("ContainerList", () => {
       serviceId,
       cpuCores,
       memoryGb,
+      // The totals sentence deliberately does not sum these — see lib/container-metrics.ts.
+      cpuLimitCores: 2,
+      memoryLimitGb: 0.99999744,
       sampledAt: 1_760_000_000,
     });
 
