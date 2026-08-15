@@ -3,7 +3,8 @@ import "server-only";
 import type { RailwaySession } from "@/lib/auth/session";
 import { STREAM } from "@/lib/constants";
 import { requestContext, runWithRequestContext } from "@/lib/log/context";
-import { log, type LogEvent, type LogFields } from "@/lib/logger";
+import type { LogEvent } from "@/lib/log/events";
+import { log, type LogFields } from "@/lib/logger";
 
 /** What the SSE transport reports on teardown. Mirrors sse.ts's own shape. */
 type SseCloseInfo = { reason: string; durationMs: number };

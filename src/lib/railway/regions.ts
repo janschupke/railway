@@ -1,8 +1,28 @@
 import "server-only";
 
 import { REGIONS } from "@/lib/constants";
-import { listRegions } from "./api";
+import { gql } from "./client";
+import { toRegionOptions } from "./mappers";
+import { REGIONS_QUERY } from "./operations";
 import type { RegionOption } from "./types";
+
+/**
+ * The regions a container can be created in, for the spin-up form's select.
+ *
+ * Throws, and the caller catches. This is the uncached truth; the memo below decides how
+ * often it is asked for.
+ *
+ * It lived in `api.ts` and was called from exactly one place — here, the module that exists
+ * to memoise it. A read and its cache in two files, with nothing else reading either.
+ */
+async function listRegions(
+  accessToken: string,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<RegionOption[]> {
+  const data = await gql(REGIONS_QUERY, { projectId }, { accessToken, signal });
+  return toRegionOptions(data.regions);
+}
 
 /**
  * The region list, memoised, because nothing else on the dashboard carries it.

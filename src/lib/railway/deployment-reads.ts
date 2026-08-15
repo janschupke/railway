@@ -2,7 +2,7 @@ import "server-only";
 
 import { STREAM } from "@/lib/constants";
 import { log } from "@/lib/logger";
-import { gql, gqlPartial } from "./client";
+import { gql, gqlPartial, logRefusals } from "./client";
 import {
   BUILD_LOGS_QUERY,
   DEPLOYMENT_EVENTS_QUERY,
@@ -63,17 +63,12 @@ export async function getDeploymentFailure(
     { accessToken, signal },
   );
 
-  for (const error of errors) {
-    /*
-     * Debug, not warn. This runs while the user is already looking at a failure, and a
-     * feed the token cannot read is a capability this app degrades out of rather than an
-     * incident — a warn per failed deployment would train people to ignore warns.
-     */
-    log.debug("railway.deployment.failure_reason_refused", {
-      deployment_id: deploymentId,
-      error,
-    });
-  }
+  // Once per failed deployment, while the user is already looking at the failure.
+  logRefusals(
+    "railway.deployment.failure_reason_refused",
+    { deployment_id: deploymentId },
+    errors,
+  );
 
   const failure = pickFailureReason(
     nodes(data?.deploymentEvents),

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { log, type LogEvent } from "@/lib/logger";
+import type { LogEvent } from "@/lib/log/events";
+import { log } from "@/lib/logger";
 import { requireSession } from "./server";
 import type { RailwaySession } from "./session";
 

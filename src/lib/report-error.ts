@@ -1,5 +1,6 @@
 import { newIncidentId } from "@/lib/incident";
-import { log, type LogEvent } from "@/lib/logger";
+import type { LogEvent } from "@/lib/log/events";
+import { log } from "@/lib/logger";
 import { RailwayApiError } from "@/lib/railway/errors";
 import type { MessageDescriptor, MessageKey } from "@/lib/messages";
 

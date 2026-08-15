@@ -6,12 +6,14 @@ import {
   toContainerMetrics,
   toContainerVolumes,
   toContainers,
+  toDeploymentHistory,
   toProject,
   toRegionOptions,
   toWorkspaceSpend,
   toWorkspaces,
 } from "./mappers";
 import type {
+  DeploymentHistoryNode,
   MetricsResultNode,
   RegionNode,
   ServiceNode,
@@ -256,6 +258,71 @@ describe("sortContainers", () => {
     ];
     sortContainers(input);
     expect(input.map((c) => c.serviceId)).toEqual(["a", "b"]);
+  });
+});
+
+describe("toDeploymentHistory", () => {
+  const node = (over: Partial<DeploymentHistoryNode> = {}): DeploymentHistoryNode => ({
+    id: "d",
+    status: "SUCCESS",
+    createdAt: "2026-01-01T00:00:00Z",
+    canRollback: true,
+    ...over,
+  });
+
+  it("orders newest first, whatever order the connection arrived in", () => {
+    /*
+     * The reason this is sorted rather than trusted: `last` is asked for on one observation
+     * about Railway's Relay ordering, and an ordering that changed would otherwise offer
+     * the wrong ten deployments to roll back to.
+     */
+    const entries = toDeploymentHistory([
+      node({ id: "middle", createdAt: "2026-01-02T00:00:00Z" }),
+      node({ id: "oldest", createdAt: "2026-01-01T00:00:00Z" }),
+      node({ id: "newest", createdAt: "2026-01-03T00:00:00Z" }),
+    ]);
+
+    expect(entries.map((entry) => entry.id)).toEqual(["newest", "middle", "oldest"]);
+  });
+
+  it("sorts an entry with no timestamp last rather than dropping it", () => {
+    // The panel renders it; a deployment Railway will not date is still one that exists.
+    const entries = toDeploymentHistory([
+      node({ id: "undated", createdAt: null }),
+      node({ id: "dated", createdAt: "2026-01-01T00:00:00Z" }),
+    ]);
+
+    expect(entries.map((entry) => entry.id)).toEqual(["dated", "undated"]);
+  });
+
+  it("keeps Railway's own status beside the state derived from it", () => {
+    const [entry] = toDeploymentHistory([node({ status: "CRASHED" })]);
+
+    // The badge's title shows Railway's member; the state it maps onto is coarser.
+    expect(entry).toMatchObject({ state: "failed", rawStatus: "CRASHED" });
+  });
+
+  it("maps a status it has never seen without losing it", () => {
+    // Same trade toContainerState makes everywhere: an unknown member degrades the state
+    // and the raw value survives for the badge's title.
+    const [entry] = toDeploymentHistory([node({ status: "NOT_A_REAL_STATUS" })]);
+
+    expect(entry?.rawStatus).toBe("NOT_A_REAL_STATUS");
+    expect(entry?.state).toBe("unknown");
+  });
+
+  it("carries Railway's rollback answer rather than deriving one", () => {
+    // `canRollback` is Railway's, not a rule computed here — see DeploymentHistoryEntry.
+    const entries = toDeploymentHistory([
+      node({ id: "a", canRollback: false, createdAt: "2026-01-02T00:00:00Z" }),
+      node({ id: "b", canRollback: true, createdAt: "2026-01-01T00:00:00Z" }),
+    ]);
+
+    expect(entries.map((entry) => entry.canRollback)).toEqual([false, true]);
+  });
+
+  it("is empty for a service that has never deployed", () => {
+    expect(toDeploymentHistory([])).toEqual([]);
   });
 });
 

@@ -28,6 +28,48 @@ function scopeForPath(path?: Array<string | number>): string | undefined {
   return undefined;
 }
 
+/**
+ * One entry of a GraphQL `errors[]` array.
+ *
+ * `path` is modelled rather than ignored because it is the only thing that says *which*
+ * field Railway refused, and that is what turns "Railway rejected the operation" into a
+ * sentence naming the permission that is missing — see `scopeForPath` above.
+ */
+export type GraphQLErrorEntry = {
+  message: string;
+  path?: Array<string | number>;
+  extensions?: Record<string, unknown> & { code?: string };
+};
+
+/**
+ * Railway's authorization refusals, which do not use the codes the spec suggests.
+ *
+ * Verified against the live API: an unauthorized field comes back as HTTP 200 with
+ * `{"message":"Not Authorized","extensions":{"code":"INTERNAL_SERVER_ERROR"}}` — never
+ * UNAUTHENTICATED or FORBIDDEN. Matching only on those two codes is what classified
+ * every permission problem as a generic operation failure, which then offered a Retry
+ * that could not possibly work and withheld the re-authorize that would have.
+ */
+const AUTH_MESSAGE =
+  /\b(not\s+authorized|unauthorized|unauthenticated|forbidden|access denied)\b|\b(invalid|expired|revoked)\s+(access\s+)?token\b/i;
+
+/**
+ * Whether one `errors[]` entry is Railway refusing a permission.
+ *
+ * Here rather than in `client.ts` because it is a statement about how Railway signals
+ * authorization, not about how a request is sent — the same knowledge `credentialRejected`
+ * and `missingScope` below are built on, and it read strangely for the class that acts on
+ * the classification to live two files from the rule producing it.
+ */
+export function isAuthEntry(entry: GraphQLErrorEntry): boolean {
+  const code = entry.extensions?.code;
+  if (code === "UNAUTHENTICATED" || code === "FORBIDDEN") return true;
+  // A validation failure can mention "field" wording that trips nothing here; the code
+  // is checked first so a genuine schema rejection is never mistaken for a permission.
+  if (code === "GRAPHQL_VALIDATION_FAILED") return false;
+  return AUTH_MESSAGE.test(entry.message);
+}
+
 export class RailwayApiError extends Error {
   readonly kind: RailwayErrorKind;
   readonly status?: number;
@@ -154,4 +196,21 @@ export class RailwayApiError extends Error {
           : { key: "errors.api.graphqlUnexpected", values: { incident } };
     }
   }
+}
+
+/** One `errors[]` entry, classified and carried with everything needed to explain it. */
+export function toApiError(
+  entry: GraphQLErrorEntry,
+  operationName: string,
+  status: number,
+): RailwayApiError {
+  const code = entry.extensions?.code;
+  const auth = isAuthEntry(entry);
+  return new RailwayApiError(entry.message || "Railway rejected the operation", {
+    kind: auth ? "auth" : "graphql",
+    status,
+    operation: operationName,
+    ...(code ? { code } : {}),
+    ...(entry.path ? { path: entry.path } : {}),
+  });
 }

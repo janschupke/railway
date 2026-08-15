@@ -2,9 +2,15 @@ import "server-only";
 
 import { env } from "@/env";
 import { NETWORK } from "@/lib/constants";
+import type { LogEvent } from "@/lib/log/events";
 import { log } from "@/lib/logger";
 import { sleep } from "@/lib/utils";
-import { RailwayApiError } from "./errors";
+import {
+  isAuthEntry,
+  RailwayApiError,
+  toApiError,
+  type GraphQLErrorEntry,
+} from "./errors";
 import type {
   AnyTypedDocument,
   Refusable,
@@ -16,61 +22,10 @@ import type {
 export const railwayApiUrl = () => env().RAILWAY_API_URL;
 export const railwayWsUrl = () => env().RAILWAY_WS_URL;
 
-/**
- * One entry of a GraphQL `errors[]` array.
- *
- * `path` is modelled rather than ignored because it is the only thing that says *which*
- * field Railway refused, and that is what turns "Railway rejected the operation" into a
- * sentence naming the permission that is missing. See scopeForPath in ./errors.
- */
-type GraphQLErrorEntry = {
-  message: string;
-  path?: Array<string | number>;
-  extensions?: Record<string, unknown> & { code?: string };
-};
-
 type GraphQLResponse<T> = {
   data?: T | null;
   errors?: GraphQLErrorEntry[];
 };
-
-/**
- * Railway's authorization refusals, which do not use the codes the spec suggests.
- *
- * Verified against the live API: an unauthorized field comes back as HTTP 200 with
- * `{"message":"Not Authorized","extensions":{"code":"INTERNAL_SERVER_ERROR"}}` — never
- * UNAUTHENTICATED or FORBIDDEN. Matching only on those two codes is what classified
- * every permission problem as a generic operation failure, which then offered a Retry
- * that could not possibly work and withheld the re-authorize that would have.
- */
-const AUTH_MESSAGE =
-  /\b(not\s+authorized|unauthorized|unauthenticated|forbidden|access denied)\b|\b(invalid|expired|revoked)\s+(access\s+)?token\b/i;
-
-function isAuthEntry(entry: GraphQLErrorEntry): boolean {
-  const code = entry.extensions?.code;
-  if (code === "UNAUTHENTICATED" || code === "FORBIDDEN") return true;
-  // A validation failure can mention "field" wording that trips nothing here; the code
-  // is checked first so a genuine schema rejection is never mistaken for a permission.
-  if (code === "GRAPHQL_VALIDATION_FAILED") return false;
-  return AUTH_MESSAGE.test(entry.message);
-}
-
-/** One `errors[]` entry, classified and carried with everything needed to explain it. */
-function toApiError(
-  entry: GraphQLErrorEntry,
-  operationName: string,
-  status: number,
-): RailwayApiError {
-  const code = entry.extensions?.code;
-  const auth = isAuthEntry(entry);
-  return new RailwayApiError(entry.message || "Railway rejected the operation", {
-    kind: auth ? "auth" : "graphql",
-    status,
-    operation: operationName,
-    ...(code ? { code } : {}),
-    ...(entry.path ? { path: entry.path } : {}),
-  });
-}
 
 export type GqlOptions = {
   accessToken: string;
@@ -386,4 +341,28 @@ export async function gqlPartial<TDocument extends AnyTypedDocument>(
       toApiError(entry, operationNameOf(query), status),
     ),
   };
+}
+
+/**
+ * What a `gqlPartial` caller does with the refusals it decided to survive.
+ *
+ * **`debug`, not `warn`, and the level is the whole point of this function existing.** Every
+ * one of these reads runs on a schedule a person sets by using the app — a dashboard render,
+ * an opened panel, a failure they are already looking at. A token that will never hold the
+ * scope would write a warn on each of those, forever, for a readout the UI has a designed
+ * answer for. That is precisely how a log store teaches people to ignore warns, and it is a
+ * judgement each caller was making separately: the same loop, and four near-identical
+ * paragraphs arguing for it, written out at every `gqlPartial` site in this directory.
+ *
+ * Here rather than in `errors.ts` where the rest of the refusal policy lives, because
+ * `logger.ts` imports `log/serialize-error.ts`, which imports `errors.ts` — giving that file
+ * a logger would close the ring. Beside `gqlPartial` is the honest home anyway: this is what
+ * to do with the array that function returns.
+ */
+export function logRefusals(
+  event: LogEvent,
+  fields: Record<string, string>,
+  errors: readonly RailwayApiError[],
+): void {
+  for (const error of errors) log.debug(event, { ...fields, error });
 }

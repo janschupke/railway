@@ -4,6 +4,7 @@ import {
   type Container,
   type ContainerMetrics,
   type ContainerVolume,
+  type DeploymentHistoryEntry,
   type RailwayProject,
   type RailwayWorkspace,
   type RegionOption,
@@ -176,6 +177,40 @@ export function toContainer(
     url: toPublicUrl(instance.domains),
     managed: isManagedName(service.name),
   };
+}
+
+/** One node of the deployments connection, as `listServiceDeployments` asks for it. */
+export type DeploymentHistoryNode = {
+  id: string;
+  status: string | null;
+  createdAt: string | null;
+  canRollback: boolean;
+};
+
+/**
+ * A service's deployments as the rollback control chooses from them, newest first.
+ *
+ * Sorted here rather than trusted from the connection. `last` is asked for on the strength
+ * of the one thing this app has observed about Railway's Relay ordering, and an ordering
+ * that changed would otherwise silently offer the wrong ten — `pnpm probe:deployments`
+ * checks that assumption against the live API.
+ *
+ * It was the only response mapping written outside this file, inlined in the middle of
+ * `listServiceDeployments`'s partial-read handling, which is why the sort above had no test
+ * of its own.
+ */
+export function toDeploymentHistory(
+  nodes: readonly DeploymentHistoryNode[],
+): DeploymentHistoryEntry[] {
+  return nodes
+    .map((node) => ({
+      id: node.id,
+      state: toContainerState(node.status),
+      rawStatus: node.status,
+      createdAt: node.createdAt,
+      canRollback: node.canRollback,
+    }))
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
 
 /** Managed containers first, then newest — the ones the user can act on lead. */

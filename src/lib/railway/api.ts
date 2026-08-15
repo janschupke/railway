@@ -7,7 +7,7 @@ import { log } from "@/lib/logger";
 import { RESERVED_VARIABLE_PREFIX } from "@/lib/validation";
 // The catalog decides which images get a volume and where it mounts; this layer sends it.
 import { presetVolumeFor } from "@/lib/presets";
-import { gql, gqlPartial } from "./client";
+import { gql, gqlPartial, logRefusals } from "./client";
 import { RailwayApiError } from "./errors";
 import {
   DEPLOYMENTS_QUERY,
@@ -21,7 +21,6 @@ import {
   PROJECT_CREATE_MUTATION,
   PROJECT_METRICS_QUERY,
   PROJECT_QUERY,
-  REGIONS_QUERY,
   SERVICE_CREATE_MUTATION,
   SERVICE_DELETE_MUTATION,
   SERVICE_DEPLOY_MUTATION,
@@ -47,24 +46,22 @@ import {
   toContainerMetrics,
   toContainerVolumes,
   toContainers,
+  toDeploymentHistory,
   toProject,
   toProjects,
-  toRegionOptions,
   toWorkspaceSpend,
   toWorkspaces,
   type ViewerNode,
 } from "./mappers";
-import {
-  toContainerState,
-  type Container,
-  type ContainerMetrics,
-  type ContainerVolume,
-  type DeploymentHistoryEntry,
-  type RailwayEnvironment,
-  type RailwayProject,
-  type RailwayWorkspace,
-  type RegionOption,
-  type WorkspaceSpend,
+import type {
+  Container,
+  ContainerMetrics,
+  ContainerVolume,
+  DeploymentHistoryEntry,
+  RailwayEnvironment,
+  RailwayProject,
+  RailwayWorkspace,
+  WorkspaceSpend,
 } from "./types";
 import type { RestartPolicyType } from "./graphql.generated";
 import type { Refusable, TypedDocument } from "./typed-document";
@@ -291,20 +288,9 @@ export async function getProjectMetrics(
     { accessToken, signal },
   );
 
-  for (const error of errors) {
-    /*
-     * Debug, not warn, and the level is the decision here rather than an oversight.
-     *
-     * This read happens on every dashboard render. A token that will never hold
-     * `workspace:viewer` would write a warn per render, forever, for a readout the UI
-     * already has a designed answer for — which is precisely how a log store teaches people
-     * to ignore warns. Same reasoning getDeploymentFailure states one function down.
-     */
-    log.debug("railway.metrics.refused", {
-      project_id: projectId,
-      error,
-    });
-  }
+  // Every dashboard render, so a token that will never hold `workspace:viewer` would
+  // otherwise warn per render forever — see logRefusals.
+  logRefusals("railway.metrics.refused", { project_id: projectId }, errors);
 
   return {
     metrics: toContainerMetrics(data?.metrics ?? []),
@@ -341,29 +327,10 @@ export async function getEnvironmentVolumes(
     { accessToken, signal },
   );
 
-  for (const error of errors) {
-    // Debug for the reason getProjectMetrics states above: this runs on every dashboard
-    // render, and a readout the app degrades out of by design is not an incident.
-    log.debug("railway.volumes.refused", { environment_id: environmentId, error });
-  }
+  // Also every dashboard render.
+  logRefusals("railway.volumes.refused", { environment_id: environmentId }, errors);
 
   return toContainerVolumes(nodes(data?.environment?.volumeInstances));
-}
-
-/**
- * The regions a container can be created in, for the spin-up form's select.
- *
- * Throws, and the caller catches. The read is one Railway round trip that no other part of
- * the dashboard shares, so it is memoised a layer up in ./regions — this function is the
- * uncached truth and that module decides how often it is asked for.
- */
-export async function listRegions(
-  accessToken: string,
-  projectId: string,
-  signal?: AbortSignal,
-): Promise<RegionOption[]> {
-  const data = await gql(REGIONS_QUERY, { projectId }, { accessToken, signal });
-  return toRegionOptions(data.regions);
 }
 
 /**
@@ -1161,10 +1128,11 @@ export async function restartDeployment(
  * unactionable. The caller that does not care may ignore the flag; `rollback` is one, because
  * both cases mean the same thing to it.
  *
- * Sorted here rather than trusted from the connection. `last` is asked for on the strength of
- * the one thing this app has observed about Railway's Relay ordering — DEPLOYMENT_EVENTS_QUERY
- * — and an ordering that changed would otherwise silently offer the wrong ten. `pnpm
- * probe:deployments` is what checks the assumption against the live API.
+ * The shape and the newest-first sort are `toDeploymentHistory`'s, beside every other mapping
+ * of a Railway response. The ordering is not trusted from the connection: `last` is asked for
+ * on the strength of the one thing this app has observed about Railway's Relay ordering —
+ * DEPLOYMENT_EVENTS_QUERY — and `pnpm probe:deployments` is what checks that against the live
+ * API.
  */
 export async function listServiceDeployments(
   accessToken: string,
@@ -1184,29 +1152,13 @@ export async function listServiceDeployments(
     { accessToken, signal },
   );
 
-  for (const error of errors) {
-    /*
-     * Debug, and only the service id. The same call `getDeploymentFailure` makes: a feed
-     * this token cannot read is a capability the app degrades out of rather than an
-     * incident, and a warn per opened panel would train people to ignore warns.
-     */
-    log.debug("railway.deployments.refused", {
-      service_id: params.serviceId,
-      error,
-    });
-  }
+  // Once per opened panel, and only the service id.
+  logRefusals("railway.deployments.refused", { service_id: params.serviceId }, errors);
 
-  const entries = nodes(data?.deployments)
-    .map((node) => ({
-      id: node.id,
-      state: toContainerState(node.status),
-      rawStatus: node.status,
-      createdAt: node.createdAt,
-      canRollback: node.canRollback,
-    }))
-    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-
-  return { entries, refused: errors.length > 0 };
+  return {
+    entries: toDeploymentHistory(nodes(data?.deployments)),
+    refused: errors.length > 0,
+  };
 }
 
 /**
