@@ -73,6 +73,16 @@ const advanced = () =>
   screen.getByText("Advanced settings").closest("details") as HTMLDetailsElement;
 
 const submitButton = () => screen.getByRole("button", { name: /spin up container/i });
+/*
+ * The same button, once the submission it started has settled.
+ *
+ * While the action is in flight the accessible name is `submitPending`, so the
+ * synchronous query above throws. Asserting the action's own call count is not enough to
+ * get past that: the mock records the call one transition *before* the label comes back,
+ * so a case that submits twice raced the render and failed only under a loaded suite.
+ */
+const settledSubmitButton = () =>
+  screen.findByRole("button", { name: /spin up container/i });
 /** The image control is one editable combobox now, so this is a real <input>. */
 const image = () => screen.getByLabelText("Image reference");
 
@@ -346,7 +356,7 @@ describe("SpinUpForm", () => {
        * do with what it was asserting.
        */
       expect(screen.getByLabelText("Name")).toHaveValue("cache");
-      await user.click(submitButton());
+      await user.click(await settledSubmitButton());
 
       await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
       expect(keyFrom(1)).toBe(keyFrom(0));
