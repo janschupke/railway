@@ -35,11 +35,17 @@ const ISSUER = `http://localhost:${PORT}`;
 
 const store = new Store();
 
-const json = (res: ServerResponse, status: number, body: unknown) => {
+const json = (
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+) => {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(payload),
+    ...headers,
   });
   res.end(payload);
 };
@@ -52,15 +58,63 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("error", reject);
   });
 
-/** Returns a fault response to serve instead of the real one, if one is queued. */
-function takeFault(): { status: number; body: unknown } | null {
+/**
+ * Returns a fault response to serve instead of the real one, if one is queued.
+ *
+ * Two refusal shapes, because Railway has two and the app classifies them by different
+ * mechanisms. Modelling only one left the other's classifier untested.
+ *
+ * `unauthorized` is the **transport** refusal: HTTP 401, which `client.ts` classifies on
+ * the status code. That is a spent or revoked bearer.
+ *
+ * `notAuthorizedField` is the **field** refusal, and it is the one that cost a real bug:
+ * HTTP 200 with `{"message":"Not Authorized","extensions":{"code":
+ * "INTERNAL_SERVER_ERROR"}}`. Nothing about it is a status code, so `isAuthEntry` has to
+ * recognise it from the message — and while it did not, every permission problem was
+ * classified as a generic failure, offering a Retry that could not work and withholding
+ * the re-authorize that would have. `notAuthorized()` in graphql.ts already reproduced this
+ * faithfully for a *resolved* field; this is the same shape at the transport knob, so a
+ * spec can inject it against any operation rather than only the ones with a path.
+ */
+function takeFault(): {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+} | null {
   if (store.faults.unauthorized > 0) {
     store.faults.unauthorized -= 1;
     return { status: 401, body: { errors: [{ message: "Not authorized" }] } };
   }
+  if (store.faults.notAuthorizedField > 0) {
+    store.faults.notAuthorizedField -= 1;
+    return {
+      status: 200,
+      body: {
+        data: null,
+        errors: [
+          { message: "Not Authorized", extensions: { code: "INTERNAL_SERVER_ERROR" } },
+        ],
+      },
+    };
+  }
   if (store.faults.rateLimit > 0) {
     store.faults.rateLimit -= 1;
-    return { status: 429, body: { errors: [{ message: "Rate limited" }] } };
+    /*
+     * With `retry-after`, because the app reads it — `parseRetryAfter` in client.ts takes
+     * `retry-after` else `x-ratelimit-reset` and uses the value as the backoff instead of
+     * the exponential one. ADR-8 advertises that as a feature and no test reached it: the
+     * fault carried no headers at all, so every rate-limit path in the suite took the "no
+     * hint" branch and the honouring code was dead in e2e.
+     *
+     * One second so a spec can wait it out. `rateLimitRetryAfter` sets it, and `0` sends no
+     * header at all — which is still a shape Railway produces and still needs covering.
+     */
+    const seconds = store.faults.rateLimitRetryAfter;
+    return {
+      status: 429,
+      body: { errors: [{ message: "Rate limited" }] },
+      ...(seconds > 0 ? { headers: { "retry-after": String(seconds) } } : {}),
+    };
   }
   return null;
 }
@@ -101,7 +155,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
 
     const fault = takeFault();
-    if (fault) return json(res, fault.status, fault.body);
+    if (fault) return json(res, fault.status, fault.body, fault.headers);
 
     const body = JSON.parse((await readBody(req)) || "{}") as {
       query?: string;

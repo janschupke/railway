@@ -186,8 +186,30 @@ export type FailureFieldFault = "error" | "reason" | "detail" | "none";
 export type Faults = {
   /** Next N GraphQL calls answer 429. */
   rateLimit: number;
-  /** Next N GraphQL calls answer 401. */
+  /**
+   * Seconds to advertise in `retry-after` alongside a 429. `0` sends no header.
+   *
+   * The app honours it in place of its own exponential backoff — ADR-8 sells that as a
+   * feature — and until this existed the fault carried no headers at all, so every
+   * rate-limit path in the suite took the "no hint" branch and the honouring code was
+   * never once executed end to end.
+   */
+  rateLimitRetryAfter: number;
+  /**
+   * Next N GraphQL calls answer 401 — the *transport* refusal, a spent or revoked bearer,
+   * which `client.ts` classifies on the status code.
+   */
   unauthorized: number;
+  /**
+   * Next N GraphQL calls answer Railway's *field* refusal: HTTP **200** with
+   * `{"message":"Not Authorized","extensions":{"code":"INTERNAL_SERVER_ERROR"}}`.
+   *
+   * A different classifier entirely — there is no status code to read, so `isAuthEntry`
+   * has to recognise it from the message. While it did not, every permission problem was
+   * reported as a generic failure with a Retry that could not work. README's "Known
+   * non-issues" records that shape; this is the knob that exercises it.
+   */
+  notAuthorizedField: number;
   /** The refresh grant fails, simulating a revoked authorization. */
   refreshFails: boolean;
   /** Access tokens are issued with this lifetime, to force a refresh mid-session. */
@@ -302,7 +324,9 @@ export type Faults = {
 const DEFAULT_FAULTS: Faults = {
   registryStatus: 0,
   rateLimit: 0,
+  rateLimitRetryAfter: 0,
   unauthorized: 0,
+  notAuthorizedField: 0,
   refreshFails: false,
   accessTokenTtl: 3600,
   deploymentsFail: false,

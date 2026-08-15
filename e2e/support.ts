@@ -22,7 +22,9 @@ export async function injectFaults(
   page: Page,
   faults: Partial<{
     rateLimit: number;
+    rateLimitRetryAfter: number;
     unauthorized: number;
+    notAuthorizedField: number;
     refreshFails: boolean;
     accessTokenTtl: number;
     deploymentsFail: boolean;

@@ -431,6 +431,19 @@ export async function createContainer(
     /**
      * Merged by the caller from the catalog's defaults and the rows the user submitted,
      * already validated. This layer sets what it is handed.
+     *
+     * Sent as a separate `variableCollectionUpsert` after the service exists, although
+     * `ServiceCreateInput` has a `variables` member that would carry them in the create
+     * itself. That is a deliberate choice and the reason was never written down, which is
+     * the sort of gap that gets "simplified" later:
+     *
+     * The create is not the only writer. The edit path has to upsert variables against a
+     * service that already exists, so that call has to work standalone regardless — and
+     * having one code path set a service's environment rather than two is worth an extra
+     * round trip on a form submission a person is watching. It also keeps the failure
+     * separable: a service that was created and then failed to take its variables is a
+     * state this app can report and the user can fix, where a create that failed as a whole
+     * leaves nothing to point at.
      */
     variables?: Record<string, string>;
     /**

@@ -894,6 +894,30 @@ test.describe("container lifecycle", () => {
     await expect(toast(page, /rate limit/i)).toBeVisible();
   });
 
+  test("honours Retry-After rather than its own backoff", async ({ page }) => {
+    /*
+     * ADR-8 sells this as one of the things a hand-rolled client buys over RetryLink —
+     * "`Retry-After` and `X-RateLimit-Reset` are honoured against a documented 1000
+     * req/hour quota" — and no test reached it. The fault sent a bare 429 with no headers
+     * at all, so every rate-limit path in this suite took the "no hint" branch and
+     * `parseRetryAfter` was dead code end to end.
+     *
+     * Asserted through the wait rather than through the header, because the header is an
+     * input and the behaviour is the output. NETWORK.RETRY_BASE_MS is 400ms with a factor
+     * of three, so two retries on the exponential path cost ~1.6s; two honouring a
+     * `retry-after: 2` cost at least 4s. The floor is what separates them — an upper bound
+     * would be asserting on machine speed.
+     */
+    await setTabVisibility(page, "hidden");
+    await injectFaults(page, { rateLimit: 4, rateLimitRetryAfter: 2 });
+
+    const startedAt = Date.now();
+    await spinUp(page, "cache");
+    await expect(toast(page, /rate limit/i)).toBeVisible();
+
+    expect(Date.now() - startedAt).toBeGreaterThan(4_000);
+  });
+
   test("switches project and environment through the URL", async ({ page }) => {
     await onlyVisible(page.getByRole("combobox", { name: "Environment" })).click();
     await onlyVisible(page.getByRole("option", { name: "staging" })).click();
