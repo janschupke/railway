@@ -673,4 +673,28 @@ describe("LogPane maximise", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByRole("log")).toBeVisible();
   });
+
+  it("offers one restore control, not two stacked in the same corner", async () => {
+    /*
+     * The defect this pins: the toolbar's own minimise button ended the first row flush
+     * against the content's right edge, and the dialog draws its close control
+     * absolutely into that same corner — so they overlapped by most of their box, and
+     * the close button, rendered after the children, took the clicks. Both are still
+     * reachable by name, so a count is what says there is only one.
+     */
+    renderPane({ lines: lines(3), status: "live" });
+
+    fireEvent.click(button("Maximise the log"));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(
+      within(dialog).getAllByRole("button", { name: "Restore the log" }),
+    ).toHaveLength(1);
+    // The toolbar's own control is gone rather than renamed.
+    expect(
+      within(dialog).queryByRole("button", { name: "Maximise the log" }),
+    ).toBeNull();
+    // And nothing is left calling itself "Close", which is what it used to say.
+    expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull();
+  });
 });

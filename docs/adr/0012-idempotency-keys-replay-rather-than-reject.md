@@ -4,14 +4,14 @@
 
 ## Context
 
-Spin-up creates billable infrastructure, and the form posted twice used to create two containers.
-What stood in the way was a name lookup: the whole container list, read before every create,
-refusing a name already present.
+Spin-up creates billable infrastructure, so a form posted twice must not create two containers.
+The cheap guard is a name lookup: read the whole container list before every create and refuse a
+name already present.
 
-Its own comment conceded the problem — "checking first is not airtight (nothing short of a lock
-is)" — because two submissions a millisecond apart both read a list without the name in it and
-both proceeded. It also made one spin-up four Railway round trips against a rate limit measured
-in the low thousands per hour.
+That guard concedes the problem in its own comment — "checking first is not airtight (nothing
+short of a lock is)" — because two submissions a millisecond apart both read a list without the
+name in it, and both proceed. It also makes one spin-up four Railway round trips against a rate
+limit measured in the low thousands per hour.
 
 ## Decision
 
@@ -51,13 +51,13 @@ would be asked to survive.
 
 - **The map is per replica**, so a deploy landing between the two halves of a double submit
   creates two services, and a repeat after `IDEMPOTENCY.RETAIN_SECONDS` does too. Both are much
-  narrower than the window the name check left open. The same per-replica caveat already governs
-  the stream cap in `lib/stream-slots.ts`; that constraint is argued in
-  [Limitations](../limitations.md#single-replica-and-the-state-that-says-so) rather than restated
-  here. If it ever changes, both maps move to shared state together.
-- **The duplicate-name message survives, in the browser**, checked against the list the page has
-  already fetched. It is stale by construction and it is a typo guard, not a lock — but it costs no
-  round trip, which the server-side version did.
+  narrower than the window a name check leaves open. The stream cap in `lib/stream-slots.ts` is
+  per replica for the same reason, and the single-replica constraint behind both is argued in
+  [Limitations](../limitations.md#single-replica-and-the-state-that-says-so). If it changes, both
+  maps move to shared state together.
+- **The duplicate-name message lives in the browser**, checked against the list the page has
+  already fetched. It is stale by construction and it is a typo guard rather than a lock, but it
+  costs no round trip.
 - **`spinDown`'s ownership re-derivation is untouched**: it is a real safety property, and
   [ADR-5](0005-the-app-only-destroys-what-it-created.md) says why.
 

@@ -158,9 +158,10 @@ Fourteen, argued in full in [`docs/adr/`](docs/adr/README.md). The short version
 
 [src/features/rail-yard/](src/features/rail-yard/) is the canvas animation behind the sign-in
 card — trains routing over a track graph, a travelling gantry crane, a conveyor belt of containers.
-It is **not** a visualisation of Railway data. It is the largest body of code outside
-`src/lib`, which is exactly why it is worth naming here: a reader looking for container logic
-should not open it.
+It is **not** a visualisation of Railway data. It is a self-contained simulation with no
+application logic in it at all, which is why it is worth naming here: it is a large directory
+whose file names read like application code, and a reader looking for container logic should not
+open it.
 
 **The boundary is the filesystem.** `src/features/` exists for this and holds nothing else. Four
 facts define it, each of them checkable:

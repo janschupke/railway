@@ -297,7 +297,7 @@
     "restartRetriesPlaceholder": "10",
     "startCommandLabel": "Start command",
     "startCommandHint": "Replaces the image's CMD. Its ENTRYPOINT still runs and cannot be changed here.",
-    "startCommandPlaceholder": "redis-server --appendonly yes"
+    "startCommandPlaceholder": "Leave blank to use the image's own command"
   },
   "lifecycle": {
     "stop": {

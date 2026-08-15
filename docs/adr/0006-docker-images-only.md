@@ -27,8 +27,9 @@ Image sources work for anyone, so that is the product surface.
   [Limitations](../limitations.md#failure-reasons).
 - **A preset cannot need a command-line argument.** Core NATS is offered and JetStream is not,
   for exactly that reason.
-- **This is the entry the limitations list opens with**, and closing it is a real feature rather
-  than a line of code: [Limitations](../limitations.md#sources-and-registries).
+- **Adding GitHub sources is a feature, not a configuration change** — it needs a path through
+  the app-installation problem above, not just another source type in the form:
+  [Limitations](../limitations.md#sources-and-registries).
 
 ---
 

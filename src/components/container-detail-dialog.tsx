@@ -146,7 +146,7 @@ export function ContainerDetailDialog({
         </Button>
       </DialogTrigger>
 
-      <DialogContent size="full" closeLabel={tCommon("close")}>
+      <DialogContent size="panel" closeLabel={tCommon("close")}>
         {/* Mounted only while open, which is also what re-reads the variables and resets
             anything typed into a form that was dismissed rather than submitted. */}
         {open && (

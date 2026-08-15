@@ -1,7 +1,7 @@
 # Performance
 
 The budgets themselves live in [`bundle-budgets.json`](../bundle-budgets.json) and the
-Lighthouse ceilings in `lighthouserc.json`; neither is restated here, because a number copied
+Lighthouse ceilings in `lighthouserc.cjs`; neither is restated here, because a number copied
 into prose is a number that goes stale. The rule for raising one is in
 [`.ai/rules/performance.md`](../.ai/rules/performance.md). What follows is how it is measured
 and what moved.

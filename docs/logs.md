@@ -20,7 +20,7 @@ Next externalizes pino to work around.
 
 | Field                       | What it is                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `msg`                       | The event name. Around sixty stable values — the field to build a Loki label on                                      |
+| `msg`                       | The event name, from a bounded set — the field to build a Loki label on                                              |
 | `level`, `time`             | String label, epoch ms. Both pino defaults, left alone so the OTel bridge reads them                                 |
 | `service`, `env`, `version` | Map onto OTel's `service.name` / `deployment.environment.name` / `service.version`                                   |
 | `request_id`                | Joins a proxy line to the render and stream lines that follow it                                                     |

@@ -33,7 +33,7 @@ public `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto: https` — a route handle
 emitted `location: https://localhost:8080/…`. Next's standalone `server.js` builds that
 URL from its own bind address, so the headers never reach it. The headers themselves are
 intact. A `no-restricted-syntax` selector in `eslint.config.mjs` bans `request.url` in a
-route handler for that reason and still does.
+route handler for that reason.
 
 ## Decision
 
@@ -52,8 +52,8 @@ Three rules bound what will be believed:
    `evil.example/path`, `user@evil.example`, whitespace and punycode surprises.
 3. **`APP_ORIGINS`, when set, is an allowlist.** Unset means any host the edge reports.
 
-`APP_URL` survives as an explicit override and as the fallback for a request carrying no
-usable Host. It is no longer required, and a service with no public domain now boots.
+`APP_URL` is an explicit override and the fallback for a request carrying no usable Host. It is
+optional, so a service with no public domain boots.
 
 ### Why the default is open
 
@@ -73,8 +73,8 @@ nothing downstream is exploitable by naming a host you already control:
 
 ## Alternatives rejected
 
-- **Keep `APP_URL` required, one per deployment.** This is the status quo and the reported
-  bug. It cannot serve two domains at all.
+- **Keep `APP_URL` required, one per deployment.** One configured origin cannot serve two
+  domains at all, which is the failure above rather than a fix for it.
 - **Require `APP_ORIGINS`.** A new custom domain would then fail to sign anyone in until
   somebody remembered to edit a service variable — the same class of failure as today's,
   moved one step later and made harder to diagnose, since the symptom is a redirect to a
@@ -97,15 +97,14 @@ nothing downstream is exploitable by naming a host you already control:
 - **A route handler may name neither `request.url` nor `APP_URL`.** Both are
   `no-restricted-syntax` selectors scoped to `src/app/**/route.ts`, so they report while
   you type rather than in CI.
-- **`/api/health` reports a narrower condition.** "Misconfigured" now means a missing
-  secret or a malformed optional value — no longer "this service has no public domain yet",
-  which was the most common false healthcheck failure it produced.
+- **`/api/health` reports a narrower condition.** "Misconfigured" means a missing secret or a
+  malformed optional value. It does not mean "this service has no public domain yet", which is
+  not a fault.
 - **A refusal never logs the host it refused.** It is caller input; the record carries a
   bounded reason, and `boot` carries the configured allowlist so the other half of the
   question is still answerable.
-- **The fallback is the rollback.** If Railway's edge ever stops forwarding the public
-  host, the app behaves exactly as it did before and setting `APP_URL` restores the old
-  behaviour without a redeploy.
+- **The fallback is the rollback.** If Railway's edge stops forwarding the public host, setting
+  `APP_URL` pins the origin again without a redeploy.
 
 ---
 

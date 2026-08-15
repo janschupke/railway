@@ -48,7 +48,7 @@
     "is why a change to shared chrome shows up here most clearly.",
     "",
     "/ 171 -> 179: the landing page became a freight yard with the sign-in card floating",
-    "in it \u2014 src/features/rail-yard, a canvas simulation of about 1,300 lines. Measured",
+    "in it \u2014 src/features/rail-yard, a canvas simulation. Measured",
     "166.2 -> 173.3, so the whole feature costs 7.1 kB gzip: the simulation, the routing",
     "graph, the arc-length geometry, the renderer and the scene literal, with no new",
     "dependency. Set at actual + ~3% as this file's rule intends.",

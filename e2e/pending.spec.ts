@@ -101,5 +101,15 @@ test("switching project reports loading without stealing focus", async ({ page }
   await expect(projectSelect).toBeEnabled();
 
   await injectFaults(page, { slowMs: 0 });
-  await settled(page);
+
+  /*
+   * The destination, not `settled()`. Second Project holds no services, so the switch
+   * lands on the empty state and there is no `ul[aria-label="Containers"]` for
+   * `settled()` to find — it could only ever pass by catching the *previous* project's
+   * list before the transition finished, which is a race it lost roughly half the time
+   * under a full-suite run and won every time in isolation.
+   */
+  await expect(
+    onlyVisible(page.getByText("Nothing running in this environment")),
+  ).toBeVisible();
 });

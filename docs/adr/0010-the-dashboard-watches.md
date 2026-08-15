@@ -72,10 +72,9 @@ rest of the budget, four concurrent log streams are ~270/hour on their own (see
 `STREAM.MAX_POLL_MS`), so a busy tab sits near 630.
 
 Adding the two ceilings each row shows — `CPU_LIMIT` and `MEMORY_LIMIT_GB` — did not move a line of
-that table, and the number is worth stating rather than leaving to silence. `measurements` is a
-variable on the one document, so two became four inside the same request: 202 points across 42
-results became 404 across 84 for a twenty-service environment, and 360/hour stayed 360/hour.
-Response weight is not what this budget counts.
+that table. `measurements` is a variable on the one document, so asking for four instead of two
+makes the response bigger inside the same request rather than adding a request. Response weight is
+not what this budget counts.
 
 Both intervals are env vars rather than constants because the right value depends on the plan
 behind the token, and both are floored at one second — a sanity bound rather than the quota
@@ -102,12 +101,12 @@ constant and would therefore be _safe_ in the hash — which is the argument for
 the usage they qualify, so moving them would buy a second read off `ServiceInstance` for a value
 that changes only when someone edits the service.
 
-**The connection budget, which is what forced a change elsewhere.** Browsers allow six connections
-per origin over HTTP/1.1, and the server this app ships speaks HTTP/1.1. One is now the watcher
-and one is reserved for RSC navigation and Server Action fetches, which share the same pool — so
-`STREAM.MAX_CONCURRENT_PER_USER` came down from 8 to 4. It was above the browser's own limit
-before, which meant the cap that actually applied was invisible: the seventh EventSource did not
-fail, it queued, with nothing on the wire and nothing in any log.
+**The connection budget, which is what sets the stream cap.** Browsers allow six connections per
+origin over HTTP/1.1, and the server this app ships speaks HTTP/1.1. One of the six is the
+watcher and one is reserved for RSC navigation and Server Action fetches, which share the same
+pool — which is why `STREAM.MAX_CONCURRENT_PER_USER` is 4. A server cap above the browser's own
+limit is a cap that never applies: the seventh EventSource does not fail, it queues, with nothing
+on the wire and nothing in any log.
 
 **Not done, and named rather than left implicit:** a client-side connection registry that defers
 streams past the limit instead of letting the browser queue them silently. Lowering the server cap

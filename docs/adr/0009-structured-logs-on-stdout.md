@@ -4,10 +4,10 @@
 
 ## Context
 
-The entire server logged through one `console.error` in `report-error.ts`. It had already
-computed everything a query would want — the error's kind, HTTP status, operation name, Railway's
-`extensions.code`, the refused GraphQL path, the incident id — and then flattened all of it into a
-template string that only `grep` could read.
+`report-error.ts` already computes everything a query would want about a failure — the error's
+kind, HTTP status, operation name, Railway's `extensions.code`, the refused GraphQL path, the
+incident id. Emitting that through `console.error` flattens all of it into one template string,
+which makes every one of those fields reachable only by substring search.
 
 ## Decision
 
@@ -17,10 +17,10 @@ this buys is the part that is expensive to retrofit: stable event names, a reque
 survives the proxy → render → stream handoff, and an error serializer that cannot leak a
 credential. The field reference is in [docs/logs.md](../logs.md).
 
-**`msg` is an event name, not prose.** `container.created`, `auth.session.refresh_failed`. Around
-sixty values, which is what makes it usable as a Loki label rather than a substring search.
-`reportError`'s existing `scope` argument already had this shape, so it became the event name
-unchanged.
+**`msg` is an event name rather than prose** — `container.created`,
+`auth.session.refresh_failed`. It is drawn from a bounded set, which is what makes it usable as a
+Loki label rather than a substring search. `reportError`'s `scope` argument already had this
+shape and is the event name unchanged.
 
 **The request id travels as a header, because it has to.** Next's own documentation says Proxy
 "is meant to be invoked separately of your render code and in optimized cases deployed to your
@@ -34,8 +34,8 @@ outside the matcher, so those handlers mint their own and say so at the call sit
 client — and the monitor outlives the request that created it, so an argument would have to survive
 a handoff no argument survives. It works because `new ReadableStream({ start })` runs `start`
 synchronously during construction, inside the handler's scope, so the status poll loop created
-there stays correlated for the full fifteen minutes. That is a real invariant with a real test,
-not a happy accident.
+there stays correlated for the full fifteen minutes. It is an invariant of that constructor rather
+than an accident of ordering, and a test holds it.
 
 **The error serializer never reads `cause`.** This is the same finding the security review closed,
 one library away from returning: pino's stock `err` serializer walks `cause` recursively, and

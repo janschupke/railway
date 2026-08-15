@@ -62,7 +62,6 @@ export function LogPane({
   label: string;
 }) {
   const t = useTranslations("containers");
-  const tCommon = useTranslations("common");
   const { toast } = useToast();
   const counterId = useId();
   /*
@@ -369,9 +368,12 @@ export function LogPane({
   if (maximized) {
     return (
       <DialogRoot open onOpenChange={(next) => setMaximized(next)}>
+        {/* The close control is the restore control, so it is named as one rather than
+            "Close". The toolbar drops its own minimise button while maximised for this
+            reason — see ./log-pane-toolbar — and this is where that name comes back. */}
         <DialogContent
           size="full"
-          closeLabel={tCommon("close")}
+          closeLabel={t("logMinimize")}
           aria-label={t("logsLabel")}
         >
           {/* `relative` for the same reason the in-place wrapper has it: Jump to latest
