@@ -143,7 +143,7 @@ export default defineConfig({
           functions: 100,
           statements: 100,
         },
-        "src/hooks/**": { lines: 98, branches: 91, functions: 98, statements: 97 },
+        "src/hooks/**": { lines: 98, branches: 94, functions: 98, statements: 97 },
         /*
          * The rail yard. It gets a floor of its own for the same reason lib and hooks do:
          * it is the largest body of logic in the app outside those two, and a global
@@ -154,8 +154,14 @@ export default defineConfig({
          * pixel" — which need a viewport scale per branch to reach, and the assertion
          * that actually matters there is the measured one in render.test.ts rather than
          * having visited both sides of every size check.
+         *
+         * Lower, though, still means just under what is measured. It sat at 85 against a
+         * measured 87.12 — a round number with two points of slack, which is what the
+         * paragraph at the top of this block and testing.md both forbid: it is room for
+         * tests to be deleted without a red build, which is the only thing a ratchet is
+         * for. Same correction for src/hooks/**, at 91 against 94.29.
          */
-        "src/features/**": { lines: 98, branches: 85, functions: 98, statements: 95 },
+        "src/features/**": { lines: 98, branches: 87, functions: 98, statements: 95 },
         /*
          * The directory the ratchet above was missing, and the one it could least afford to.
          *
