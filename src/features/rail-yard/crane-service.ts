@@ -12,7 +12,7 @@
  * rake with nothing.
  */
 
-import { WAGON } from "./config";
+import { WAGON } from "./sprites";
 import {
   headClear,
   headLoaded,

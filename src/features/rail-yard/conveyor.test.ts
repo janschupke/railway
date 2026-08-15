@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CONTAINER, CONVEYOR } from "./config";
+import { CONVEYOR } from "./config";
+import { CONTAINER } from "./sprites";
 import {
   capacityOf,
   createConveyor,

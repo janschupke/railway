@@ -13,7 +13,8 @@
  * There is no sign to get wrong here, because there is nothing to negate.
  */
 
-import { CONTAINER, GANTRY, VIEW, type Box } from "./config";
+import { VIEW } from "./config";
+import { CONTAINER, GANTRY, type Box } from "./sprites";
 import { localToWorld, type Pose } from "./geometry";
 import type { YardPalette } from "./palette";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";

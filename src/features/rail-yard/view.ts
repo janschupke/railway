@@ -30,7 +30,7 @@
 
 import { clamp } from "./geometry";
 import { VIEW } from "./config";
-import type { RailScene } from "./scene";
+import type { RailScene } from "./scene-types";
 
 export type Viewport = {
   /** CSS pixels. The bitmap is these times `dpr`. */

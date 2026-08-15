@@ -13,12 +13,13 @@
  * each depends on the rate limit of the plan behind the token. The `WATCH` and `METRICS`
  * groups below say so where a reader would otherwise look for them.
  *
- * `src/features/**` owns its own — `src/features/rail-yard/config.ts` holds roughly ninety
- * of them. That is the right home rather than an oversight: the rail yard is decoration
- * with one consumer and no application data flowing through it, so its timestep and its
- * track geometry are not part of this app's tuning surface and would only make this file
- * harder to read whole. A number that a Railway request, a session or a rendered container
- * depends on belongs here; a number that only moves a pixel belongs there.
+ * `src/features/**` owns its own — `src/features/rail-yard/config.ts` holds them, with the
+ * yard's sprite geometry beside it in `sprites.ts`. That is the right home rather than an
+ * oversight: the rail yard is decoration with one consumer and no application data flowing
+ * through it, so its timestep and its track geometry are not part of this app's tuning
+ * surface and would only make this file harder to read whole. A number that a Railway
+ * request, a session or a rendered container depends on belongs here; a number that only
+ * moves a pixel belongs there.
  */
 
 /** Talking to Railway's HTTP API. */

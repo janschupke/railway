@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { YARD } from "./config";
 import {
   CONTAINER,
   GANTRY,
   LOCOMOTIVE,
   TRACK,
   WAGON,
-  YARD,
   type Box,
   type VehicleSpec,
-} from "./config";
+} from "./sprites";
 import { buildGraph, findPath } from "./graph";
 import { RAIL_YARD_TOKENS } from "./palette";
-import { CROSSOVER_RUN, RAIL_YARD_SCENE, type SceneStructure } from "./scene";
+import { CROSSOVER_RUN, RAIL_YARD_SCENE } from "./scene";
+import type { SceneStructure } from "./scene-types";
 
 const scene = RAIL_YARD_SCENE;
 const graph = buildGraph(scene);

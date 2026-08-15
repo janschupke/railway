@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createFakeContext } from "@/test/fake-canvas-2d";
 import { KNOWN, PALETTE, graph, numbers, view } from "@/test/rail-yard";
-import { TRACK } from "./config";
+import { TRACK } from "./sprites";
 import { composeStaticLayer } from "./draw-scene";
 import { RAIL_YARD_SCENE } from "./scene";
 

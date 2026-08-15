@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CONTAINER, CONVEYOR, CRANE, GANTRY } from "./config";
+import { CONVEYOR, CRANE } from "./config";
+import { CONTAINER, GANTRY } from "./sprites";
 import {
   CRANE_CYCLE,
   assignCrane,

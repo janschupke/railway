@@ -14,12 +14,14 @@
  * meets the road tangentially, because both are horizontal at their ends by construction.
  */
 
-import { SHED, TRACK, VIEW } from "./config";
+import { VIEW } from "./config";
+import { TRACK } from "./sprites";
 import { localToWorld, poseAtDistance, sampleRun, type Pose } from "./geometry";
 import type { RailGraph } from "./graph";
 import type { YardPalette } from "./palette";
-import type { RailScene, SceneStructure } from "./scene";
+import type { RailScene, SceneStructure } from "./scene-types";
 import { drawBoxes, visible } from "./draw-box";
+import { shedBackBoxes } from "./structures";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";
 
 /** A polygon of the ground plane, offset either side of a centreline in world depth. */
@@ -181,27 +183,6 @@ function drawSkyline(
     );
   }
   ctx.restore();
-}
-
-/**
- * The back wall of a shed, which is the only part of one nothing can get in front of.
- *
- * The front wall **and the roof** are drawables instead, so a train can stand inside. The
- * roof used to be here, and being baked meant being painted before the front wall — so the
- * wall, which stands `SHED.eaves` behind the roof's fascia, was drawn over it and left its
- * own lit top face showing as a pale band between the two. That was the rest of "the roof
- * isn't attached to the walls".
- */
-function shedBackBoxes(structure: Extract<SceneStructure, { kind: "shed" }>) {
-  const half = structure.depth / 2;
-  return [
-    {
-      at: [0, half - SHED.wallThickness, 0] as const,
-      size: [structure.length, SHED.wallThickness, structure.height] as const,
-      // The inside of the building, which is what the doorways frame. See the token.
-      fill: "structureShade" as const,
-    },
-  ];
 }
 
 /** A pose standing still at a world point, facing east. Structures do not have headings. */

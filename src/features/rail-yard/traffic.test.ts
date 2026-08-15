@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { YARD } from "./config";
 import { buildGraph, findPath, type RailGraph } from "./graph";
 import { aspectOf, limitFor, occupancyOf } from "./traffic";
-import type { RailScene } from "./scene";
+import type { RailScene } from "./scene-types";
 
 /**
  * Two roads, a run each, and a crossover between them — plus a second way onto the far

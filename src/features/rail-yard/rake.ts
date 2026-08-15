@@ -13,7 +13,8 @@
  * the machine that loads it nor the code that paints it.
  */
 
-import { LOCOMOTIVE, WAGON, YARD } from "./config";
+import { YARD } from "./config";
+import { LOCOMOTIVE, WAGON } from "./sprites";
 
 /**
  * Nose to nose between two adjacent wagons — a wagon plus the coupling behind it.

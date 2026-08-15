@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTAINER, CRANE, SIM, YARD } from "./config";
+import { CRANE, SIM, YARD } from "./config";
+import { CONTAINER } from "./sprites";
 import { CRANE_CYCLE } from "./crane";
 import { capacityOf, headClear, headLoaded } from "./conveyor";
 import { poseAlong } from "./graph";

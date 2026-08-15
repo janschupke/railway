@@ -29,7 +29,8 @@
  * chatter and no hysteresis to tune.
  */
 
-import { CONTAINER, CONVEYOR } from "./config";
+import { CONVEYOR } from "./config";
+import { CONTAINER } from "./sprites";
 import { FREIGHT_TOKENS } from "./palette";
 import { rangeInt, type Rng } from "./rng";
 

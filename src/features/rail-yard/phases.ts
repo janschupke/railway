@@ -13,7 +13,7 @@ import { YARD } from "./config";
 import { findPath, type Path } from "./graph";
 import { releaseCrane } from "./crane";
 import { pick, range, type Rng } from "./rng";
-import type { Duty } from "./scene";
+import type { Duty } from "./scene-types";
 import type { Itinerary, TrainPhase, TrainState, WorldState } from "./world-state";
 
 /** The ring each kind of train goes round, in order. Exported for the lifecycle test. */

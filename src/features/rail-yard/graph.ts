@@ -19,7 +19,7 @@ import {
   type Vec2,
 } from "./geometry";
 import { VIEW } from "./config";
-import type { RailScene, Road, SceneEdge, SceneNode } from "./scene";
+import type { RailScene, Road, SceneEdge, SceneNode } from "./scene-types";
 
 type BuiltNode = SceneNode & { readonly at: Vec2; readonly rail: Road["rail"] };
 

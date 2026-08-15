@@ -94,8 +94,8 @@ user acts on. Deleting it would change the landing page and nothing else.
 
 Three consequences, each recorded where it applies rather than here:
 
-- It **owns its own tuned numbers**, in `src/features/rail-yard/config.ts` — see the
-  constants section below.
+- It **owns its own tuned numbers**, in `src/features/rail-yard/config.ts`, and its own
+  sprite geometry beside them in `sprites.ts` — see the constants section below.
 - It is **exempt from `@typescript-eslint/no-non-null-assertion`** in `eslint.config.mjs`,
   because nothing a caller supplied reaches the arrays it indexes.
 - It is **not exempt from coverage**. It carries a directory floor like `lib` and `hooks`
@@ -370,12 +370,18 @@ rationale. Do not inline it "just this once".
 in `src/env.ts`, because the right value for each depends on the rate limit of the plan
 behind the token; `src/lib/constants.ts` says so at the `WATCH` and `METRICS` groups.
 
-And **`src/features/**` owns its own** — `src/features/rail-yard/config.ts` holds roughly
-ninety. That is the right home rather than a violation, for the reason the decoration
-section above gives: no application data reaches the rail yard, and its timestep and track
-geometry are not part of this app's tuning surface. The test is what the number
-affects, not where it is declared: anything a Railway request, a session or a rendered
-container depends on goes in `constants.ts`, and a number that only moves a pixel does not.
+And **`src/features/**` owns its own** — `src/features/rail-yard/config.ts` holds them.
+That is the right home rather than a violation, for the reason the decoration section above
+gives: no application data reaches the rail yard, and its timestep and track geometry are
+not part of this app's tuning surface. The test is what the number affects, not where it is
+declared: anything a Railway request, a session or a rendered container depends on goes in
+`constants.ts`, and a number that only moves a pixel does not.
+
+The **sprite geometry is not tuning and is not there** — it is `sprites.ts`, beside it.
+`config.ts` holds the numbers someone turns to change how the yard behaves; `sprites.ts`
+holds what a locomotive, a shed and a length of track _are_. The distinction earns a file
+because the two are read by different code for different reasons, and because the sprite
+block was a third of `config.ts` on an argument its own header had already conceded.
 
 ## Configuration goes through `src/env.ts`
 

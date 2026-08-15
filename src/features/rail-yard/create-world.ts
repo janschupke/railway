@@ -19,7 +19,8 @@ import { createCrane } from "./crane";
 import { buildGraph, findPath } from "./graph";
 import { drawItinerary } from "./phases";
 import { range, rangeInt, weightedPick, type Rng } from "./rng";
-import { RAIL_YARD_SCENE, type RailScene } from "./scene";
+import { RAIL_YARD_SCENE } from "./scene";
+import type { RailScene } from "./scene-types";
 import { step } from "./simulation";
 import type { TrainState, Wagon, WorldState } from "./world-state";
 

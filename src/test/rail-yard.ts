@@ -22,7 +22,8 @@ import {
   type YardPalette,
 } from "@/features/rail-yard/palette";
 import { createRng } from "@/features/rail-yard/rng";
-import { RAIL_YARD_SCENE, type SceneStructure } from "@/features/rail-yard/scene";
+import { RAIL_YARD_SCENE } from "@/features/rail-yard/scene";
+import type { SceneStructure } from "@/features/rail-yard/scene-types";
 import { createWorld } from "@/features/rail-yard/create-world";
 import { step } from "@/features/rail-yard/simulation";
 import type { WorldState } from "@/features/rail-yard/world-state";

@@ -10,7 +10,8 @@
  * "up the screen" and "further away" are allowed to be the same axis.
  */
 
-import { LOCOMOTIVE, YARD } from "./config";
+import { YARD } from "./config";
+import { LOCOMOTIVE } from "./sprites";
 import { localToWorld, type Pose } from "./geometry";
 import { poseAlong } from "./graph";
 import type { Rng } from "./rng";

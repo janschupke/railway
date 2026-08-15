@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { LOCOMOTIVE, WAGON, YARD } from "./config";
+import { YARD } from "./config";
+import { LOCOMOTIVE, WAGON } from "./sprites";
 import { rakeLength, wagonNoseDistance } from "./rake";
 
 describe("wagonNoseDistance", () => {

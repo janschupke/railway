@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildGraph, edgeIndexAt, edgeStart, findPath, poseAlong } from "./graph";
-import { RAIL_YARD_SCENE, type RailScene } from "./scene";
+import { RAIL_YARD_SCENE } from "./scene";
+import type { RailScene } from "./scene-types";
 
 /**
  * A miniature yard: three roads, one run each, and a ladder between them. Small enough to

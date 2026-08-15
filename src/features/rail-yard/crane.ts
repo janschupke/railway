@@ -19,7 +19,8 @@
  * be nine functions each needing a test of its own.
  */
 
-import { CONTAINER, CONVEYOR, CRANE } from "./config";
+import { CONVEYOR, CRANE } from "./config";
+import { CONTAINER } from "./sprites";
 import type { Freight } from "./conveyor";
 
 type Place = "source" | "sink";

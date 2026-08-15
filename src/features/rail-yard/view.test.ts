@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TRACK, VIEW } from "./config";
+import { VIEW } from "./config";
+import { TRACK } from "./sprites";
 import { RAIL_YARD_SCENE } from "./scene";
 import {
   fitView,

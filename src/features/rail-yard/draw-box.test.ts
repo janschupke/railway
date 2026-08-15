@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createFakeContext } from "@/test/fake-canvas-2d";
 import { PALETTE, at, view } from "@/test/rail-yard";
-import { CONTAINER, VIEW } from "./config";
+import { VIEW } from "./config";
+import { CONTAINER } from "./sprites";
 import {
   drawBox,
   drawRibs,
