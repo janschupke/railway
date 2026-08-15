@@ -287,6 +287,29 @@ describe("GET /api/watch/[projectId]", () => {
       return {
         frames,
         stop: async () => {
+          /*
+           * Settle before cancelling, or the last frame is a coin toss.
+           *
+           * `reader.cancel()` discards whatever is queued and not yet pulled, and the
+           * frame this describe block is usually asserting on is enqueued by the final
+           * timer callback — one microtask turn ahead of the read that would collect it.
+           * Cancelling straight away therefore dropped it whenever the loop happened to
+           * be a turn behind, which is a property of how busy the machine is: these cases
+           * passed on their own and on a plain `vitest run`, and failed under coverage,
+           * where the instrumentation changes the scheduling.
+           *
+           * Flushing microtasks until the count stops moving is deterministic under fake
+           * timers and is not a wait: no clock advances here, and a stream with nothing
+           * queued settles on the first pass. It is also what the negative cases in this
+           * block need — "no frame was sent" is only true once everything that was going
+           * to arrive has.
+           */
+          let settled = 0;
+          for (let turn = 0; turn < 50 && settled < 3; turn++) {
+            const before = frames.length;
+            await Promise.resolve();
+            settled = frames.length === before ? settled + 1 : 0;
+          }
           await reader.cancel();
           await drained;
         },

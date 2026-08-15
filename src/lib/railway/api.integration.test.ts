@@ -9,15 +9,13 @@ import {
   deleteVolume,
   destroyContainer,
   getEnvironmentVolumes,
-  getDeployment,
-  getDeploymentFailure,
-  getLogs,
   getProjectContainers,
   getProjectMetrics,
   listProjects,
   readServiceVariableNames,
   updateContainer,
 } from "./api";
+import { getDeployment, getDeploymentFailure, getLogs } from "./deployment-reads";
 import { railwayApiUrl } from "./client";
 
 const api = graphql.link(railwayApiUrl());

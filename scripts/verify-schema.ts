@@ -44,7 +44,7 @@ import {
   DEGRADING_OPERATIONS,
   OPTIONAL_FIELDS,
   PROBED_INPUT_TYPES,
-} from "../src/lib/railway/operations.ts";
+} from "../src/lib/railway/schema-policy.ts";
 import { SCHEMA_PATH } from "../src/lib/railway/schema-path.ts";
 import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";

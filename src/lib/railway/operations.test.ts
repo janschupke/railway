@@ -3,7 +3,7 @@ import { buildSchema, Kind, parse, validate } from "graphql";
 import { describe, expect, it } from "vitest";
 import { operationNameOf as derivedOperationName } from "./client";
 import { DOCUMENTS, type NamedDocument } from "./documents";
-import { DEGRADING_OPERATIONS, OPTIONAL_FIELDS } from "./operations";
+import { DEGRADING_OPERATIONS, OPTIONAL_FIELDS } from "./schema-policy";
 import { SCHEMA_PATH } from "./schema-path";
 
 /**

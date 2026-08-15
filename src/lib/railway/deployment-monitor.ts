@@ -6,7 +6,7 @@ import { log } from "@/lib/logger";
 import { expectReplay } from "@/lib/log-overlap";
 import { reportError } from "@/lib/report-error";
 import { sleep } from "@/lib/utils";
-import { getDeployment, getDeploymentFailure, getLogs } from "./api";
+import { getDeployment, getDeploymentFailure, getLogs } from "./deployment-reads";
 import { RailwayApiError } from "./errors";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
 import {
