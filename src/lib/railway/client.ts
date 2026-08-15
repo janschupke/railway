@@ -223,8 +223,14 @@ async function execute<T>(
           cause,
         });
       }
-      logRetry(operationName, attempt, "network", backoffMs(attempt));
-      await backoff(backoffMs(attempt), signal);
+      /*
+       * One computation, read twice. The logged delay and the awaited one have to be the
+       * same number, and two calls kept them equal only by identical arguments — which
+       * the rate-limit branch below already had to repeat by hand.
+       */
+      const delay = backoffMs(attempt);
+      logRetry(operationName, attempt, "network", delay);
+      await backoff(delay, signal);
       continue;
     }
 
@@ -246,14 +252,9 @@ async function execute<T>(
           retryAfterSeconds,
         });
       }
-      logRetry(
-        operationName,
-        attempt,
-        "rate_limit",
-        backoffMs(attempt, retryAfterSeconds),
-        429,
-      );
-      await backoff(backoffMs(attempt, retryAfterSeconds), signal);
+      const delay = backoffMs(attempt, retryAfterSeconds);
+      logRetry(operationName, attempt, "rate_limit", delay, 429);
+      await backoff(delay, signal);
       continue;
     }
 
@@ -265,8 +266,9 @@ async function execute<T>(
           operation: operationName,
         });
       }
-      logRetry(operationName, attempt, "server", backoffMs(attempt), response.status);
-      await backoff(backoffMs(attempt), signal);
+      const delay = backoffMs(attempt);
+      logRetry(operationName, attempt, "server", delay, response.status);
+      await backoff(delay, signal);
       continue;
     }
 
