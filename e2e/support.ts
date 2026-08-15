@@ -90,6 +90,28 @@ export function toast(page: Page, text: string | RegExp) {
 export const onlyVisible = (locator: Locator) => locator.filter({ visible: true });
 
 /**
+ * Waits until a dialog is actually able to receive the next click or Escape.
+ *
+ * **Three signals, and each one is earned by a failure that happened without it.** The
+ * dialog being visible is not enough: Radix renders the shell before the body settles, so
+ * a spec acting on `alertdialog` alone proves nothing about the form inside it — hence
+ * `ready`, which is the confirm field for the destroy dialog and the confirm button for the
+ * ones with nothing to type into. And `pointer-events: auto` is the layer gate: Radix hands
+ * a dialog its layer one render AFTER it appears, and a click or an Escape landing in that
+ * window is swallowed, which reads as a flaky test rather than as a race.
+ *
+ * This sequence was written out five times, under four separate docblocks each arguing the
+ * same point in slightly different words. The argument is the same every time and now it is
+ * written once.
+ */
+async function awaitDialogReady(dialog: Locator, ready?: Locator) {
+  await expect(dialog).toBeVisible();
+  if (ready) await expect(ready).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  return dialog;
+}
+
+/**
  * A form control, by its exact label.
  *
  * `exact` is load-bearing rather than tidy. `getByLabel` defaults to a case-insensitive
@@ -243,10 +265,7 @@ export async function openDestroyDialog(page: Page, name: string) {
     row(page, name).getByRole("button", { name: /^destroy$/i }),
   ).click();
   const dialog = onlyVisible(page.getByRole("alertdialog"));
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel(/to confirm/i)).toBeVisible();
-  await expect(dialog).toHaveCSS("pointer-events", "auto");
-  return dialog;
+  return awaitDialogReady(dialog, dialog.getByLabel(/to confirm/i));
 }
 
 /**
@@ -270,12 +289,10 @@ export async function runRowAction(
   ).click();
 
   const dialog = onlyVisible(page.getByRole("alertdialog"));
-  await expect(dialog).toBeVisible();
   const confirm = dialog.getByRole("button", {
     name: new RegExp(`^${action} container$`, "i"),
   });
-  await expect(confirm).toBeVisible();
-  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  await awaitDialogReady(dialog, confirm);
 
   await confirm.click();
   await expect(dialog).toBeHidden();
@@ -313,12 +330,8 @@ export async function rollBackTo(page: Page, name: string, index: number) {
   await trigger.click();
 
   const dialog = onlyVisible(page.getByRole("alertdialog"));
-  await expect(dialog).toBeVisible();
   const confirm = dialog.getByRole("button", { name: /^Roll back container$/i });
-  await expect(confirm).toBeVisible();
-  // The layer gate, for the reason runRowAction states: a dialog one render from ready
-  // swallows the click rather than the confirmation happening.
-  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  await awaitDialogReady(dialog, confirm);
 
   await confirm.click();
   await expect(dialog).toBeHidden();
@@ -390,9 +403,7 @@ export async function openDetailDialog(page: Page, name: string) {
   await onlyVisible(row(page, name).getByRole("button", { name: /^Details$/ })).click();
 
   const dialog = onlyVisible(page.getByRole("dialog"));
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveCSS("pointer-events", "auto");
-  return dialog;
+  return awaitDialogReady(dialog);
 }
 
 /**
@@ -516,9 +527,7 @@ export async function openCreateFromSelect(
   await onlyVisible(page.getByRole("option", { name: row })).click();
 
   const dialog = onlyVisible(page.getByRole("dialog"));
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveCSS("pointer-events", "auto");
-  return dialog;
+  return awaitDialogReady(dialog);
 }
 
 /**
