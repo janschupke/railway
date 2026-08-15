@@ -47,10 +47,9 @@ persistence. There is nothing here a database would be asked to survive.
 The cost is stated rather than hidden. The map is per replica, so a deploy landing between
 the two halves of a double submit creates two services, and a repeat after
 `IDEMPOTENCY.RETAIN_SECONDS` does too. Both are much narrower than the window the name
-check left open, and the same single-replica caveat already governs the stream cap in
-`lib/stream-slots.ts` — SSE pins a client to one replica, which is what makes the
-assumption honest rather than convenient. If that ever changes, both maps move to shared
-state together.
+check left open, and the same per-replica caveat already governs the stream cap in
+`lib/stream-slots.ts`. That constraint is argued in README Limitations rather than restated
+here. If it ever changes, both maps move to shared state together.
 
 ## What the name check left behind
 

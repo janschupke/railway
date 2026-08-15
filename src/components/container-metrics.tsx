@@ -14,7 +14,8 @@ import { Text } from "./ui/text";
  * uptime while it is running, and the volume when the container has one. The pane is a fixed
  * 256px and arrives lazily behind a skeleton, so a side-by-side layout would reflow when its
  * chunk lands — a layout shift on a page Lighthouse gates at 0.1 — and would need a
- * breakpoint, where the app declares exactly one in all of src/ and adapts by wrapping
+ * breakpoint, which the app reaches for four times in all of src/ and otherwise adapts by
+ * wrapping
  * everywhere else. Above the pane it is one line at desktop width, two on a phone, and it
  * gives the panel something to show in its first frame.
  *

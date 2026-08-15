@@ -227,28 +227,23 @@ describe("the toolchain", () => {
     }
   });
 
-  it("keeps the Cursor rules' critical list identical to AGENTS.md's", () => {
-    /*
-     * `.cursor/rules/main.mdc` opens by declaring that it mirrors AGENTS.md's Rules and
-     * Critical rules sections and that the two must be kept in sync. Nothing kept them.
-     *
-     * It had drifted four ways at once: it said eleven ADRs against fourteen, it omitted
-     * `codegen:check` from the gate, it dropped the ADR-14 volume clause and the
-     * projects-and-environments clause from the ownership bullet, and it was missing the
-     * `Dockerfile` gate and the `required`-needs rule entirely. Every one of those is a
-     * rule an agent reading only that file would not know about — and Cursor reads only
-     * that file.
-     *
-     * Compared as an ordered list rather than a set, because these are ordered by how
-     * often an agent trips over them and a reordering is a change worth noticing.
-     */
-    const bullets = (text: string) =>
-      text.split("\n").filter((line) => line.startsWith("- **"));
-
-    const canonical = bullets(gateDocs["AGENTS.md"]);
-    expect(canonical.length).toBeGreaterThan(5);
-    expect(bullets(gateDocs[".cursor/rules/main.mdc"])).toEqual(canonical);
-  });
+  /*
+   * `.cursor/rules/main.mdc` is generated from AGENTS.md now — `pnpm cursor:generate`,
+   * asserted current by `pnpm cursor:check` inside `pnpm check`.
+   *
+   * What was here compared the two files' `- **` bullets for byte equality, and it had
+   * caught real drift: eleven ADRs against fourteen, `codegen:check` missing from the
+   * gate, the ADR-14 volume clause dropped from the ownership bullet. But byte equality
+   * only ever guarded the bullets, so the prose around them drifted twice more
+   * afterwards — and worse, it *required* a broken link. AGENTS.md writes
+   * `[workflow.md](.ai/rules/workflow.md)`, which resolves from the repo root; copied
+   * verbatim into `.cursor/rules/` it points at `.cursor/rules/.ai/rules/workflow.md`.
+   * Every other link in that file was hand-written `../../` precisely because those
+   * bullets were not under test.
+   *
+   * Generating removes the class rather than testing one instance of it: the whole file
+   * is derived, and the links are rewritten for the depth it actually sits at.
+   */
 
   it("lets the Dockerfile decide how the app starts", () => {
     /*

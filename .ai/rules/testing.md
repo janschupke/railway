@@ -65,8 +65,9 @@ in the config — because it is small enough for that to cost nothing and it is 
 place in the app that puts a bearer token on an upgrade request. Reach for a file entry
 when the module is both small and load-bearing; the directory floor is for everything else.
 
-When the real number rises, raise these. Lowering one is the same class of edit as raising
-a bundle budget: permitted, and argued for in the commit that does it.
+When the real number falls, lower these — a count goes down as coverage goes up, which is
+the direction the ratchet turns. Raising one is the same class of edit as raising a bundle
+budget: permitted, and argued for in the commit that does it.
 
 Excluded: `src/test/**`, `*.d.ts`, `*.test.*`, and the framework shells — `layout.tsx`,
 `page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`. Those are React Server Components
@@ -113,7 +114,7 @@ also keeps a browser pool off developer machines.
 
 Two projects, and the split is deliberate: `chromium` runs everything except
 `responsive.spec.ts`, and `mobile` (Pixel 7) runs only that one. A second full project would
-roughly double CI wall-clock at `workers: 1` and buy very little — the app declares two `sm:` breakpoints
+roughly double CI wall-clock at `workers: 1` and buy very little — the app reaches for `sm:` four times
 in all of `src/` and adapts by wrapping everywhere else, so there is no viewport-conditional
 code for a second pass to regress. Put a phone-width assertion in `e2e/responsive.spec.ts`
 rather than adding a project.
@@ -130,7 +131,7 @@ against it, so PKCE, token exchange and refresh rotation are all genuinely exerc
 - Every spec resets it: the `test` fixture in `e2e/support.ts` posts to `/__test/reset`
   before the page is used.
 - Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
-  and supports twenty-three knobs — `rateLimit`, `unauthorized`, `refreshFails`,
+  and supports twenty-six knobs — `rateLimit`, `unauthorized`, `refreshFails`,
   `accessTokenTtl`, `deploymentsFail`, `logPhase`, `failureField`, `deploymentEventsFail`,
   `variablesFail`, `domainFails`, `settingsFail`, `limitsFail`, `volumeCreateFail`,
   `volumesFail`, `metricsFail`, `workspaceFail`, `noWorkspace`, `projectsSource`,

@@ -35,9 +35,18 @@ Three lanes, and a change belongs in exactly one of them.
 
 - **Read** — `src/app/dashboard/data.ts`. Called from Server Components. Never from a
   client component.
-- **Write** — `src/app/dashboard/actions.ts`. The only `"use server"` file in the repo.
-  Actions return an `ActionResult`; they do not throw at the UI. See
-  [errors-and-logging.md](errors-and-logging.md).
+- **Write** — `src/app/dashboard/actions.ts`, the only `"use server"` file in the repo, and
+  the seven `action-*.ts` modules beside it. The directive file holds the ten exports and
+  nothing else: each opens a request scope and hands off. What a verb does lives in
+  `action-<verb>.ts`, and the shared parts in `action-form.ts` (fields, zod issues, thrown
+  values) and `action-managed.ts` (the ownership guard). Actions return an `ActionResult`;
+  they do not throw at the UI. See [errors-and-logging.md](errors-and-logging.md).
+
+  The split is forced rather than chosen: a `"use server"` file may export only async
+  functions, so a type, a constant or a synchronous helper cannot sit beside an action.
+  Adding a verb means a module and one forwarder, never a tenth concern in the directive
+  file.
+
 - **Route handlers** — `src/app/api/**`. Two stream:
   `src/app/api/streams/[deploymentId]/route.ts` multiplexes deployment status and logs into
   a single SSE response, and `src/app/api/watch/[projectId]/route.ts` is the project
@@ -49,9 +58,9 @@ Three lanes, and a change belongs in exactly one of them.
 
 **A route handler is the right lane when the browser needs an answer mid-interaction, or
 when the work needs the inbound `AbortSignal`.** The image check is both. A Server Action
-would have worked and was rejected for two reasons: `actions.ts` is documented as the only
-`"use server"` file _and_ as the write lane, so a read there makes the file something other
-than what it says it is — and actions are uncancellable, which is the wrong primitive for a
+would have worked and was rejected for two reasons: the write lane is where things that
+change infrastructure live, so a read there makes it something other than what it says it
+is — and actions are uncancellable, which is the wrong primitive for a
 request the next keystroke should abort. Do not read this as permission for a REST API;
 the read lane is still where reads belong, and this is the exception that names its own
 conditions.
@@ -114,13 +123,11 @@ Two things in that file are load-bearing and easy to break:
 A failed refresh is **not** proof the session is gone. Refresh tokens rotate, so a request
 that lost a race spends a token another request already replaced.
 
-`refreshSession` is what keeps that from signing anyone out. It holds one grant per token
-being spent, and **retains a fulfilled grant for `SESSION.REFRESH_GRACE_SECONDS` rather
-than deleting it on settle** — a request already in flight with the old cookie arrives
-after the winner resolved, and must be handed the live session instead of spending a dead
-token. Deleting on settle deduped only strictly overlapping callers, which is half the
-race. A _rejected_ grant is dropped immediately; caching one turns an upstream blip into a
-sign-out for the whole window.
+`refreshSession` is what keeps that from signing anyone out, and it has two rules that a
+change here must not break: **a fulfilled grant is retained for
+`SESSION.REFRESH_GRACE_SECONDS` rather than deleted on settle**, and **a rejected one is
+dropped immediately**. The race each of those answers — and the symptom that led to them —
+is documented on `grants` in `src/lib/auth/refresh.ts`, which is where the mechanism lives.
 
 The re-read in the proxy's catch block stays, but know what it is: `request.cookies` is
 that invocation's own inbound jar, so the only thing that can put a newer session in it is
@@ -146,8 +153,8 @@ trade, because the blast radius is bounded by the OAuth scopes they granted and 
 is visible in Railway's UI rather than hidden metadata.
 
 That is five verbs now — destroy, stop, restart, redeploy, edit — and they share **one** guard:
-`withManagedContainer` in `src/app/dashboard/actions.ts` parses the three ids, re-reads the
-container list from Railway, and refuses before the verb's own callback runs. A second copy
+`withManagedContainer` in `src/app/dashboard/action-managed.ts` parses the three ids,
+re-reads the container list from Railway, and refuses before the verb's own callback runs. A second copy
 of that check is the thing to refuse in review, because the weaker copy is the one that
 would ship. Two lint rules assert the shape structurally, and neither is sufficient alone:
 `no-restricted-imports` lets only `src/app/dashboard/**` import a mutation from

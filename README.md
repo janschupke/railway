@@ -97,14 +97,16 @@ The app deploys itself the same way it deploys containers.
 ### Checks
 
 ```bash
-pnpm check          # format + lint (0 warnings) + types + codegen drift + knip + coverage
+pnpm check          # format:check + lint + typecheck + codegen:check + cursor:check + knip + test:coverage
 pnpm build && pnpm test:e2e   # Playwright against the fake Railway fixture
 pnpm build && pnpm size   # per-route first-load JS against bundle-budgets.json
 pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 pnpm verify:schema  # pinned OIDC metadata, and every document against the committed schema
 ```
 
-Two more gates have no local script, because what they check is not the source tree:
+Two more gates have no local script at all, because what they check is not the source tree.
+(The four above do have one and are simply not part of `pnpm check`; `.ai/rules/workflow.md`
+sets out which count is counting what.)
 
 ```bash
 docker build -t rw .   # then boot it and curl /api/health; hadolint and Trivy over it
@@ -595,7 +597,7 @@ searches the raw serialized bytes rather than a parsed record.
 **One spec runs at phone width, not the whole suite.** `playwright.config.ts` declares a
 second `mobile` project scoped by `testMatch` to `e2e/responsive.spec.ts`. `workers: 1`
 is not negotiable — the fixture holds shared state — so a second full project would
-roughly double CI wall-clock, and the app declares one `sm:` in all of `src/` and adapts
+roughly double CI wall-clock, and the app reaches for `sm:` four times in all of `src/` and adapts
 by wrapping everywhere else, leaving no viewport-conditional code to regress. What a
 phone viewport genuinely proves is what that spec asserts: nothing overflows sideways
 with the list filtered and paged, the nine status chips wrap rather than clip, the search

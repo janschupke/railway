@@ -15,9 +15,9 @@ import type { RegionOption } from "./types";
  * quota Railway documents at 1,000 an hour on Hobby.
  *
  * A process-global map with a TTL, on the same terms as lib/registry/probe.ts and
- * lib/idempotency.ts: per replica, reset by `next dev`'s module reloading, and honest
- * because this is a single-replica app that says so in the README. Nothing here is state the
- * app owns — losing the whole map costs one extra request.
+ * lib/idempotency.ts: per replica (README Limitations) and reset by `next dev`'s module
+ * reloading. Nothing here is state the app owns — losing the whole map costs one extra
+ * request.
  *
  * ADR-4 is untouched by it. That decision is about not mirroring Railway's state in a
  * database that can then disagree with it; this cannot disagree for longer than TTL_MS, and

@@ -10,13 +10,15 @@ restatement of the diff. If an alternative was rejected, name it and why.
 ## Gates
 
 `pnpm check` is the local gate — `format:check`, `lint` at zero warnings, `typecheck`,
-`codegen:check`, `knip`, and `test:coverage` against the thresholds in `vitest.config.mts`.
+`codegen:check`, `cursor:check`, `knip`, and `test:coverage` against the thresholds in
+`vitest.config.mts`.
 Nothing is ready before it passes.
 
 - [ ] `pnpm check`
 
-CI runs five more that `pnpm check` does not. Tick the ones this change can reach and you
-ran locally; CI runs all five regardless, and **All checks** — the `required` aggregator —
+CI runs five more gates that `pnpm check` does not — the four with a local script, plus the
+image job. Tick the ones this change can reach and you ran locally; CI runs all five
+regardless, and **All checks** — the `required` aggregator —
 is the single name branch protection requires.
 
 - [ ] `pnpm build && pnpm size` — per-route first-load JS against `bundle-budgets.json`

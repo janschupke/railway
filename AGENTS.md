@@ -22,6 +22,10 @@ the relevant rule before touching auth, the design tokens, the log stream, or a 
 
 ## Rules
 
+[`.ai/rules/README.md`](.ai/rules/README.md) states the rule about the rules: one fact, one
+home, and every other mention is a sentence and a link. Read it before adding to any of
+these files.
+
 - [Architecture](.ai/rules/architecture.md) — RSC reads / Server Actions write / one SSE route, `src/proxy.ts`, the managed-name ownership rule, import boundaries, `src/lib/constants.ts`, `src/env.ts`
 - [Design system](.ai/rules/design-system.md) — two token layers (`--rc-*`), the seven-step type scale defined in four files, and the four appearance bans on feature components
 - [Internationalisation](.ai/rules/i18n.md) — every string in `messages/en.json`, type-checked keys, `MessageKey` for code that cannot translate itself
@@ -42,7 +46,7 @@ this repo.
 
 Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 
-- **`pnpm check` is the gate** — `format:check && lint && typecheck && codegen:check && knip && test:coverage`. Run it before saying anything is done.
+- **`pnpm check` is the gate** — `format:check && lint && typecheck && codegen:check && cursor:check && knip && test:coverage`. Run it before saying anything is done.
 - **No raw palette colour, type step, hex literal or `-[var(--…)]` in a feature component** — appearance belongs to `src/components/ui/**` or to a token. It is a lint error, not a guideline: palette and type-step strings are banned anywhere in a `src/**` file, not just inside `className`, and hex is banned in `style={{…}}`. `src/components/ui/**` and `src/features/**` are exempt and are the only two places a literal belongs.
 - **No hardcoded user-facing string in JSX** — it goes in `messages/en.json`. Also a lint error.
 - **No `console.*` in `src/**`** — use `src/lib/logger.ts`. This is a security ratchet: a stray `console.error(error)` is how a live access token reached stdout once.
@@ -50,7 +54,7 @@ Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 - **`src/components/**` and `src/hooks/**` may not import** `lib/auth/session|refresh|server` or `lib/logger` / `lib/log/*`. Pass what the component needs as a prop.
 - **Every tuned number goes in `src/lib/constants.ts`**, in its group, with a rationale comment.
 - **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input. **A volume's owner is its service**, so the same check gates deleting it; destroy asks whether the data goes too and names the outcome either way (ADR-14). **Projects and environments are created but never deleted**, so they carry no prefix and `projectDelete`/`environmentDelete` are absent from `operations.ts` entirely.
-- **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
+- **Coverage gates on how many lines, branches, functions and statements are NOT covered — a count, not a percentage — per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.
 - **A change to the `Dockerfile` is gated by `docker build`, a boot against `/api/health`, hadolint and Trivy** — the `image` job. Run them locally; the commands are in [workflow.md](.ai/rules/workflow.md). Do not put a package manager back into the runtime stage.

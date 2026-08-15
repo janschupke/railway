@@ -1,6 +1,6 @@
 # ADR-8 — A hand-rolled GraphQL client, not Apollo
 
-`src/lib/railway/` is 5,303 lines covering twenty-eight operations: a transport (`client.ts`), the
+`src/lib/railway/` is 5,437 lines covering twenty-eight operations: a transport (`client.ts`), the
 documents, typed call sites, error mapping, and a monitor that merges a log subscription
 with a status poll.
 

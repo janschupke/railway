@@ -11,14 +11,22 @@ meta:
 pnpm check
 ```
 
-is `format:check && lint && typecheck && codegen:check && knip && test:coverage`. **Run it
+is `format:check && lint && typecheck && codegen:check && cursor:check && knip && test:coverage`. **Run it
 before saying anything is done.** `pnpm format` fixes the formatting half, and `pnpm codegen`
 fixes the codegen half — `codegen:check` regenerates the GraphQL types and fails if the
 result differs from what is committed, so a document edited without regenerating stops here.
 
-CI adds four things `pnpm check` does not run: `pnpm build && pnpm size`, `pnpm test:e2e`,
-`pnpm lighthouse`, and `pnpm verify:schema`. Run whichever your change can reach — the
-per-rule files say which.
+Four more gates have a local script and are not in `pnpm check`: `pnpm build && pnpm size`,
+`pnpm test:e2e`, `pnpm lighthouse` and `pnpm verify:schema`. Run whichever your change can
+reach — the per-rule files say which.
+
+Two more have no local script at all, because what they check is not the source tree: the
+image job (`docker build`, a boot against `/api/health`, hadolint, Trivy) and the secret
+scan (`gitleaks` over the whole history). Their commands are below.
+
+So the counts in the other documents are counting different sets, and each says which:
+the pull-request template lists five, because it folds the image job in beside the four
+with scripts; the README says two, because it is naming only the pair with no script.
 
 ## Knip findings fail; dead code is an error
 

@@ -1,7 +1,7 @@
 # ADR-7 — The URL is the state; there is no client store
 
 No Redux, Zustand, Jotai, React Query or SWR. The measured shape of client state is one
-app-authored context, fifty-two `useState`, zero `useReducer`, zero `useOptimistic` —
+app-authored context, fifty-five `useState`, zero `useReducer`, zero `useOptimistic` —
 counted across `src/**` excluding tests, and re-measurable with a grep rather than
 remembered. It read seventeen when this was written; the growth is six features' worth of
 local state and no shared state at all, which is the claim this decision actually makes.

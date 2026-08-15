@@ -14,12 +14,10 @@ type Entry = {
 /**
  * Which submission produced which result, keyed by `userId:idempotencyKey`.
  *
- * Spin-up creates billable infrastructure, and the form posted twice used to create two
- * containers. What stood in the way was a name lookup — a full project query before every
- * create, and one that a second submission a millisecond behind the first sails straight
- * through, because reading a list is not holding a lock. This is the lock: the entry is
- * inserted before the create is attempted, and the second caller finds it and is handed
- * the first caller's answer instead of making a second container.
+ * Why a key rather than the name check it replaced is ADR-12's argument and is not repeated
+ * here. What this module is: the lock that argument concluded with. The entry is inserted
+ * before the create is attempted, so a second caller finds it and is handed the first
+ * caller's answer instead of making a second container.
  *
  * A settled entry is retained for IDEMPOTENCY.RETAIN_SECONDS rather than deleted, for the
  * same reason `grants` in ./auth/refresh.ts retains one: a repeat does not have to overlap
@@ -35,11 +33,10 @@ type Entry = {
  * Keyed by user so one person's key can neither burn nor observe another's; the key alone
  * is client-supplied, and two browsers can mint whatever they like.
  *
- * In-memory, and per replica. That is honest rather than lazy: SSE already pins a client
- * to one replica, which is why the README describes this as a single-replica app. The
- * consequence worth stating is that a rolling restart between the two halves of a double
- * submit creates two services — a much narrower window than the one this closes, but not
- * zero. Note that `next dev`'s module reloading resets the map; production does not.
+ * In-memory, and per replica — see README Limitations. The consequence specific to this
+ * map, and the reason it is named there: a rolling restart between the two halves of a
+ * double submit creates two services. A much narrower window than the one this closes, but
+ * not zero. Note that `next dev`'s module reloading resets the map; production does not.
  */
 const entries = new Map<string, Entry>();
 
