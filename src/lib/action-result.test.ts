@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeActionError, isField } from "./action-result";
+import { ACTION_FIELDS, describeActionError, isField } from "./action-result";
 import { SessionExpiredError } from "./auth/refresh";
 import { RailwayApiError } from "./railway/errors";
 import messages from "../../messages/en.json";
@@ -103,16 +103,16 @@ describe("describeActionError", () => {
 
 describe("isField", () => {
   it("recognises every attributable field", () => {
-    expect(isField("name")).toBe(true);
-    expect(isField("image")).toBe(true);
-    expect(isField("variableKey")).toBe(true);
-    expect(isField("variableValue")).toBe(true);
-    expect(isField("port")).toBe(true);
-    expect(isField("replicas")).toBe(true);
-    expect(isField("cpu")).toBe(true);
-    expect(isField("memory")).toBe(true);
-    expect(isField("restartRetries")).toBe(true);
-    expect(isField("startCommand")).toBe(true);
+    /*
+     * Driven from ACTION_FIELDS rather than listing them again. This block used to name ten
+     * of the twelve by hand, which made it a third copy of the union — and one that could
+     * pass while `isField` had already stopped recognising the two it forgot to mention.
+     * The list is the source; the assertion is that nothing on it falls out of the guard.
+     */
+    expect(ACTION_FIELDS.length).toBeGreaterThan(0);
+    for (const field of ACTION_FIELDS) {
+      expect(isField(field), `${field} should be attributable`).toBe(true);
+    }
   });
 
   it("rejects anything else, including zod's numeric array indices", () => {

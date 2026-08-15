@@ -13,19 +13,34 @@ import type { MessageDescriptor } from "@/lib/messages";
  * a control. Adding them would put "reload the page" under a dropdown the user just used
  * correctly. See action-result.test.ts, which asserts they are absent.
  */
-export type ActionField =
-  | "name"
-  | "image"
-  | "port"
-  | "replicas"
-  | "cpu"
-  | "memory"
-  | "restartRetries"
-  | "startCommand"
-  | "variableKey"
-  | "variableValue"
-  | "projectName"
-  | "environmentName";
+/*
+ * One list, and the type is read off it.
+ *
+ * These were two hand-maintained copies of the same twelve strings — a union here and a
+ * `Set` further down — with nothing tying them together. Adding a field to the union and
+ * forgetting the set is a silent downgrade: `isField` answers false, the action drops the
+ * attribution, and an error that belonged under an input arrives as a toast instead. That
+ * is exactly the failure the union exists to prevent, reachable by editing the union.
+ *
+ * `src/lib/messages.ts` already does it this way for `MessageKey`, which is the larger and
+ * more load-bearing of the two lists. This is that shape.
+ */
+export const ACTION_FIELDS = [
+  "name",
+  "image",
+  "port",
+  "replicas",
+  "cpu",
+  "memory",
+  "restartRetries",
+  "startCommand",
+  "variableKey",
+  "variableValue",
+  "projectName",
+  "environmentName",
+] as const;
+
+export type ActionField = (typeof ACTION_FIELDS)[number];
 
 /**
  * What the client should select once an action has created it.
@@ -86,21 +101,9 @@ export function describeActionError(error: unknown): MessageDescriptor {
 /*
  * A set rather than a chain of ===: the two variable fields made the expression long
  * enough that the next addition would have been the one to get the || precedence wrong.
+ * Built from ACTION_FIELDS, so it cannot disagree with the type.
  */
-const FIELDS: ReadonlySet<string> = new Set([
-  "name",
-  "image",
-  "port",
-  "replicas",
-  "cpu",
-  "memory",
-  "restartRetries",
-  "startCommand",
-  "variableKey",
-  "variableValue",
-  "projectName",
-  "environmentName",
-]);
+const FIELDS: ReadonlySet<string> = new Set(ACTION_FIELDS);
 
 export function isField(value: unknown): value is ActionField {
   /*

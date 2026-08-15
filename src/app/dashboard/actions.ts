@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { requireAccessToken, requireSession } from "@/lib/auth/server";
-import { describeActionError, isField, type ActionResult } from "@/lib/action-result";
+import type { z } from "zod";
+import {
+  describeActionError,
+  isField,
+  type ActionField,
+  type ActionResult,
+} from "@/lib/action-result";
 import { runOnce, type Retainable } from "@/lib/idempotency";
 import {
   createContainer,
@@ -43,7 +49,7 @@ import {
   projectCreateSchema,
   spinUpSchema,
 } from "@/lib/validation";
-import type { MessageKey, Translate } from "@/lib/messages";
+import type { Translate } from "@/lib/messages";
 import type { Container, ContainerVolume } from "@/lib/railway/types";
 
 /**
@@ -78,6 +84,95 @@ function messageForIssue(t: Translator, key: string): string {
   }
   const values = VALIDATION_VALUES[key];
   return t(key as Parameters<Translator>[0], values as never);
+}
+
+/**
+ * Not `MessageKey`: that union is the `errors.*` subset reachable from code with no
+ * translator, and these two are ordinary catalog keys resolved right here. Spelled as a
+ * literal union rather than `string` so a typo is a compile error, and so the set stays
+ * small enough to read — a third fallback is a question worth asking, not a default.
+ */
+type IssueFallbackKey = "actions.invalidForm" | "actions.missingReference";
+
+type IssueShape = {
+  /** Schema field name → the `ActionField` the form actually renders. */
+  rename?: Readonly<Record<string, ActionField>>;
+  /** The message when zod produced no issue at all. */
+  fallback?: IssueFallbackKey;
+  /** Off for schemas whose every field is a hidden input. */
+  attribute?: false;
+};
+
+/**
+ * A failed parse, as the result the caller returns.
+ *
+ * Written five times before this, and three of the copies had already drifted: spin-up and
+ * edit carried the full field-and-index attribution, `addProject` hardcoded a field name
+ * rather than reading the path, `addEnvironment` remapped one, and `destroyMany` dropped
+ * attribution altogether and used a different fallback. Four behaviours from one rule, none
+ * of them wrong exactly, and no way to tell deliberate from forgotten by reading them.
+ *
+ * The differences are the three options above, so they are stated rather than reimplemented:
+ *
+ * `rename` exists because two schemas call their field `name` while the form renders it as
+ * `projectName` or `environmentName`. Without it the attribution lands on an input that is
+ * not on the page, which reads to the user as no error at all.
+ *
+ * `fallback` is for an error with no issues in it — a shape no browser produces.
+ * `destroyMany` wants a different sentence for that than the forms do.
+ *
+ * `attribute: false` is `destroyMany` again: every field it validates is a hidden input the
+ * page filled in, so there is nothing on screen to point at and the message has to be a toast.
+ */
+function issueToResult(
+  t: Translator,
+  error: z.ZodError,
+  { rename, fallback = "actions.invalidForm", attribute }: IssueShape = {},
+): ActionResult {
+  const issue = error.issues[0];
+  // The same cast every call through `Translator` makes; see messageForIssue.
+  if (!issue) return { ok: false, error: t(fallback as Parameters<Translator>[0]) };
+
+  const result: ActionResult = {
+    ok: false,
+    error: messageForIssue(t, issue.message),
+  };
+  if (attribute === false) return result;
+
+  const [path, index] = issue.path;
+  const field =
+    typeof path === "string" && rename?.[path]
+      ? rename[path]
+      : isField(path)
+        ? path
+        : null;
+  if (!field) return result;
+
+  return {
+    ...result,
+    field,
+    /*
+     * Only meaningful alongside a field, and only ever present for the repeated ones — zod
+     * builds the row index into the path itself. A rule about the whole list (too many rows,
+     * too large together) carries no index, and the form has to toast those rather than look
+     * for a row that does not exist.
+     */
+    ...(typeof index === "number" ? { index } : {}),
+  };
+}
+
+/**
+ * Any thrown value, as the result the caller returns.
+ *
+ * The five catch blocks that used to hold these two lines were byte-identical, and
+ * `data.ts` has a sixth against `reportError`. Both casts go with them: `describeActionError`
+ * already returns a `MessageDescriptor` whose key is a `MessageKey`, so `key as MessageKey`
+ * was re-asserting a type the value already had, and `asTranslate` exists precisely to make
+ * the second one unnecessary.
+ */
+function toActionError(t: Translator, error: unknown): ActionResult {
+  const { key, values } = describeActionError(error);
+  return { ok: false, error: asTranslate(t)(key, values) };
 }
 
 /**
@@ -134,22 +229,7 @@ async function create(formData: FormData): Promise<ActionResult> {
   });
 
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    if (!issue) return { ok: false, error: t("actions.invalidForm") };
-    const field = issue.path[0];
-    const index = issue.path[1];
-    return {
-      ok: false,
-      error: messageForIssue(t, issue.message),
-      ...(isField(field) ? { field } : {}),
-      /*
-       * Only meaningful alongside a field, and only ever present for the repeated ones —
-       * zod builds the row index into the path itself. A rule about the whole list
-       * (too many rows, too large together) carries no index, and the form has to toast
-       * those rather than look for a row that does not exist.
-       */
-      ...(isField(field) && typeof index === "number" ? { index } : {}),
-    };
+    return issueToResult(t, parsed.error);
   }
 
   const { projectId, environmentId, name, idempotencyKey } = parsed.data;
@@ -199,8 +279,7 @@ async function create(formData: FormData): Promise<ActionResult> {
 
     return value;
   } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+    return toActionError(t, error);
   }
 }
 
@@ -537,13 +616,8 @@ async function addProject(formData: FormData): Promise<ActionResult> {
     name: formField(formData, "projectName"),
   });
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    if (!issue) return { ok: false, error: t("actions.invalidForm") };
-    return {
-      ok: false,
-      error: messageForIssue(t, issue.message),
-      field: "projectName",
-    };
+    // The schema has one field, `name`, and the form renders it as `projectName`.
+    return issueToResult(t, parsed.error, { rename: { name: "projectName" } });
   }
 
   const { name } = parsed.data;
@@ -586,8 +660,7 @@ async function addProject(formData: FormData): Promise<ActionResult> {
       },
     };
   } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+    return toActionError(t, error);
   }
 }
 
@@ -608,19 +681,13 @@ async function addEnvironment(formData: FormData): Promise<ActionResult> {
     name: formField(formData, "environmentName"),
   });
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    if (!issue) return { ok: false, error: t("actions.invalidForm") };
     /*
      * Attributed to the only field on screen. A bad `projectId` is not something the form
      * can show — it is a hidden input the picker filled in — so its message reaches the
-     * user as a toast instead, which is what an absent `field` means.
+     * user as a toast instead, which is what an absent `field` means. `projectId` is not an
+     * ActionField, so it falls through to exactly that.
      */
-    const field = issue.path[0];
-    return {
-      ok: false,
-      error: messageForIssue(t, issue.message),
-      ...(field === "name" ? { field: "environmentName" as const } : {}),
-    };
+    return issueToResult(t, parsed.error, { rename: { name: "environmentName" } });
   }
 
   const { projectId, name } = parsed.data;
@@ -643,8 +710,7 @@ async function addEnvironment(formData: FormData): Promise<ActionResult> {
       select: { projectId, environmentId: environment.id },
     };
   } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+    return toActionError(t, error);
   }
 }
 
@@ -829,8 +895,7 @@ async function withManagedContainer(
       containers,
     });
   } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+    return toActionError(t, error);
   }
 }
 
@@ -1035,13 +1100,13 @@ async function destroyMany(formData: FormData): Promise<ActionResult> {
     serviceId: formList(formData, "serviceId"),
   });
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
     // The count ceiling is the one rule here a person can be told something useful about;
-    // everything else this schema refuses is a request no browser produces.
-    return {
-      ok: false,
-      error: issue ? messageForIssue(t, issue.message) : t("actions.missingReference"),
-    };
+    // everything else this schema refuses is a request no browser produces. Every field is
+    // a hidden input, so there is nothing on screen to attribute to.
+    return issueToResult(t, parsed.error, {
+      attribute: false,
+      fallback: "actions.missingReference",
+    });
   }
 
   const { projectId, environmentId, serviceId: serviceIds } = parsed.data;
@@ -1129,8 +1194,7 @@ async function destroyMany(formData: FormData): Promise<ActionResult> {
           : t("actions.destroyedSome", { count: destroyed, total }),
     };
   } catch (error) {
-    const { key, values } = describeActionError(error);
-    return { ok: false, error: asTranslate(t)(key as MessageKey, values) };
+    return toActionError(t, error);
   }
 }
 
@@ -1325,16 +1389,7 @@ async function edit(formData: FormData): Promise<ActionResult> {
   });
 
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    if (!issue) return { ok: false, error: t("actions.invalidForm") };
-    const field = issue.path[0];
-    const index = issue.path[1];
-    return {
-      ok: false,
-      error: messageForIssue(t, issue.message),
-      ...(isField(field) ? { field } : {}),
-      ...(isField(field) && typeof index === "number" ? { index } : {}),
-    };
+    return issueToResult(t, parsed.error);
   }
 
   const { name, image, variableKey, variableValue } = parsed.data;
