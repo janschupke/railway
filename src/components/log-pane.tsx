@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -15,111 +14,23 @@ import { useTranslations } from "next-intl";
 import { UI } from "@/lib/constants";
 import {
   bufferSeverities,
-  highlightRuns,
   indexMatches,
   logFileName,
   serializeLines,
-  severityTone,
   visibleLines,
-  type LineMatch,
 } from "@/lib/log-view";
 import { cn } from "@/lib/utils";
+import { useExportConfirmation } from "@/hooks/use-export-confirmation";
 import type { StreamStatus } from "@/hooks/use-deployment-stream";
 import type { BufferedLine } from "@/hooks/use-deployment-stream";
 import { LogPaneToolbar } from "./log-pane-toolbar";
+import { LogRow } from "./log-row";
 import { DialogContent, DialogRoot } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
 import { downloadText, writeClipboard } from "@/lib/hand-off";
-
-/**
- * One line, memoised.
- *
- * `matches` comes straight out of the match index and is referentially stable across any
- * render that does not rebuild it, so stepping to the next match re-renders two rows out
- * of a thousand rather than all of them. `current` is the ordinal this row holds, or -1.
- *
- * highlightRuns is called in here rather than in the map above, so a line with no matches
- * does no string work at all.
- */
-const LogRow = memo(function LogRow({
-  line,
-  matches,
-  current,
-  wrap,
-  noTimestamp,
-}: {
-  line: BufferedLine;
-  matches: LineMatch[] | undefined;
-  current: number;
-  wrap: boolean;
-  noTimestamp: string;
-}) {
-  const tone = severityTone(line);
-
-  return (
-    <div
-      data-log-row
-      /*
-       * The row's colour is a token lookup in globals.css keyed on this attribute, the
-       * same mechanism StatusBadge uses — omitted entirely when there is no tone, so the
-       * row inherits the pane's text colour rather than being painted with it.
-       */
-      {...(tone ? { "data-severity": tone } : {})}
-      className={cn(
-        "text-text",
-        // break-all is not optional. Radix wraps the viewport's children in a
-        // `min-width:100%; display:table` box, which is shrink-to-fit, so a single
-        // unbreakable token — a URL, a base64 blob — would keep the horizontal scrollbar
-        // alive and leave "wrap" visibly not wrapping.
-        wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
-      )}
-    >
-      {/*
-        Selectable, and it used to not be.
-
-        `select-none` here meant a hand selection yielded messages without their times,
-        on the argument that a pasted excerpt reads better as the log than as a column of
-        clock times. That is a real preference and it was the wrong one to enforce: the
-        commonest reason to drag-select two log lines is to say when something happened,
-        and there was no way to get the times out short of copying the whole buffer.
-        Anyone who wants the messages alone can still select from the first glyph of one.
-      */}
-      <span className="text-text-subtle mr-2">
-        {/* `||`, not `??`: an empty timestamp slices to "" and must
-            still fall back to the placeholder. */}
-        {line.timestamp?.slice(11, 19) || noTimestamp}
-      </span>
-      {highlightRuns(line.message, matches).map((run, index) =>
-        run.ordinal === null ? (
-          run.text
-        ) : (
-          <mark
-            key={index}
-            data-log-match={run.ordinal === current ? "current" : "other"}
-            /*
-             * <mark> defaults to yellow-on-black in every UA, so both halves are set
-             * here. The non-current fill is nearly invisible over the pane's own
-             * background — it is the glyph colour that carries it — while the current
-             * match takes the opaque accent, which is the loudest thing in the pane.
-             *
-             * No horizontal padding: this is a monospace column, and px-0.5 would shift
-             * every glyph after a match out of alignment with the lines around it.
-             */
-            className={cn(
-              "bg-accent-bg text-accent rounded-sm",
-              "data-[log-match=current]:bg-accent data-[log-match=current]:text-accent-fg",
-            )}
-          >
-            {run.text}
-          </mark>
-        ),
-      )}
-    </div>
-  );
-});
 
 /**
  * Log output with autoscroll that yields to the reader.
@@ -197,13 +108,7 @@ export function LogPane({
   const [selected, setSelected] = useState<string[]>([]);
   const [maximized, setMaximized] = useState(false);
   const [copying, setCopying] = useState(false);
-  /*
-   * Which export last succeeded, cleared on a timer. One value rather than two booleans:
-   * the two ticks are mutually exclusive in practice and a single state cannot get stuck
-   * showing both.
-   */
-  const [confirmed, setConfirmed] = useState<"copy" | "download" | null>(null);
-  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { confirmed, confirm } = useExportConfirmation();
 
   /*
    * Both a ref and a state, deliberately.
@@ -318,26 +223,6 @@ export function LogPane({
         : index.total === 0
           ? t("logNoMatches")
           : t("logMatchCount", { index: current + 1, total: index.total });
-
-  /*
-   * Shows the tick, and clears it on a timer that cannot outlive the component.
-   *
-   * The timeout is held in a ref and cleared on unmount because this pane is mounted
-   * behind a row's `mounted` gate — collapsing the row mid-window would otherwise leave a
-   * setState scheduled against a component that is gone.
-   */
-  const confirm = (which: "copy" | "download") => {
-    setConfirmed(which);
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    confirmTimer.current = setTimeout(() => setConfirmed(null), UI.ACTION_FEEDBACK_MS);
-  };
-
-  useEffect(
-    () => () => {
-      if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    },
-    [],
-  );
 
   const onCopy = async () => {
     // `navigator.clipboard` can block on a permission prompt, so this is a real wait and

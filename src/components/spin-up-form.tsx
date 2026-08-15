@@ -19,11 +19,16 @@ import type { ActionField, ActionResult } from "@/lib/action-result";
 import {
   DEFAULT_IMAGE,
   presetFor,
-  httpPortFor,
   presetOptions,
-  presetVariableDefaults,
   presetVolumeFor,
 } from "@/lib/presets";
+import {
+  portFor,
+  reattachProvenance,
+  reseed,
+  seedRows,
+  type VariableRow,
+} from "@/lib/spin-up-rows";
 import { isUnattributable, rowErrorFor } from "@/lib/variable-rows";
 import { newIdempotencyKey } from "@/lib/random-id";
 import { managedSlug } from "@/lib/railway/slug";
@@ -40,43 +45,6 @@ import { VariableEditor } from "./variable-editor";
 import { PendingStatus } from "./ui/misc";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
-
-/** A row plus what the form needs to know about where it came from. */
-type VariableRow = KeyValueRow & {
-  origin: "preset" | "user";
-  /** Whether a person has edited either cell since it was seeded. */
-  touched: boolean;
-};
-
-const PRESET_ORIGIN = "preset" as const;
-const USER_ORIGIN = "user" as const;
-
-/** Catalog defaults as locked rows: the name is the catalog's, the value is the user's. */
-function seedRows(image: string): VariableRow[] {
-  return presetVariableDefaults(image).map((variable) => ({
-    // Stable across a reseed, so switching images and back does not move focus.
-    id: `preset-${variable.name}`,
-    name: variable.name,
-    value: variable.value,
-    locked: true,
-    ...(variable.generated ? { blankMeans: "generated" as const } : {}),
-    origin: PRESET_ORIGIN,
-    touched: false,
-  }));
-}
-
-/**
- * The port field's seeded value for an image, as the input holds it.
- *
- * A string because that is what an `<input>` value is, and the empty string is the whole of
- * "this image gets no public URL" — for a preset the catalog knows serves nothing, and for
- * an image it has never heard of. Those two are the same blank field on purpose: in both
- * cases the app has no port to offer, and the person is the one who knows.
- */
-const portFor = (image: string): string => {
-  const known = httpPortFor(image);
-  return known === undefined ? "" : String(known);
-};
 
 /**
  * The fields that live behind the Advanced disclosure.
@@ -100,25 +68,6 @@ export const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
 
 /** A stable empty list, so the resolved-name seed is not a new array every render. */
 const NO_NAMES: readonly string[] = [];
-
-/**
- * The rows an image change should leave behind.
- *
- * One rule: nothing a person typed is thrown away by changing the image. A touched preset
- * row survives and stops being locked, since the catalog that owned its name is gone; an
- * untouched one is replaced. A user row whose name collides with a new preset default wins,
- * and that default is not seeded — which is what keeps the duplicate rule from firing on
- * something the app itself created.
- */
-function reseed(rows: readonly VariableRow[], image: string): VariableRow[] {
-  const keep = rows
-    .filter((row) => row.origin === USER_ORIGIN || row.touched)
-    .map((row) => ({ ...row, locked: false }));
-  const seeded = seedRows(image).filter(
-    (row) => !keep.some((kept) => kept.name === row.name),
-  );
-  return [...seeded, ...keep];
-}
 
 export function SpinUpForm({
   projectId,
@@ -231,30 +180,8 @@ export function SpinUpForm({
     setPort((current) => (portTouched ? current : portFor(next)));
   };
 
-  /**
-   * Re-attaches the provenance the editor does not carry.
-   *
-   * `KeyValueEditor` is domain-free — it holds rows of two strings and knows nothing about
-   * catalogs — so `origin` and `touched` are matched back on here by row id. A row the
-   * editor invented is a user row, and any edit to either cell marks it touched, which is
-   * what stops the next image change from discarding it.
-   */
-  const changeRows = (next: KeyValueRow[]) => {
-    setRows(
-      next.map((row) => {
-        const previous = rows.find((candidate) => candidate.id === row.id);
-        return {
-          ...row,
-          origin: previous?.origin ?? USER_ORIGIN,
-          touched:
-            previous === undefined ||
-            previous.touched ||
-            previous.name !== row.name ||
-            previous.value !== row.value,
-        };
-      }),
-    );
-  };
+  // The editor is domain-free and hands back rows of two strings; see reattachProvenance.
+  const changeRows = (next: KeyValueRow[]) => setRows(reattachProvenance(next, rows));
 
   /*
    * Labels and group headings are catalog keys, resolved here. The catalog is a plain
