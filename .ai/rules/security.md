@@ -255,7 +255,8 @@ pnpm build && pnpm test:e2e e2e/security.spec.ts
 page. The unit and canary layers:
 
 ```sh
-pnpm test src/lib/security-headers.test.ts src/lib/auth/redact.test.ts \
+pnpm test src/lib/security-headers.test.ts src/app/security-headers.test.ts \
+  src/lib/auth/redact.test.ts \
   src/lib/log/serialize-error.test.ts src/lib/logger.test.ts \
   src/app/api/auth/callback/route.integration.test.ts
 ```

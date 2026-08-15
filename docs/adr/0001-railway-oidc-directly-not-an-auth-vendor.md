@@ -27,9 +27,9 @@ the refresh logic, just further from the thing that needs it.
    hand (`src/lib/auth/oidc.ts`). The escape hatch is most of the implementation.
 3. **v5 is still `5.0.0-beta.x`** and unproven against Next 16.
 
-**What it costs, measured.** The auth implementation is **419 lines** across
-`src/lib/auth/**` and the three route handlers, 493 counting `src/proxy.ts` — against
-**728 lines of tests**. (An earlier revision of this ADR said "about 150 lines"; that
+**What it costs, measured.** The auth implementation is **1,070 lines** across
+`src/lib/auth/**` (708) and the three route handlers (362), 1,336 counting `src/proxy.ts` —
+against **1,565 lines of tests**. (An earlier revision of this ADR said "about 150 lines"; that
 was wrong by a factor of three, and a decision argued from a number should use the real
 one.) In exchange for those lines, session encryption, CSRF and cookie chunking are
 hand-rolled rather than inherited. Two consequences are listed under Limitations.

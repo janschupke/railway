@@ -215,6 +215,29 @@ describe("the toolchain", () => {
     }
   });
 
+  it("keeps the Cursor rules' critical list identical to AGENTS.md's", () => {
+    /*
+     * `.cursor/rules/main.mdc` opens by declaring that it mirrors AGENTS.md's Rules and
+     * Critical rules sections and that the two must be kept in sync. Nothing kept them.
+     *
+     * It had drifted four ways at once: it said eleven ADRs against fourteen, it omitted
+     * `codegen:check` from the gate, it dropped the ADR-14 volume clause and the
+     * projects-and-environments clause from the ownership bullet, and it was missing the
+     * `Dockerfile` gate and the `required`-needs rule entirely. Every one of those is a
+     * rule an agent reading only that file would not know about — and Cursor reads only
+     * that file.
+     *
+     * Compared as an ordered list rather than a set, because these are ordered by how
+     * often an agent trips over them and a reordering is a change worth noticing.
+     */
+    const bullets = (text: string) =>
+      text.split("\n").filter((line) => line.startsWith("- **"));
+
+    const canonical = bullets(gateDocs["AGENTS.md"]);
+    expect(canonical.length).toBeGreaterThan(5);
+    expect(bullets(gateDocs[".cursor/rules/main.mdc"])).toEqual(canonical);
+  });
+
   it("lets the Dockerfile decide how the app starts", () => {
     /*
      * The runtime stage deliberately has no package manager in it, so a `startCommand`

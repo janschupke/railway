@@ -105,8 +105,8 @@ Two things in that file are load-bearing and easy to break:
 
 - The forwarded header set must be built from `new Headers(request.headers)`. Next drops
   every request header absent from the override list.
-- The matcher excludes `_next/static`, `_next/image`, `favicon.ico`, `icon.svg` and
-  `api/auth`. Each matched request pays an HKDF derive and a JWE decrypt; a favicon is
+- The matcher excludes `_next/static`, `_next/image`, `favicon.ico`, `icon.svg`,
+  `api/auth` **and `api/health`**. Each matched request pays an HKDF derive and a JWE decrypt; a favicon is
   fetched on every cold tab. The auth routes are excluded because they mint the session and
   must not be gated by it. Static security headers still reach those paths — `next.config.ts`
   sets them on `/:path*` independently of this matcher.
@@ -321,8 +321,8 @@ container depends on goes in `constants.ts`, and a number that only moves a pixe
 
 zod schema, memoised, `__resetEnv()` for tests. Required: `RAILWAY_CLIENT_ID`,
 `RAILWAY_CLIENT_SECRET`, `SESSION_SECRET` (≥32 chars). Optional: `APP_URL`,
-`APP_ORIGINS`, `MANAGED_PREFIX`, `WATCH_POLL_MS`, `METRICS_POLL_MS`, and the three
-`RAILWAY_*` endpoint overrides that exist so the e2e suite can point the whole app at
+`APP_ORIGINS`, `MANAGED_PREFIX`, `WATCH_POLL_MS`, `METRICS_POLL_MS`, `REGISTRY_PROBE_URL`,
+and the three `RAILWAY_*` endpoint overrides that exist so the e2e suite can point the whole app at
 `e2e/fixtures/fake-railway`.
 
 **The origin must be https unless it is loopback**, because every cookie decision reads it

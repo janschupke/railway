@@ -102,7 +102,7 @@ also keeps a browser pool off developer machines.
 
 Two projects, and the split is deliberate: `chromium` runs everything except
 `responsive.spec.ts`, and `mobile` (Pixel 7) runs only that one. A second full project would
-roughly double CI wall-clock at `workers: 1` and buy very little — the app declares one `sm:`
+roughly double CI wall-clock at `workers: 1` and buy very little — the app declares two `sm:` breakpoints
 in all of `src/` and adapts by wrapping everywhere else, so there is no viewport-conditional
 code for a second pass to regress. Put a phone-width assertion in `e2e/responsive.spec.ts`
 rather than adding a project.
@@ -119,9 +119,12 @@ against it, so PKCE, token exchange and refresh rotation are all genuinely exerc
 - Every spec resets it: the `test` fixture in `e2e/support.ts` posts to `/__test/reset`
   before the page is used.
 - Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
-  and supports `rateLimit`, `unauthorized`, `refreshFails`, `accessTokenTtl`,
-  `deploymentsFail`, `logPhase`, `variablesFail`, `projectsSource`, `rejectWorkspaces`,
-  `rejectPersonal` and `slowMs`.
+  and supports twenty-three knobs — `rateLimit`, `unauthorized`, `refreshFails`,
+  `accessTokenTtl`, `deploymentsFail`, `logPhase`, `failureField`, `deploymentEventsFail`,
+  `variablesFail`, `domainFails`, `settingsFail`, `limitsFail`, `volumeCreateFail`,
+  `volumesFail`, `metricsFail`, `workspaceFail`, `noWorkspace`, `projectsSource`,
+  `rejectWorkspaces`, `rejectPersonal`, `projectsEmpty`, `slowMs` and `registryStatus`.
+  `Faults` in `store.ts` is the list; this one is a summary and will drift again.
 - `fixtureStats(page)` exposes grant counters, because refresh happens server-side and
   Playwright cannot observe it with `waitForRequest`.
 

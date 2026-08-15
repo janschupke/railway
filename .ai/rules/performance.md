@@ -11,8 +11,8 @@ meta:
 
 | Route         | Budget |
 | ------------- | ------ |
-| `/`           | 171    |
-| `/dashboard`  | 222    |
+| `/`           | 179    |
+| `/dashboard`  | 229    |
 | `/_not-found` | 171    |
 
 `scripts/check-bundle-budget.ts` (`pnpm size`) checks them against

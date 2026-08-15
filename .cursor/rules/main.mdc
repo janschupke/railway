@@ -14,7 +14,7 @@ All detailed rules live in [`.ai/rules/`](../../.ai/rules/) — the single sourc
 This file mirrors the **Rules** and **Critical rules** sections of
 [`AGENTS.md`](../../AGENTS.md); keep those two in sync. It deliberately omits AGENTS.md's
 `## Commands` section and the `nextjs-agent-rules` block Next writes into that file. The
-reasoning behind each decision is in [`docs/adr/`](../../docs/adr/README.md) (eleven
+reasoning behind each decision is in [`docs/adr/`](../../docs/adr/README.md) (fourteen
 ADRs) and [SECURITY.md](../../SECURITY.md).
 
 ## Rules
@@ -38,8 +38,10 @@ ADRs) and [SECURITY.md](../../SECURITY.md).
 - **Never log** a token, `Error.cause`, an email, the sealed cookie, or container stdout. Never render upstream failure text — route it through `reportError`.
 - **`src/components/**` and `src/hooks/**` may not import** `lib/auth/session|refresh|server` or `lib/logger` / `lib/log/*`. Pass what the component needs as a prop.
 - **Every tuned number goes in `src/lib/constants.ts`**, in its group, with a rationale comment.
-- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input.
+- **The app only destroys services it created** — the `MANAGED_PREFIX` name check in `src/lib/railway/managed.ts`, tested against Railway's own response, never against client input. **A volume's owner is its service**, so the same check gates deleting it; destroy asks whether the data goes too and names the outcome either way (ADR-14). **Projects and environments are created but never deleted**, so they carry no prefix and `projectDelete`/`environmentDelete` are absent from `operations.ts` entirely.
 - **Coverage thresholds sit just under the measured figures, per directory as well as globally, and knip findings fail CI.** Widening an exclude list is not the fix.
 - **Playwright is `workers: 1`** and not negotiable — the fake Railway holds shared state.
 - **Raising a bundle budget needs a written reason** in the `$comment` array of `bundle-budgets.json`.
+- **A change to the `Dockerfile` is gated by `docker build`, a boot against `/api/health`, hadolint and Trivy** — the `image` job. Run them locally; the commands are in [workflow.md](.ai/rules/workflow.md). Do not put a package manager back into the runtime stage.
+- **A new CI job must be added to `required`'s `needs`**, or it gates nothing. `src/toolchain.test.ts` fails when the two disagree.
 - **Never create a branch**; commit subjects are sentence-case prose, and bodies explain the defect and the rejected alternatives.

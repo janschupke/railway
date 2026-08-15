@@ -14,7 +14,8 @@ browser.** Everything below follows from that.
 
 ```ts
 type ActionResult =
-  { ok: true; message: string } | { ok: false; error: string; field?: ActionField };
+  | { ok: true; message: string; select?: ActionSelection }
+  | { ok: false; error: string; field?: ActionField; index?: number };
 ```
 
 `describeActionError(error)` turns any thrown value into a `MessageDescriptor` the caller

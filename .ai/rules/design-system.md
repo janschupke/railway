@@ -79,9 +79,13 @@ from every heading. **Weight lives in the `Text` primitive for that reason.**
   instance extended with `TYPE_SCALE`, never bare `clsx` or string concatenation.
 - Control geometry (`h-control-*`, `px-control-*`) is tokenised too, and asserted by
   `src/app/control-scale.test.ts`. Do not hand-size a button.
-- Check `src/components/ui/` before writing a component. There are already primitives for
-  alert dialog, banner, button, card, combobox, error block, field, input, scroll area,
-  select, skeleton, text, theme toggle, toast and tooltip.
+- Check `src/components/ui/` before writing a component. **Read the directory rather than
+  this list** — it went stale by ten entries once already, which is the worst way for a
+  "check before you build" instruction to fail: it sends a reader off to write a checkbox
+  that exists. As of 2026-08-15: alert dialog, banner, button, card, checkbox, chip,
+  combobox, dialog, disclosure, error block, field, input, key-value editor, live region,
+  misc, multi-select, page, scroll area, select, skeleton, text, theme toggle, toast and
+  tooltip.
 
 ## Three themes, not two
 

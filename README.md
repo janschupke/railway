@@ -17,7 +17,7 @@ or destroy them — with live build and deploy logs streamed while it happens.
 [Limitations](#limitations) · [What I would do next](#what-i-would-do-next) ·
 [Verifying it works](#verifying-it-works)
 
-**Reference** — [Decisions (13 ADRs)](#decisions) · [Tests](#tests) ·
+**Reference** — [Decisions (14 ADRs)](#decisions) · [Tests](#tests) ·
 [Design system](#design-system) · [Internationalisation](#internationalisation) ·
 [Performance](#performance) · [Accessibility](#accessibility) · [Logs](#logs) ·
 [Typed documents](#typed-documents-and-schema-verification) · [Security](SECURITY.md) ·
@@ -83,7 +83,8 @@ them into the resolved package's identity, so `next` was literally named
 `next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` and
 `pnpm install --prod` could not drop any of them. Playwright and TypeScript were being
 deployed because they are devDependencies of the same package.json. Tracing asks what the
-server imports instead, and the answer is 38 MB.
+server imports instead, and the answer is 38 MB of `node_modules` — 44 MB once `.next` and
+the message catalog are counted, which is the number quoted above and everywhere else.
 
 The cost is that `next start` does not serve a standalone build, so `pnpm start`, the
 Playwright `webServer` and `scripts/serve-e2e.ts` all run `node .next/standalone/server.js`
@@ -146,21 +147,21 @@ Browser ──── SSE ────► Next.js (single Railway service)
 One process, one deployment. Server Components read, Server Actions write, and a single
 SSE route multiplexes deployment status and log output into the open tab.
 
-| Path                                    | Role                                                                   |
-| --------------------------------------- | ---------------------------------------------------------------------- |
-| `src/proxy.ts`                          | Refreshes the Railway access token before the render (see ADR-2)       |
-| `src/lib/auth/`                         | OIDC flow, encrypted session cookie, refresh rotation                  |
-| `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker                |
-| `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream         |
-| `src/app/layout.tsx`                    | The shell: one top bar and one footer, so a route owns only its column |
-| `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling                    |
-| `src/lib/logger.ts`                     | Structured logs: request-scoped fields, the error serializer           |
-| `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it                |
-| `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses        |
-| `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class          |
-| `src/app/dashboard/`                    | Page, data loader, Server Actions                                      |
-| `e2e/fixtures/fake-railway/`            | Stand-in Railway: OIDC + GraphQL + graphql-ws                          |
-| `scripts/verify-schema.ts`              | Checks every operation against the live Railway API                    |
+| Path                                    | Role                                                                       |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `src/proxy.ts`                          | Refreshes the Railway access token before the render (see ADR-2)           |
+| `src/lib/auth/`                         | OIDC flow, encrypted session cookie, refresh rotation                      |
+| `src/lib/railway/`                      | GraphQL client, mappers, status model, ownership marker                    |
+| `src/lib/railway/deployment-monitor.ts` | Merges status polling and the log subscription into one stream             |
+| `src/app/layout.tsx`                    | The shell: one top bar and one footer, so a route owns only its column     |
+| `src/lib/sse.ts`                        | SSE transport: framing, keepalive, duration ceiling                        |
+| `src/lib/logger.ts`                     | Structured logs: request-scoped fields, the error serializer               |
+| `src/lib/constants.ts`                  | Every tuned number, grouped by the concern that owns it                    |
+| `src/app/tokens.css`                    | Design tokens — primitives, then the semantic layer the UI uses            |
+| `src/components/ui/`                    | Primitives on Radix; features never hand-write a colour class              |
+| `src/app/dashboard/`                    | Page, data loader, Server Actions                                          |
+| `e2e/fixtures/fake-railway/`            | Stand-in Railway: OIDC + GraphQL + graphql-ws                              |
+| `scripts/verify-schema.ts`              | Checks every operation against the committed schema; live too with a token |
 
 ---
 
@@ -401,7 +402,7 @@ billingPeriod { start end } }` as part of the document. All three render a link 
 - **SSE pins a client to one replica**, so this is a single-replica app today. Two pieces
   of module state say so out loud: the stream cap in `lib/stream-slots.ts` and the
   idempotency map in `lib/idempotency.ts`. See below.
-- **A stream open for more than an hour** outlives its access token. Deploys finish well
+- **A stream open to its ceiling** outlives nothing: `STREAM.MAX_DURATION_MS` is fifteen minutes, clamped further to whatever is left of the access token. Deploys finish well
   inside that; a long-lived streaming session would need mid-stream token rotation.
 - **Double-submit protection expires, and does not survive a restart.** A submission
   carries an idempotency key and a repeat of it is answered with the first one's result
@@ -651,7 +652,8 @@ with it the light theme and the contrast test.
 ### Typography
 
 The type scale is seven roles, not a set of sizes: `display`, `title`, `heading`, `body`,
-`label`, `caption`, `badge`, `mono`. Sizes and line-heights live in `tokens.css` and are
+`label`, `caption`, `mono` — plus `badge`, which is a `Text` variant sharing the caption
+size rather than a scale step with a token of its own. Sizes and line-heights live in `tokens.css` and are
 mapped into Tailwind as `text-<role>` utilities; the `Text` and `Heading` primitives in
 `src/components/ui/text.tsx` are the only place a weight is chosen.
 
@@ -787,7 +789,7 @@ compares against `bundle-budgets.json`. Per route, no browser, ~2 seconds. (size
 cannot express this: Turbopack hashes every chunk name, so its config could only hold
 globs, and a glob sums a directory instead of answering "what does /dashboard cost".)
 
-Current: **/dashboard 207.6 kB**, **/ 162.3 kB**, **/\_not-found 161.9 kB** gzipped. The
+Budgets: **/dashboard 229 kB**, **/ 179 kB**, **/\_not-found 171 kB** gzipped, each a point or two above its last measurement — `bundle-budgets.json` is where they live and every raise carries its reason in the `$comment` log. The
 404 pays for the shared top bar — `ThemeToggle` is a client component, so every route
 now carries Radix ToggleGroup — which is the trade recorded in `bundle-budgets.json`.
 
@@ -854,7 +856,7 @@ thing Next externalizes pino to work around.
 
 | Field                       | What it is                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `msg`                       | The event name. ~25 stable values — the field to build a Loki label on                                               |
+| `msg`                       | The event name. Around sixty stable values — the field to build a Loki label on                                      |
 | `level`, `time`             | String label, epoch ms. Both pino defaults, left alone so the OTel bridge reads them                                 |
 | `service`, `env`, `version` | Map onto OTel's `service.name` / `deployment.environment.name` / `service.version`                                   |
 | `request_id`                | Joins a proxy line to the render and stream lines that follow it                                                     |
@@ -892,9 +894,9 @@ RAILWAY_TOKEN=… pnpm schema:pull    # src/lib/railway/schema.graphql — 6 900
 pnpm codegen                        # the documents' result and variable types, from that file
 ```
 
-`pnpm codegen` validates all sixteen documents against that schema and generates
-`src/lib/railway/graphql.generated.ts` — 345 lines, being exactly the operation types plus
-the eight enums and input objects the documents reach. Each export in `operations.ts` is
+`pnpm codegen` validates all twenty-eight documents against that schema and generates
+`src/lib/railway/graphql.generated.ts` — 524 lines, being exactly the operation types plus
+the nineteen enums and input objects the documents reach. Each export in `operations.ts` is
 annotated with its pair:
 
 ```ts
@@ -933,13 +935,15 @@ those objects in TypeScript.
 _root_ fields, and said nothing about the selections underneath them. Two declarations
 survive, because neither is derivable from a document:
 
-- `DEGRADING_OPERATIONS` — `ProjectMetrics` and `DeploymentEvents`, the two documents whose
+- `DEGRADING_OPERATIONS` — `ProjectMetrics`, `DeploymentEvents`, `EnvironmentVolumes` and
+  `Regions`, the four documents whose
   refusal degrades a readout rather than breaking the app. A validation error inside those is
   reported and does not fail the run. That is a product decision, not a fact about the schema.
 - `OPTIONAL_FIELDS` — capabilities Railway does not document and this app does not use, with
-  what the app cannot do without each. As of 2026-08-14 `deploymentRemove`,
-  `deploymentRollback` and `variableUpsert` all exist and none is sent; see Limitations for
-  why. No document mentions them, so no derivation can find them. `deploymentStop` and
+  what the app cannot do without each. Seven entries as of 2026-08-15 — `deploymentRemove`,
+  `deploymentRollback`, `variableUpsert`, `volumeUpdate`, `volumeInstanceUpdate`,
+  `customDomainCreate` and `tcpProxyCreate` — all of which exist and none of which is sent;
+  see Limitations for why. No document mentions them, so no derivation can find them. `deploymentStop` and
   `serviceInstanceUpdate` were both listed here and are documents now, which is the whole
   distinction this list draws: a capability the app wants is reported, a capability it
   depends on fails the run.

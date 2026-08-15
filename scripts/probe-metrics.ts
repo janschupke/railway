@@ -25,8 +25,10 @@
  *      mapper has to group by `[SERVICE_ID, ENVIRONMENT_ID]` and filter — one more branch,
  *      no more requests.
  *   4. Whether the `project.workspace.customer` chain answers. That chain is the only
- *      monetary figure anywhere in Railway's schema, and it is three types below a root
- *      field where `verify:schema` cannot see it.
+ *      monetary figure anywhere in Railway's schema. `verify:schema` does now validate it —
+ *      the document selecting it is in `operations.ts` and is checked like any other — so
+ *      what is left for this probe is the question introspection cannot answer: whether an
+ *      OAuth grant is *permitted* to read it. Different question, same script.
  */
 
 import { openSession } from "../src/lib/auth/session.ts";

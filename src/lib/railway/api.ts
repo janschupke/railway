@@ -652,7 +652,7 @@ export async function createContainer(
        * Recorded because it is the ownership marker, and this app did not write it.
        * Railway derives the volume's name from the service's — `spun-pg` gets
        * `spun-pg-volume` — so the MANAGED_PREFIX reaches the volume without a rename. See
-       * ADR-13, and OPTIONAL_FIELDS on `volumeUpdate` for what happens if that changes.
+       * ADR-14, and OPTIONAL_FIELDS on `volumeUpdate` for what happens if that changes.
        */
       log.info("railway.volume_created", {
         service_id: serviceId,
@@ -1122,7 +1122,7 @@ export async function destroyContainer(
  *
  * Checks nothing itself, exactly as `destroyContainer` checks nothing. The guard is the
  * `MANAGED_PREFIX` re-derivation in the one caller, and `mutation-callsites.test.ts` is what
- * holds that property — a call graph no type defends. See ADR-13 for why a volume's owner is
+ * holds that property — a call graph no type defends. See ADR-14 for why a volume's owner is
  * the service it is mounted on.
  */
 export async function deleteVolume(

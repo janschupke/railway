@@ -180,7 +180,7 @@ answer 200. It prints the container's logs either way, because those records are
 diagnostic.
 
 The runtime stage **removes npm**, which the base image ships and nothing here calls. Same
-rule as pnpm's absence, and it is what makes an unqualified `HIGH,CRITICAL` image scan
+rule as pnpm's absence, and it is what lets a `--ignore-unfixed HIGH,CRITICAL` image scan
 gate on zero: every finding otherwise reported sits inside npm's own bundled dependencies,
 which no commit in this repository can fix.
 

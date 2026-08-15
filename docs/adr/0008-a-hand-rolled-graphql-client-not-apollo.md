@@ -1,6 +1,6 @@
 # ADR-8 — A hand-rolled GraphQL client, not Apollo
 
-`src/lib/railway/` is 1072 lines covering ten operations: a transport (`client.ts`), the
+`src/lib/railway/` is 5,303 lines covering twenty-eight operations: a transport (`client.ts`), the
 documents, typed call sites, error mapping, and a monitor that merges a log subscription
 with a status poll.
 
@@ -9,7 +9,7 @@ with a status poll.
 components that touch this directory import types and pure helpers exclusively. Apollo
 Client's value is a normalized cache plus hooks in the browser — there is no
 browser-side GraphQL here to give them to, and it would put ~35 kB gzip into a bundle
-that is gated at 209 kB.
+that is gated at 229 kB.
 
 **A normalized cache would be actively wrong.** The dashboard shows infrastructure that
 changes underneath the user; every request is `cache: "no-store"` on purpose. There are
@@ -47,7 +47,7 @@ against Railway's live schema instead of a hand-written list of root fields.
 That strengthens this decision rather than weakening it. Everything Apollo was rejected for
 is untouched — there is still no browser-side GraphQL, still no cache to normalize, still a
 `graphql-ws`-to-SSE bridge no link chain crosses — and the one thing it was missing arrived
-without it. What was added is 345 generated lines and one dev dependency that runs at build
+without it. What was added is 524 generated lines and one dev dependency that runs at build
 time; `graphql` itself is a peer of `graphql-ws`, which this app already had.
 
 ---

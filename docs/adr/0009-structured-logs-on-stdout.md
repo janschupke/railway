@@ -12,7 +12,7 @@ a request id that survives the proxy → render → stream handoff, and an error
 that cannot leak a credential.
 
 **`msg` is an event name, not prose.** `container.created`, `auth.session.refresh_failed`.
-About twenty-five values, which is what makes it usable as a Loki label rather than a
+Around sixty values, which is what makes it usable as a Loki label rather than a
 substring search. `reportError`'s existing `scope` argument already had this shape, so it
 became the event name unchanged.
 

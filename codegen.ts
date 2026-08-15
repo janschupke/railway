@@ -39,14 +39,14 @@ const config: CodegenConfig = {
        * one unusual line in this file.
        *
        * With `onlyOperationTypes` this plugin emits everything the documents reach and
-       * nothing else — the operation and variable types, plus the eight enums and input
+       * nothing else — the operation and variable types, plus the nineteen enums and input
        * objects they reference — in 240 lines, self-contained, with scalars inlined rather
        * than routed through a `Scalars` lookup. Adding the base plugin does not add to that:
        * it emits all 609 of Railway's types regardless of `onlyOperationTypes`, and the two
        * outputs then declare the same eight identifiers twice, which does not compile.
        *
        * Rejected: both plugins with no `onlyOperationTypes`. That compiles, and it commits
-       * 6000 generated lines describing a container platform in order to type sixteen
+       * 6000 generated lines describing a container platform in order to type twenty-eight
        * documents — most of it input objects for mutations ADR-6 says this app will never
        * send.
        */
