@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Container } from "@/lib/railway/types";
 
 const loadContainers = vi.fn();
-vi.mock("./data", () => ({
+vi.mock("./data-containers", () => ({
   loadContainers: (...args: unknown[]) => loadContainers(...args),
 }));
 

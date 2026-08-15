@@ -8,7 +8,7 @@ import { Text } from "@/components/ui/text";
 import { LINKS } from "@/lib/constants";
 import { managedPrefix } from "@/lib/railway/managed";
 import type { WorkspaceSpend } from "@/lib/railway/types";
-import { loadContainers } from "./data";
+import { loadContainers } from "./data-containers";
 
 /**
  * The container list and everything derived from it.

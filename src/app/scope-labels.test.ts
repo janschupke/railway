@@ -97,12 +97,38 @@ describe("the request scope's label", () => {
   });
 
   it("names the page the dashboard loaders serve", () => {
-    // Not a function name: these are Server Component loaders, and the thing a log reader
-    // wants beside them is the page whose render they belong to.
-    for (const call of code(path.join(SRC, "app", "dashboard", "data.ts")).matchAll(
-      CALL,
-    )) {
-      expect(call[1]).toBe("/dashboard");
+    /*
+     * Every scoped module under app/dashboard, discovered rather than named.
+     *
+     * This read `data.ts` by hand, which is the trap the note above already describes for
+     * the Server Action case: a check that names one file makes splitting that file
+     * impossible without deleting the check. `data.ts` is four loader modules now, and a
+     * fifth would have been invisible here.
+     *
+     * Not a function name on any of them: these are Server Component loaders, and the thing
+     * a log reader wants beside them is the page whose render they belong to.
+     */
+    const dashboard = path.join(SRC, "app", "dashboard");
+    const scoped = readdirSync(dashboard, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .filter((entry) => !entry.name.endsWith(".test.ts"))
+      .map((entry) => path.join(dashboard, entry.name))
+      /*
+       * Server Actions are excluded by what they are rather than by what they are called:
+       * a `"use server"` module labels each export with its own name, and
+       * `local/action-scope-label` is what checks those. Everything else scoped under
+       * app/dashboard is a loader.
+       */
+      .filter((file) => !/^\s*"use server";/m.test(readFileSync(file, "utf8")))
+      .flatMap((file) =>
+        [...code(file).matchAll(CALL)].map((call) => [file, call] as const),
+      );
+
+    // A discovery bug would empty this and pass in silence, the same way the route case says.
+    expect(scoped.length).toBeGreaterThan(1);
+
+    for (const [file, call] of scoped) {
+      expect(call[1], `the scope label in ${path.basename(file)}`).toBe("/dashboard");
     }
   });
 });

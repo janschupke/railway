@@ -16,7 +16,9 @@ import { ErrorBlock } from "@/components/ui/error-block";
 import { EmptyState } from "@/components/ui/misc";
 import { LINKS } from "@/lib/constants";
 import { ContainerSection } from "./container-section";
-import { deployRegions, loadDashboardShell, managedNames } from "./data";
+import { managedNames } from "./data-containers";
+import { deployRegions } from "./data-regions";
+import { loadDashboardShell } from "./data-shell";
 import { PageMain } from "@/components/ui/page";
 import { Heading } from "@/components/ui/text";
 

@@ -24,8 +24,14 @@ vi.mock("@/lib/railway/regions", () => ({
   cachedRegions: (...args: unknown[]) => cachedRegions(...args),
 }));
 
-const { loadDashboardShell, loadContainers, managedNames, deployRegions } =
-  await import("./data");
+/*
+ * Four loaders across four modules now, driven together because that is how the page uses
+ * them: `managedNames` reads through `loadContainers`' own `cache()` memo, and the cases
+ * asserting that the second call costs no round trip only mean anything from here.
+ */
+const { loadContainers, managedNames } = await import("./data-containers");
+const { deployRegions } = await import("./data-regions");
+const { loadDashboardShell } = await import("./data-shell");
 const { RailwayApiError } = await import("@/lib/railway/errors");
 /**
  * `METRICS_POLL_MS`, overridable per test without touching `process.env`.
