@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
-import catalog from "../../messages/en.json";
-import { LIMITS } from "./constants";
+import catalog from "../../../messages/en.json";
+import { LIMITS } from "../constants";
+import { VALIDATION_KEYS, VALIDATION_VALUES } from "./keys";
 import {
-  VALIDATION_KEYS,
-  VALIDATION_VALUES,
   containerActionSchema,
   containerEditSchema,
   environmentCreateSchema,
   projectCreateSchema,
   spinUpSchema,
-} from "./validation";
+} from "./schemas";
 
 /**
  * A key the form would have minted, written out rather than generated.

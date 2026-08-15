@@ -8,7 +8,7 @@ import { log } from "@/lib/logger";
 import { stripPrefix, toManagedName } from "@/lib/railway/managed";
 import { presetFor } from "@/lib/presets";
 import { resolveVariables } from "@/lib/railway/secrets";
-import { containerEditSchema, pairVariableRows } from "@/lib/validation";
+import { containerEditSchema, pairVariableRows } from "@/lib/validation/schemas";
 import { formField, formList, issueToResult, variableAudit } from "./action-form";
 import { logLifecycle, withManagedContainer } from "./action-managed";
 

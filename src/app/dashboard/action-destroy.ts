@@ -9,7 +9,7 @@ import { destroyContainer } from "@/lib/railway/service-lifecycle";
 import { deleteVolume, getEnvironmentVolumes } from "@/lib/railway/volumes";
 import { log } from "@/lib/logger";
 import { SessionExpiredError } from "@/lib/auth/refresh";
-import { containerBulkActionSchema } from "@/lib/validation";
+import { containerBulkActionSchema } from "@/lib/validation/schemas";
 import type { Container, ContainerVolume } from "@/lib/railway/types";
 import { formField, formList, issueToResult, toActionError } from "./action-form";
 import {

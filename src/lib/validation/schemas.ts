@@ -1,3 +1,14 @@
+/**
+ * The form schemas — every rule that decides whether a submission is acceptable.
+ *
+ * The zod half of what used to be one 703-line `validation.ts`. The other two thirds of
+ * that file were a set of regexes and a table of message keys, neither of which needs a
+ * schema library, and both of which several modules wanted without one; they are `./patterns`
+ * and `./keys` now. **There is deliberately no barrel re-exporting all three** — a barrel
+ * would re-unite the module graph and put zod back in the bundle of everything that reads a
+ * regex, which is the whole point of separating them.
+ */
+
 import { z } from "zod";
 import { LIMITS } from "@/lib/constants";
 /*
@@ -9,144 +20,14 @@ import { LIMITS } from "@/lib/constants";
  */
 import { IMAGE_PATTERN } from "@/lib/registry/reference";
 import type { RestartPolicyType } from "@/lib/railway/graphql.generated";
-
-/**
- * Deployment id, as it arrives from the URL of the stream route.
- *
- * Bounds charset and length rather than asserting a format. Used for every Railway
- * identifier that arrives on a URL — deployments, projects, environments.
- * Railway's ids look like
- * UUIDs today, but this app has no way to prove that — and a validator that guesses
- * wrong turns every log pane into a 400. What matters is that path separators, dots and
- * unbounded input cannot reach the GraphQL layer; the concurrency cap and the
- * missing-deployment timeout are what bound the abuse, and neither depends on the shape.
- */
-export const RAILWAY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-/**
- * The token the spin-up form mints to name one submission of itself.
- *
- * Not exported: nothing outside this file decides what a key may look like, and the
- * generator in lib/random-id.ts sits comfortably inside these bounds rather than at them.
- *
- * Both ends of the length matter, and for unrelated reasons. The floor is the security
- * one — a short key is a guessable key, and guessing one replays somebody else's result
- * instead of creating what they asked for. The ceiling is a memory one: this string
- * becomes half of a key in a process-global map, so unbounded is a growth surface. The
- * charset is the same one every Railway identifier uses here, which keeps it greppable
- * in a log line.
- */
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
-
-/**
- * An environment variable name: POSIX's own definition.
- *
- * Underscore or letter, then letters, digits and underscores. Deliberately not
- * uppercase-only — lowercase names are legal everywhere they matter, and a validator that
- * guesses stricter than the platform turns a working variable into a form error.
- *
- * Linear, with no nested quantifier and disjoint atom classes, so it is not ReDoS-able for
- * the same reason IMAGE_PATTERN is not. SECURITY.md makes that claim about the image regex
- * and a reviewer will ask it of this one.
- */
-export const VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * Everything a value may hold: any character except the C0 controls and DEL, with tab
- * allowed through.
- *
- * The exclusion is the whole rule. A line break is invisible in a single-line input — the
- * browser's own value-sanitization algorithm strips it from a pasted string, so the user's
- * secret is silently truncated — and it survives to whatever downstream reads an
- * environment block line by line, which is the one character class that changes the shape
- * of what is being set rather than its content. NUL is refused at the other end of the
- * range for the same reason, and doubles as what a non-string FormData entry is coerced to
- * before it gets here.
- */
-const VARIABLE_VALUE_PATTERN = /^[^\u0000-\u0008\u000A-\u001F\u007F]*$/;
-
-/**
- * The namespace Railway sets itself.
- *
- * Railway injects a RAILWAY_* block into every service — environment, project id, service
- * name, the private and public domains. `variableCollectionUpsert` runs with
- * `replace: false`, so a collision is a silent merge in one direction or the other and the
- * loser is invisible. Refusing the namespace is cheaper than explaining it.
- *
- * Exported so presets.test.ts can prove no catalog entry is unsubmittable by its own form,
- * which is the failure mode this rule would otherwise create.
- */
-export const RESERVED_VARIABLE_PREFIX = "RAILWAY_";
-
-/**
- * Every catalog key a rule in this file can name, declared once.
- *
- * Every rule carries a catalog key as its message, and every rule carries one — the
- * silent `.min(1)` calls used to fall through to zod's own built-in English, which no
- * amount of translation would have reached. The action resolves them; see
- * `messageForIssue` in `src/app/dashboard/actions.ts`.
- *
- * Referenced by the rules rather than restated by them, and that is the whole point. The
- * rules used to carry bare `"validation.…"` literals and `VALIDATION_KEYS` below was a
- * hand-maintained mirror of them, linked by nothing. A rule added with its key forgotten
- * there did not fail — `messageForIssue` fell through to the generic `actions.invalidForm`
- * and the specific sentence was silently replaced by "check the form". Now a mistyped or
- * missing key is a typecheck error at the rule site, which is where it can be fixed.
- *
- * Several keys are named by two or three rules — `portInvalid` by both of `port`'s
- * refinements, `regionInvalid` by a length rule and a charset rule, `submissionInvalid` by
- * both halves of the idempotency check. Those are the sites that were free to drift.
- */
-const KEYS = {
-  nameRequired: "validation.nameRequired",
-  nameTooLong: "validation.nameTooLong",
-  imageRequired: "validation.imageRequired",
-  imageTooLong: "validation.imageTooLong",
-  imageInvalid: "validation.imageInvalid",
-  projectRequired: "validation.projectRequired",
-  environmentRequired: "validation.environmentRequired",
-  serviceRequired: "validation.serviceRequired",
-  deploymentRequired: "validation.deploymentRequired",
-  referenceInvalid: "validation.referenceInvalid",
-  variableNameRequired: "validation.variableNameRequired",
-  variableNameTooLong: "validation.variableNameTooLong",
-  variableNameInvalid: "validation.variableNameInvalid",
-  variableNameReserved: "validation.variableNameReserved",
-  variableNameDuplicate: "validation.variableNameDuplicate",
-  variableValueTooLong: "validation.variableValueTooLong",
-  variableValueInvalid: "validation.variableValueInvalid",
-  variablesTooMany: "validation.variablesTooMany",
-  variablesTooLarge: "validation.variablesTooLarge",
-  variablesMalformed: "validation.variablesMalformed",
-  portInvalid: "validation.portInvalid",
-  regionInvalid: "validation.regionInvalid",
-  replicasInvalid: "validation.replicasInvalid",
-  replicasTooMany: "validation.replicasTooMany",
-  cpuInvalid: "validation.cpuInvalid",
-  cpuTooLarge: "validation.cpuTooLarge",
-  memoryInvalid: "validation.memoryInvalid",
-  memoryTooLarge: "validation.memoryTooLarge",
-  restartPolicyInvalid: "validation.restartPolicyInvalid",
-  restartRetriesInvalid: "validation.restartRetriesInvalid",
-  restartRetriesTooMany: "validation.restartRetriesTooMany",
-  startCommandInvalid: "validation.startCommandInvalid",
-  startCommandTooLong: "validation.startCommandTooLong",
-  tooManyContainers: "validation.tooManyContainers",
-  submissionInvalid: "validation.submissionInvalid",
-  projectNameRequired: "validation.projectNameRequired",
-  projectNameTooLong: "validation.projectNameTooLong",
-  environmentNameRequired: "validation.environmentNameRequired",
-  environmentNameTooLong: "validation.environmentNameTooLong",
-} as const;
-
-/**
- * The key a rule may name — the union of the table above, and nothing else.
- *
- * Load-bearing on the three helpers that take a message as an argument (`railwayId`,
- * `optionalCount`, `optionalAmount`): those literals live at the call site rather than in
- * the rule, so a bare string there would reopen exactly the hole the table closes.
- */
-type ValidationKey = (typeof KEYS)[keyof typeof KEYS];
+import { KEYS, type ValidationKey } from "./keys";
+import {
+  IDEMPOTENCY_KEY_PATTERN,
+  RAILWAY_ID_PATTERN,
+  RESERVED_VARIABLE_PREFIX,
+  VARIABLE_NAME_PATTERN,
+  VARIABLE_VALUE_PATTERN,
+} from "./patterns";
 
 /**
  * A Railway identifier arriving from a form rather than from a URL.
@@ -649,43 +530,6 @@ export const containerBulkActionSchema = z.object({
     .min(1, KEYS.serviceRequired)
     .max(LIMITS.BULK_DESTROY_MAX, KEYS.tooManyContainers),
 });
-
-/**
- * The values each interpolating key needs, keyed by the same table the rules read.
- *
- * Only the keys whose sentence states a bound are here; the rest interpolate nothing.
- * `portInvalid` is the one that needs two, because its sentence names a range.
- */
-export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
-  [KEYS.nameTooLong]: { max: LIMITS.CONTAINER_NAME_MAX },
-  [KEYS.imageTooLong]: { max: LIMITS.IMAGE_REF_MAX },
-  [KEYS.variableNameTooLong]: { max: LIMITS.VARIABLE_NAME_MAX },
-  [KEYS.variableValueTooLong]: { max: LIMITS.VARIABLE_VALUE_MAX },
-  [KEYS.variablesTooMany]: { max: LIMITS.VARIABLES_MAX },
-  [KEYS.variablesTooLarge]: { max: LIMITS.VARIABLES_TOTAL_MAX },
-  [KEYS.portInvalid]: { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
-  [KEYS.replicasTooMany]: { max: LIMITS.REPLICAS_MAX },
-  [KEYS.cpuTooLarge]: { max: LIMITS.VCPU_MAX },
-  [KEYS.memoryTooLarge]: { max: LIMITS.MEMORY_GB_MAX },
-  [KEYS.restartRetriesTooMany]: { max: LIMITS.RESTART_RETRIES_MAX },
-  [KEYS.startCommandTooLong]: { max: LIMITS.START_COMMAND_MAX },
-  [KEYS.tooManyContainers]: { max: LIMITS.BULK_DESTROY_MAX },
-  [KEYS.projectNameTooLong]: { max: LIMITS.PROJECT_NAME_MAX },
-  [KEYS.environmentNameTooLong]: { max: LIMITS.ENVIRONMENT_NAME_MAX },
-};
-
-/**
- * Every catalog key the schemas above can produce.
- *
- * Exists so the action can tell "a key one of these rules named" from "whatever zod
- * generated when no rule applied" — the two are both strings on `issue.message`, and
- * treating the second as a key is how zod's own English reached a toast.
- *
- * Derived from the table rather than restating it. This was a second hand-written list of
- * the same 38 strings, so the set and the rules could disagree and only a user would find
- * out — the missing key degraded to `actions.invalidForm` rather than failing anything.
- */
-export const VALIDATION_KEYS: ReadonlySet<string> = new Set(Object.values(KEYS));
 
 /**
  * The fields behind the spin-up form's Advanced disclosure, by name.

@@ -10,7 +10,7 @@ import { log } from "@/lib/logger";
 import { toManagedName } from "@/lib/railway/managed";
 import { presetFor } from "@/lib/presets";
 import { resolveVariables } from "@/lib/railway/secrets";
-import { pairVariableRows, spinUpSchema } from "@/lib/validation";
+import { pairVariableRows, spinUpSchema } from "@/lib/validation/schemas";
 import {
   formField,
   formList,

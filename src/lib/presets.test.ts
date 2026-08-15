@@ -11,11 +11,8 @@ import {
   presetVolumeFor,
   repositoryOf,
 } from "./presets";
-import {
-  RESERVED_VARIABLE_PREFIX,
-  VARIABLE_NAME_PATTERN,
-  spinUpSchema,
-} from "./validation";
+import { RESERVED_VARIABLE_PREFIX, VARIABLE_NAME_PATTERN } from "./validation/patterns";
+import { spinUpSchema } from "./validation/schemas";
 
 const messages = JSON.parse(
   readFileSync(

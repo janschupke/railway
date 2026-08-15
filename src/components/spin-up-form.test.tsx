@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import { REGISTRY } from "@/lib/constants";
 import { ACTION_FIELDS, type ActionResult } from "@/lib/action-result";
-import { ADVANCED_FIELD_NAMES } from "@/lib/validation";
+import { ADVANCED_FIELD_NAMES } from "@/lib/validation/schemas";
 import type { RegionOption } from "@/lib/railway/types";
 
 const spinUp = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();

@@ -13,7 +13,7 @@ import {
   stopDeployment,
 } from "@/lib/railway/service-lifecycle";
 import { httpPortFor } from "@/lib/presets";
-import { containerRollbackSchema } from "@/lib/validation";
+import { containerRollbackSchema } from "@/lib/validation/schemas";
 import { formField } from "./action-form";
 import { LIFECYCLE_EVENTS, logLifecycle, withManagedContainer } from "./action-managed";
 

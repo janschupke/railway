@@ -8,7 +8,7 @@ import { withRequestScope } from "@/lib/log/request-scope";
 import { streamCloser, streamDurationMs } from "@/lib/stream-route";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
-import { RAILWAY_ID_PATTERN } from "@/lib/validation";
+import { RAILWAY_ID_PATTERN } from "@/lib/validation/patterns";
 
 // `ws` needs Node, and this is a long-lived response.
 export const runtime = "nodejs";

@@ -6,7 +6,7 @@ import { requireAccessToken } from "@/lib/auth/server";
 import type { ActionResult } from "@/lib/action-result";
 import { getProjectContainers } from "@/lib/railway/projects";
 import { log } from "@/lib/logger";
-import { containerActionSchema } from "@/lib/validation";
+import { containerActionSchema } from "@/lib/validation/schemas";
 import type { Container } from "@/lib/railway/types";
 import { formField, toActionError } from "./action-form";
 

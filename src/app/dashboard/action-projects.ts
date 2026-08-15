@@ -15,7 +15,7 @@ import {
   createProject as createProjectOnRailway,
 } from "@/lib/railway/projects";
 import { log } from "@/lib/logger";
-import { environmentCreateSchema, projectCreateSchema } from "@/lib/validation";
+import { environmentCreateSchema, projectCreateSchema } from "@/lib/validation/schemas";
 import { formField, issueToResult, toActionError } from "./action-form";
 
 /**

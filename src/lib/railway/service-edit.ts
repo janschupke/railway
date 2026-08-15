@@ -12,7 +12,7 @@ import "server-only";
 import { log } from "@/lib/logger";
 // The one rule this layer shares with the form: a name the schema refuses on the way in is
 // a name there is no point drawing a row for on the way out.
-import { RESERVED_VARIABLE_PREFIX } from "@/lib/validation";
+import { RESERVED_VARIABLE_PREFIX } from "@/lib/validation/patterns";
 import { gql } from "./client";
 // An edit is not live until it is deployed, so the update ends by calling the same verb a
 // redeploy does.

@@ -9,7 +9,7 @@ import {
   type ActionResult,
 } from "@/lib/action-result";
 import { presetFor } from "@/lib/presets";
-import { VALIDATION_KEYS, VALIDATION_VALUES } from "@/lib/validation";
+import { VALIDATION_KEYS, VALIDATION_VALUES } from "@/lib/validation/keys";
 import type { Translate } from "@/lib/messages";
 
 /**

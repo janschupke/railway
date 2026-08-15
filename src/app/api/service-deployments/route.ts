@@ -3,7 +3,7 @@ import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { listServiceDeployments } from "@/lib/railway/service-lifecycle";
-import { RAILWAY_ID_PATTERN } from "@/lib/validation";
+import { RAILWAY_ID_PATTERN } from "@/lib/validation/patterns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

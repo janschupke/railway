@@ -12,7 +12,7 @@ import { sleep } from "@/lib/utils";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { WATCH } from "@/lib/constants";
 import { env } from "@/env";
-import { RAILWAY_ID_PATTERN } from "@/lib/validation";
+import { RAILWAY_ID_PATTERN } from "@/lib/validation/patterns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
