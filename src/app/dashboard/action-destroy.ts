@@ -4,12 +4,9 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { requireAccessToken } from "@/lib/auth/server";
 import type { ActionResult } from "@/lib/action-result";
-import {
-  deleteVolume,
-  destroyContainer,
-  getEnvironmentVolumes,
-  getProjectContainers,
-} from "@/lib/railway/api";
+import { getProjectContainers } from "@/lib/railway/projects";
+import { destroyContainer } from "@/lib/railway/service-lifecycle";
+import { deleteVolume, getEnvironmentVolumes } from "@/lib/railway/volumes";
 import { log } from "@/lib/logger";
 import { SessionExpiredError } from "@/lib/auth/refresh";
 import { containerBulkActionSchema } from "@/lib/validation";

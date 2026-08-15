@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { log } from "@/lib/logger";
 import type { ActionResult } from "@/lib/action-result";
+import { createServiceDomain } from "@/lib/railway/domains";
 import {
-  createServiceDomain,
   deployService,
   listServiceDeployments,
   restartDeployment,
   rollbackDeployment,
   stopDeployment,
-} from "@/lib/railway/api";
+} from "@/lib/railway/service-lifecycle";
 import { httpPortFor } from "@/lib/presets";
 import { containerRollbackSchema } from "@/lib/validation";
 import { formField } from "./action-form";
@@ -98,7 +98,7 @@ export async function redeploy(formData: FormData): Promise<ActionResult> {
     /*
      * No deployment id needed, which is why this is the app's only redeploy path: a
      * service whose first deploy Railway refused has none, and it is exactly the row a
-     * user most wants this control on. See deployService in lib/railway/api.ts.
+     * user most wants this control on. See deployService in lib/railway/service-lifecycle.ts.
      */
     const deploymentId = await deployService(context.accessToken, {
       serviceId: context.target.serviceId,

@@ -3,20 +3,17 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LIST, STREAM } from "@/lib/constants";
 import { logRecords, rawLogLines } from "@/test/log-capture";
+import { createServiceDomain } from "./domains";
+import { getProjectMetrics } from "./metrics";
+import { getProjectContainers, listProjects } from "./projects";
+import { createContainer } from "./service-create";
+import { readServiceVariableNames, updateContainer } from "./service-edit";
 import {
-  createContainer,
-  createServiceDomain,
-  deleteVolume,
   destroyContainer,
-  getEnvironmentVolumes,
-  getProjectContainers,
-  getProjectMetrics,
-  listProjects,
   listServiceDeployments,
-  readServiceVariableNames,
   rollbackDeployment,
-  updateContainer,
-} from "./api";
+} from "./service-lifecycle";
+import { deleteVolume, getEnvironmentVolumes } from "./volumes";
 import { getDeployment, getDeploymentFailure, getLogs } from "./deployment-reads";
 import { railwayApiUrl } from "./client";
 

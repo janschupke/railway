@@ -38,7 +38,7 @@
  *
  * Read-only. Three queries and one subscription.
  *
- * It cannot call getLogs() or streamLogs(): src/lib/railway/api.ts and
+ * It cannot call getLogs() or streamLogs(): src/lib/railway/deployment-reads.ts and
  * src/lib/railway/subscribe.ts both `import "server-only"`, which is a bare throw outside
  * a React Server Component graph, and removing that is forbidden by .ai/rules/security.md.
  * So the GraphQL *documents* are imported from operations.ts — which carries no such

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { requireAccessToken } from "@/lib/auth/server";
 import type { ActionResult } from "@/lib/action-result";
-import { getProjectContainers } from "@/lib/railway/api";
+import { getProjectContainers } from "@/lib/railway/projects";
 import { log } from "@/lib/logger";
 import { containerActionSchema } from "@/lib/validation";
 import type { Container } from "@/lib/railway/types";

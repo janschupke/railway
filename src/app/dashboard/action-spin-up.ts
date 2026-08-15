@@ -5,7 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { requireSession } from "@/lib/auth/server";
 import type { ActionResult } from "@/lib/action-result";
 import { runOnce, type Retainable } from "@/lib/idempotency";
-import { createContainer } from "@/lib/railway/api";
+import { createContainer } from "@/lib/railway/service-create";
 import { log } from "@/lib/logger";
 import { toManagedName } from "@/lib/railway/managed";
 import { presetFor } from "@/lib/presets";

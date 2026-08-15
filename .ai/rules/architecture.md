@@ -159,7 +159,8 @@ re-reads the container list from Railway, and refuses before the verb's own call
 of that check is the thing to refuse in review, because the weaker copy is the one that
 would ship. Two lint rules assert the shape structurally, and neither is sufficient alone:
 `no-restricted-imports` lets only `src/app/dashboard/**` import a mutation from
-`lib/railway/api`, and `local/mutation-inside-ownership-guard` requires each call to sit
+`lib/railway/*` — the directory rather than one module, so a mutation added to a file nobody
+has written yet is covered by default — and `local/mutation-inside-ownership-guard` requires each call to sit
 inside `withManagedContainer`'s callback. The first alone would let the write lane act on
 an unchecked id; the second alone would let any module act as long as it opened a guard.
 

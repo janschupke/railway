@@ -97,7 +97,7 @@ of them is logged at any level.
 
 The property that matters here is on the way _out_, not the way in. Railway answers that
 query with a name-to-value map, values included; `readServiceVariableNames` reduces it to
-names inside `src/lib/railway/api.ts`, so no caller — route handler, Server Action or
+names inside `src/lib/railway/service-edit.ts`, so no caller — route handler, Server Action or
 component — is holding a value it could return. **A stored variable value reaches no browser
 on any path**, which is what lets the edit form show an existing variable as a name with an
 empty cell, and what keeps the e2e assertion that a minted credential never appears in page

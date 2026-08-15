@@ -3,7 +3,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import type { ActionResult } from "@/lib/action-result";
-import { readServiceVariableNames, updateContainer } from "@/lib/railway/api";
+import { readServiceVariableNames, updateContainer } from "@/lib/railway/service-edit";
 import { log } from "@/lib/logger";
 import { stripPrefix, toManagedName } from "@/lib/railway/managed";
 import { presetFor } from "@/lib/presets";

@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
 import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
-import { getProjectContainers } from "@/lib/railway/api";
+import { getProjectContainers } from "@/lib/railway/projects";
 import { RailwayApiError } from "@/lib/railway/errors";
 import { fingerprint } from "@/lib/railway/watch-fingerprint";
 import { sseResponse } from "@/lib/sse";

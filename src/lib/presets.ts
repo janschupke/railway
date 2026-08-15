@@ -43,7 +43,7 @@ export type PresetVariable =
  * A Railway volume is attached to a service and mounted at one path, so this is the whole
  * of it — there is no size here because `VolumeCreateInput` has no size member and Railway
  * provisions at the deployer's plan default (500 MB on the accounts this was probed
- * against). See `createContainer` in ./railway/api.ts.
+ * against). See `createContainer` in ./railway/service-create.ts.
  */
 export type PresetVolume = {
   /** Absolute path inside the container. */

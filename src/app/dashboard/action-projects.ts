@@ -13,7 +13,7 @@ import {
    */
   createEnvironment as createEnvironmentOnRailway,
   createProject as createProjectOnRailway,
-} from "@/lib/railway/api";
+} from "@/lib/railway/projects";
 import { log } from "@/lib/logger";
 import { environmentCreateSchema, projectCreateSchema } from "@/lib/validation";
 import { formField, issueToResult, toActionError } from "./action-form";

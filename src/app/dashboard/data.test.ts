@@ -10,10 +10,14 @@ const getEnvironmentVolumes = vi.fn();
 const cachedRegions = vi.fn();
 
 vi.mock("@/lib/auth/server", () => ({ getSession: () => getSession() }));
-vi.mock("@/lib/railway/api", () => ({
+vi.mock("@/lib/railway/projects", () => ({
   listProjects: (...args: unknown[]) => listProjects(...args),
   getProjectContainers: (...args: unknown[]) => getProjectContainers(...args),
+}));
+vi.mock("@/lib/railway/metrics", () => ({
   getProjectMetrics: (...args: unknown[]) => getProjectMetrics(...args),
+}));
+vi.mock("@/lib/railway/volumes", () => ({
   getEnvironmentVolumes: (...args: unknown[]) => getEnvironmentVolumes(...args),
 }));
 vi.mock("@/lib/railway/regions", () => ({

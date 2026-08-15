@@ -174,9 +174,16 @@ const serverOnlyImportBans = [
  * write lane to call a mutation on an unchecked id, and that one would allow any module
  * to do so as long as it opened a guard. Together they say what the rule has always
  * meant.
+ *
+ * **The group is the directory, not one file, and that is load-bearing.** It used to name
+ * `**\/lib/railway/api`, which was true only for as long as every mutation lived in that one
+ * module — splitting it into siblings would have disarmed the rule for each name that moved,
+ * silently, with `pnpm lint` still green. Keying on the directory is strictly stronger: a
+ * mutation added to a module that does not exist yet is covered by default, and there is no
+ * longer a path edit that can turn this off without deleting it.
  */
 const mutationImportBan = {
-  group: ["**/lib/railway/api"],
+  group: ["**/lib/railway/*"],
   importNames: [
     "createContainer",
     "updateContainer",

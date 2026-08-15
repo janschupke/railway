@@ -18,7 +18,7 @@ vi.mock("@/lib/auth/server", () => ({
 }));
 
 const getProjectContainers = vi.fn();
-vi.mock("@/lib/railway/api", () => ({
+vi.mock("@/lib/railway/projects", () => ({
   getProjectContainers: (...args: unknown[]) => getProjectContainers(...args),
 }));
 

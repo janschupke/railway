@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
-import { readServiceVariableNames } from "@/lib/railway/api";
+import { readServiceVariableNames } from "@/lib/railway/service-edit";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
 
 export const runtime = "nodejs";

@@ -4,12 +4,9 @@ import { cache } from "react";
 import { getTranslations } from "next-intl/server";
 import { env } from "@/env";
 import { getSession } from "@/lib/auth/server";
-import {
-  getEnvironmentVolumes,
-  getProjectContainers,
-  getProjectMetrics,
-  listProjects,
-} from "@/lib/railway/api";
+import { getProjectMetrics } from "@/lib/railway/metrics";
+import { getProjectContainers, listProjects } from "@/lib/railway/projects";
+import { getEnvironmentVolumes } from "@/lib/railway/volumes";
 import { RailwayApiError, type RailwayErrorKind } from "@/lib/railway/errors";
 import { cachedRegions } from "@/lib/railway/regions";
 import { reportError } from "@/lib/report-error";
