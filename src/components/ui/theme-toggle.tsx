@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ToggleGroup } from "radix-ui";
+import { THEME } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 type ThemeChoice = "light" | "dark" | "system";
@@ -19,7 +20,11 @@ const OPTIONS = [
   Icon: typeof Sun;
 }>;
 
-const STORAGE_KEY = "theme";
+/*
+ * Shared with the inline script in layout.tsx that applies this before first paint.
+ * Renaming it here alone would leave every visitor a permanent theme flash, silently.
+ */
+const { STORAGE_KEY } = THEME;
 
 /*
  * localStorage is an external store, so it is read with useSyncExternalStore rather

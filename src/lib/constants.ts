@@ -597,6 +597,22 @@ export const REGIONS = {
   CACHE_MAX_ENTRIES: 200,
 } as const;
 
+/**
+ * Where the reader's theme choice is remembered, and what it may say.
+ *
+ * Its own group because it is read from two places that cannot share code: the toggle,
+ * and the inline `<script>` in layout.tsx that applies the stored value before first
+ * paint. That script runs before any module does, so it cannot import — but it is built
+ * from a template literal, so it can interpolate these. Before, both spelled `"theme"`
+ * and `"light"|"dark"` out by hand, and renaming the key in the toggle would have left
+ * every visitor with a permanent theme flash and nothing failing.
+ */
+export const THEME = {
+  STORAGE_KEY: "theme",
+  /** The two explicit choices. Absent means "follow the OS", which stores nothing. */
+  VALUES: ["light", "dark"],
+} as const;
+
 /** Presentation thresholds that are not styling. */
 export const UI = {
   /** Distance from the bottom within which the log pane stays auto-scrolled. */

@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
+import { THEME } from "@/lib/constants";
 import { AppHeader } from "@/components/app-header";
 import { Footer } from "@/components/footer";
 import { SkipLink } from "@/components/ui/page";
@@ -51,8 +52,16 @@ export async function generateMetadata(): Promise<Metadata> {
 /**
  * Applies the stored theme before first paint. Without this the page renders at the OS
  * preference and then snaps to the stored choice — a visible flash on every load.
+ *
+ * Built from THEME rather than spelling the key and the two values out again. This script
+ * runs before any module does, so it cannot import them — but it is a string, so it can
+ * interpolate them, and the duplication that survives is the one localStorage forces.
  */
-const NO_FLASH_THEME = `(function(){try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}}catch(e){}})()`;
+const NO_FLASH_THEME = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+  THEME.STORAGE_KEY,
+)});if(${THEME.VALUES.map((value) => `t===${JSON.stringify(value)}`).join(
+  "||",
+)}){document.documentElement.dataset.theme=t}}catch(e){}})()`;
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const locale = await getLocale();
