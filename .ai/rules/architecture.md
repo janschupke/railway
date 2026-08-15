@@ -222,7 +222,9 @@ propose adding it, that is the sentence to start from.
 ## The URL is the state; there is no client store
 
 No Redux, no Zustand, no context holding server data (ADR-7). Selection lives in the query
-string; pending state comes from `useTransition`, `useFormStatus` and `router.refresh()`.
+string; pending state comes from `useTransition` and `router.refresh()`. Not `useFormStatus`:
+it reports a form React is submitting, and no form here hands React its action — see
+`local/no-function-form-action` for what that prop costs.
 `src/hooks/use-navigation-pending.ts` covers full document navigations and is bfcache-safe
 via `pageshow`.
 

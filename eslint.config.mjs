@@ -291,11 +291,15 @@ const eslintConfig = defineConfig([
   /*
    * The rules this repo needs and no linter ships. See eslint-rules/index.mjs.
    *
-   * Scoped to all of src/ rather than to a directory, because two of the three select
+   * Scoped to all of src/ rather than to a directory, because two of the four select
    * their own subjects: a client component is one whose first statement is the directive,
    * and a Server Action is an export of a file whose first statement is the other
    * directive. Path is the wrong axis for both, which is the whole reason they are rules
    * with bodies rather than `files` globs.
+   *
+   * The fourth needs the whole tree for the opposite reason: a form element is a form
+   * element wherever it is written, and the day one appears outside src/components is
+   * exactly the day nobody remembers this rule exists.
    */
   {
     files: ["src/**/*.{ts,tsx}"],
@@ -325,6 +329,7 @@ const eslintConfig = defineConfig([
         },
       ],
       "local/no-cookie-jar-delete": "error",
+      "local/no-function-form-action": "error",
       "local/action-scope-label": "error",
     },
   },

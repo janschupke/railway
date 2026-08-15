@@ -9,6 +9,7 @@ import { useToast } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Field } from "./ui/field";
+import { onSubmitWith } from "./ui/form";
 import { Input } from "./ui/input";
 import { PendingStatus } from "./ui/misc";
 import { Text } from "./ui/text";
@@ -180,7 +181,14 @@ export function ConfirmDestroyDialog({
             <AlertDialogTitle>{copy.title}</AlertDialogTitle>
             <AlertDialogDescription>{copy.description}</AlertDialogDescription>
 
-            <form action={submit} className="mt-4">
+            {/*
+              Not `action={submit}`, and on this form that is the difference between
+              honouring the checkbox below and overruling it — see ui/form.ts and the rule
+              it names. A refused destroy leaves the typed confirmation in place, so the
+              button stays armed; with the reset, the second click destroyed with
+              `deleteData` back at its default rather than at what the user chose.
+            */}
+            <form onSubmit={onSubmitWith(submit)} className="mt-4">
               {Object.entries(hiddenFields).flatMap(([name, value]) =>
                 (Array.isArray(value) ? value : [value as string]).map((one) => (
                   <input key={`${name}:${one}`} type="hidden" name={name} value={one} />

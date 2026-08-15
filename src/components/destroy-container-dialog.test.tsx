@@ -238,6 +238,48 @@ describe("the stored data", () => {
     expect(formData.get("deleteData")).toBeNull();
   });
 
+  it("keeps the box unchecked when the destroy is refused, and on the retry too", async () => {
+    /*
+     * The worst thing React's automatic form reset did, and the reason no form here takes a
+     * function action any more.
+     *
+     * The refusal leaves the dialog open with the confirmation still typed, so the button
+     * stays armed — and the reset put the checkbox back to `defaultChecked`, which is
+     * checked. Unchecking the box, being refused, and pressing Destroy again therefore
+     * deleted the volume the user had just said to keep, with nothing on screen having
+     * changed between the two clicks.
+     *
+     * Both halves are asserted because either alone would pass a broken fix: the DOM state
+     * without the second submission would miss a regression in what is posted, and the
+     * submission without the DOM state would not say why it happened.
+     */
+    spinDown.mockResolvedValue({
+      ok: false,
+      error: "Railway refused the request.",
+    });
+
+    const user = userEvent.setup();
+    renderDialog({ volumeSize: "500 MB" });
+    await openDialog(user);
+
+    const box = screen.getByRole("checkbox", { name: /stored data/i });
+    await user.click(box);
+    await user.type(screen.getByLabelText(/to confirm/i), "cache");
+    await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
+
+    await waitFor(() => expect(spinDown).toHaveBeenCalledTimes(1));
+    expect(spinDown.mock.calls[0]![1].get("deleteData")).toBeNull();
+
+    expect(await screen.findByText(/Railway refused the request/i)).toBeInTheDocument();
+    expect(box).not.toBeChecked();
+
+    // Armed already, because the confirmation survived — which is what made the reverted
+    // checkbox reachable in one click.
+    await user.click(screen.getByRole("button", { name: /destroy permanently/i }));
+    await waitFor(() => expect(spinDown).toHaveBeenCalledTimes(2));
+    expect(spinDown.mock.calls[1]![1].get("deleteData")).toBeNull();
+  });
+
   it("says what keeping it costs, rather than leaving it to be inferred", async () => {
     const user = userEvent.setup();
     renderDialog({ volumeSize: "500 MB" });

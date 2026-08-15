@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  startTransition,
   useActionState,
   useEffect,
   useRef,
@@ -362,24 +363,34 @@ export function SpinUpForm({
   const regionsUnavailable = resolvedRegions !== null && resolvedRegions.length === 0;
 
   /**
-   * The check that replaced the server's, at no round trip.
+   * Submission, and the local duplicate check that can decline it.
    *
-   * `preventDefault` rather than wrapping `formAction` in a function of our own: React
-   * resets an uncontrolled form once a function action returns, so a wrapper that declined
-   * to submit would clear the name field while telling the user to change the name in it.
+   * One handler rather than an `action` prop with an `onSubmit` guard in front of it, for
+   * the reason ui/form.ts gives and this form has the worst case of: the reset put the two
+   * advanced selects back to their defaults on a refusal, which also disabled the retries
+   * input, which meant a number still visible on screen was dropped from the retry.
    *
-   * Stale by construction — it knows what the last render knew — and that is the trade
-   * this is worth making. It is a typo guard, not a lock; the idempotency key on the
-   * submission is what makes a genuine double-submit harmless.
+   * `startTransition` around the dispatcher is not decoration. `useActionState` reads
+   * whether a transition is active to decide whether it owns one, so a bare call leaves
+   * `pending` stuck at false and React says so in the console.
+   *
+   * The check itself is stale by construction — it knows what the last render knew — and
+   * that is the trade it is worth making. It is a typo guard, not a lock; the idempotency
+   * key on the submission is what makes a genuine double-submit harmless.
    */
-  const guardDuplicate = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    // Before the transition: the advanced panel disables a control or two while a
+    // submission is in flight, and a disabled control is skipped by FormData.
+    const formData = new FormData(event.currentTarget);
+
     const typed = nameRef.current?.value ?? "";
     if (typed !== "" && takenNames.includes(managedSlug(typed))) {
-      event.preventDefault();
       setDuplicate(tActions("duplicateName", { name: typed }));
       return;
     }
     setDuplicate(null);
+    startTransition(() => formAction(formData));
   };
 
   /*
@@ -424,7 +435,7 @@ export function SpinUpForm({
 
   return (
     <Card className="p-4">
-      <form action={formAction} onSubmit={guardDuplicate} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="environmentId" value={environmentId} />
         <input type="hidden" name="idempotencyKey" value={submissionKey} />

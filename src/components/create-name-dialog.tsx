@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "./ui/dialog";
 import { Field } from "./ui/field";
+import { onSubmitWith } from "./ui/form";
 import type { GroupedOption } from "./ui/group-options";
 import { Input } from "./ui/input";
 import { PendingStatus } from "./ui/misc";
@@ -127,11 +128,10 @@ export function CreateNameDialog({
   };
   const [error, setError] = useState<string | undefined>(undefined);
   /*
-   * Controlled, unlike the spin-up form's name field, and not a stylistic difference.
-   * React resets an uncontrolled `<form action={fn}>` once the action settles — which on
-   * the failure path threw away what the person had just typed and left them retyping a
-   * name to fix a length error about it. The value has to outlive the submit, so it lives
-   * in state rather than in the DOM.
+   * Controlled, which is now belt as well as braces: the form no longer resets itself, so
+   * an uncontrolled input here would survive a refusal too. It stays in state because the
+   * dialog decides when this field is empty — see the reset on close below, which has no
+   * DOM equivalent for a value the caller never sees.
    */
   const [value, setValue] = useState("");
   /*
@@ -216,27 +216,11 @@ export function CreateNameDialog({
             <DialogDescription>{copy.description}</DialogDescription>
 
             {/*
-              `onSubmit` rather than `action`, and the difference is load-bearing.
-
-              React resets a `<form action={fn}>` once the action settles. The name input
-              below already had to live in state to survive that — see `value` above — and
-              the choice cannot survive it at all: Radix registers a `reset` listener on the
-              enclosing form and pushes the value the control mounted with back out through
-              `onValueChange`. So a failed submit left the typed name on screen and quietly
-              moved the project back to the personal account, which is the exact silence
-              this control was added to remove.
-
-              Nothing here wanted that reset. The action is called by hand either way — the
-              form only ever built the FormData — and a successful create closes the dialog,
-              which clears everything on the way out.
+              `onSubmit` rather than `action`, which is what keeps the choice below from
+              reverting to the personal account on a refused name — see ui/form.ts and the
+              rule it names for why no form here takes a function action.
             */}
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                submit(new FormData(event.currentTarget));
-              }}
-              className="mt-4"
-            >
+            <form onSubmit={onSubmitWith(submit)} className="mt-4">
               {Object.entries(hidden ?? {}).map(([name, value]) => (
                 <input key={name} type="hidden" name={name} value={value} />
               ))}

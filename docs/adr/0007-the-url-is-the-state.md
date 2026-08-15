@@ -118,6 +118,28 @@ TTL (`src/lib/railway/regions.ts`, `REGIONS` in `constants.ts`), keyed by user a
 That is a per-process cache with an expiry, like `lib/idempotency.ts` and the registry's
 answer cache — not a database (ADR-4), and not a client store.
 
+### Update: the measurement above expired, and the conclusion did not
+
+"Controlled, and that was measured rather than assumed" rested on React resetting a `<form
+action={fn}>` once the action returns. No form in this app takes a function action any more —
+`local/no-function-form-action` bans it, and its docblock is where that mechanism is now
+written down — so the reset that argument turns on cannot happen. Left alone, the paragraph
+would keep justifying a decision with a fact about a mechanism the code has left.
+
+The panel stays controlled anyway, on two reasons that were always there and are stronger:
+`retriesApply` is read during render to disable the retries input, which is not something a
+DOM value can drive; and the two dropdowns are Radix Selects, which are controlled by
+construction. The remount on success is untouched.
+
+Worth recording why the old reason was not merely stale but wrong in a way nobody could see.
+Controlled state protected the five inputs through a refusal and never the two selects: Radix
+answers a form reset by putting its own value back to whatever it mounted with, which reaches
+this component as an `onValueChange` and overwrites the state that was supposed to be
+protecting it. A refused spin-up therefore kept every number and silently dropped both
+choices — and because the retries input is disabled unless the policy is "On failure", it
+dropped a retry count that was still legible on screen. No test could tell the difference
+until this update; three now can.
+
 ---
 
 [All decisions](README.md) · [Railway Freight Loader](../../README.md)

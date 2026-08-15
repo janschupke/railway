@@ -29,13 +29,19 @@ const BLANK = {
  * element stays mounted around it, so the panel does not snap shut under someone who had
  * just opened it.
  *
- * Controlled rather than uncontrolled, and that is the half that had to be measured rather
- * than assumed. React resets an uncontrolled form once a function action returns — the same
- * behaviour `guardDuplicate` in spin-up-form.tsx works around — and it does so whatever the
- * action answered. So an uncontrolled panel is wiped by a FAILED submission, which is the
- * one moment somebody needs what they typed: they are being told to change one number, with
- * the other six gone. One `useState` holding all seven keeps the values across a failure and
- * lets the remount clear them on success, which is exactly the two behaviours wanted.
+ * Controlled rather than uncontrolled, and the reason has changed since ADR-7 recorded it.
+ * The measurement then was that React reset a `<form action={fn}>` whatever the action
+ * answered, so an uncontrolled panel was wiped by a FAILED submission — the one moment
+ * somebody needs what they typed. No form here takes a function action any more
+ * (`local/no-function-form-action`), so that argument has retired and two better ones are
+ * left: `retriesApply` below is read during render to disable a control, and the two Radix
+ * Selects are controlled by construction. One `useState` holding all seven still keeps the
+ * values across a failure and still lets the remount clear them on success.
+ *
+ * The selects were the part the old mechanism defeated anyway. State kept the five inputs
+ * through a refusal and never the two dropdowns: Radix answers a form reset by putting its
+ * own value back to whatever it mounted with, which arrives here as an `onValueChange` and
+ * overwrites the state that was supposed to be protecting it.
  *
  * ADR-7 covers why seven write-only values in one component are still not a store.
  */

@@ -1444,6 +1444,44 @@ test.describe("resource controls on a spin-up", () => {
   });
 
   /*
+   * A refusal must not quietly change what the next attempt asks for.
+   *
+   * React used to reset this form once the action settled, and Radix answers a form reset
+   * by putting a select back to what it mounted with — so a refused spin-up kept the five
+   * numbers, silently dropped the two dropdowns, and disabled the retries input, which took
+   * the number in it out of the submission too. In a browser rather than only in jsdom
+   * because the mechanism is React's and Radix's rather than this app's, and this is where
+   * both are real.
+   */
+  test("keeps the advanced choices when Railway refuses the create", async ({
+    page,
+  }) => {
+    await injectFaults(page, { rateLimit: 20 });
+
+    await field(page, "Image reference").fill("redis:7-alpine");
+    await field(page, "Name").fill("doomed");
+    await fillAdvanced(page, {
+      region: "US West (Oregon)",
+      restartPolicy: "On failure",
+      restartRetries: "4",
+    });
+    await button(page, /spin up container/i).click();
+    await expect(toast(page, /could not spin up/i)).toBeVisible();
+
+    await expect(
+      onlyVisible(page.getByRole("combobox", { name: "Region" })),
+    ).toHaveText("US West (Oregon)");
+    await expect(
+      onlyVisible(page.getByRole("combobox", { name: "Restart policy" })),
+    ).toHaveText("On failure");
+    // Enabled, not merely filled: it is disabled unless the policy is On failure, and a
+    // disabled control is left out of the submission entirely.
+    await expect(field(page, "Retries")).toBeEnabled();
+    await expect(field(page, "Retries")).toHaveValue("4");
+    await expect(field(page, "Name")).toHaveValue("doomed");
+  });
+
+  /*
    * The round-trip guarantee, in a browser. Nothing was asked for, so neither mutation was
    * sent — and since the fixture only ever writes these fields from those two mutations, all
    * null is the proof that a spin-up nobody customised costs what it always cost.

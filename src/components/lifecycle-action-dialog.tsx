@@ -7,6 +7,7 @@ import type { ActionResult } from "@/lib/action-result";
 import type { LifecycleDialogAction } from "@/lib/container-actions";
 import { useToast } from "./ui/toast";
 import { Button } from "./ui/button";
+import { onSubmitWith } from "./ui/form";
 import { PendingStatus } from "./ui/misc";
 import {
   AlertDialogCancel,
@@ -149,7 +150,7 @@ export function LifecycleActionDialog({
               {t(`${action}.description`)}
             </AlertDialogDescription>
 
-            <form action={submit} className="mt-4">
+            <form onSubmit={onSubmitWith(submit)} className="mt-4">
               <input type="hidden" name="projectId" value={projectId} />
               <input type="hidden" name="environmentId" value={environmentId} />
               <input type="hidden" name="serviceId" value={serviceId} />

@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { generateDomain } from "@/app/dashboard/actions";
 import { useToast } from "./ui/toast";
 import { Button } from "./ui/button";
+import { onSubmitWith } from "./ui/form";
 import { PendingStatus } from "./ui/misc";
 import { Text } from "./ui/text";
 
@@ -143,7 +144,7 @@ export function ContainerUrl({
   if (!canGenerate) return null;
 
   return (
-    <form action={submit}>
+    <form onSubmit={onSubmitWith(submit)}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="environmentId" value={environmentId} />
       <input type="hidden" name="serviceId" value={serviceId} />

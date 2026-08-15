@@ -339,13 +339,37 @@ describe("SpinUpForm", () => {
 
       await submitNamed(user, "cache");
       await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
-      // React resets the uncontrolled fields once a function action returns, whatever it
-      // returned, so retrying means retyping. The key is state rather than a field, which
-      // is exactly why it survives that reset.
-      await submitNamed(user, "cache");
+      /*
+       * Pressed again with nothing retyped, which is the shape of a retry and did not use
+       * to be possible: React cleared the uncontrolled name once the action settled, so
+       * this case typed the name a second time and passed for a reason that had nothing to
+       * do with what it was asserting.
+       */
+      expect(screen.getByLabelText("Name")).toHaveValue("cache");
+      await user.click(submitButton());
 
       await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
       expect(keyFrom(1)).toBe(keyFrom(0));
+      expect(spinUp.mock.calls[1]![1].get("name")).toBe("cache");
+    });
+
+    it("keeps the typed name when the server refuses", async () => {
+      // The field is uncontrolled, and the reset took it — so a refused port or image threw
+      // away the name as well, and the person was asked to change one thing while being
+      // handed an empty form. The duplicate guard already behaved this way; the two paths
+      // disagreed about the same field.
+      spinUp.mockResolvedValue({
+        ok: false,
+        error: "Give the port a number between 1 and 65535",
+        field: "port",
+      });
+      const user = userEvent.setup();
+      renderForm();
+
+      await submitNamed(user, "cache");
+
+      await screen.findByText("Give the port a number between 1 and 65535");
+      expect(screen.getByLabelText("Name")).toHaveValue("cache");
     });
   });
 
@@ -363,9 +387,8 @@ describe("SpinUpForm", () => {
       expect(await screen.findByText(/already exists here/)).toBeInTheDocument();
       expect(screen.getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
       expect(spinUp).not.toHaveBeenCalled();
-      // React resets an uncontrolled form once a function action returns, which is why
-      // this refuses in onSubmit instead: clearing the name while asking for a different
-      // one leaves nothing to change.
+      // Still there to be edited, which is the whole point of refusing here: asking for a
+      // different name and clearing the field are contradictory instructions.
       expect(screen.getByLabelText("Name")).toHaveValue("Cache");
     });
 
@@ -1029,6 +1052,81 @@ describe("the advanced panel", () => {
 
     await screen.findByText("Run at most 5 replicas here. Scale further on Railway.");
     expect(screen.getByLabelText("Replicas")).toHaveValue("9");
+  });
+
+  it("keeps the two dropdowns too, which state alone never managed", async () => {
+    /*
+     * The case above asserted an `<input>`, which was never the one at risk. React's form
+     * reset put both selects back to their mount value on a refusal — Radix answers a reset
+     * by doing exactly that, and for a controlled Root it arrives as an `onValueChange` that
+     * overwrites the state meant to be protecting it. So the panel kept the five numbers and
+     * silently dropped the two choices.
+     *
+     * Retries is asserted enabled rather than merely non-empty: it is disabled unless the
+     * policy is On failure, so a reverted policy takes the number with it.
+     */
+    const user = userEvent.setup();
+    spinUp.mockResolvedValue({
+      ok: false,
+      error: "Run at most 5 replicas here. Scale further on Railway.",
+      field: "replicas",
+    });
+    renderForm();
+    await waitFor(() => expect(screen.getByLabelText("Region")).not.toBeDisabled());
+
+    await openAdvanced(user);
+    await choose(user, "Region", "US West (Oregon)");
+    await choose(user, "Restart policy", "On failure");
+    await user.type(screen.getByLabelText("Retries"), "4");
+    await user.type(screen.getByLabelText("Replicas"), "9");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await screen.findByText("Run at most 5 replicas here. Scale further on Railway.");
+    expect(screen.getByRole("combobox", { name: "Region" })).toHaveTextContent(
+      "US West (Oregon)",
+    );
+    expect(screen.getByRole("combobox", { name: "Restart policy" })).toHaveTextContent(
+      "On failure",
+    );
+    expect(screen.getByLabelText("Retries")).toBeEnabled();
+    expect(screen.getByLabelText("Retries")).toHaveValue("4");
+  });
+
+  it("sends the retry count on the retry, not only the first time", async () => {
+    /*
+     * The half a value assertion cannot reach, and the one that actually cost something.
+     * A disabled input is skipped by the form-data algorithm — which is how `retriesApply`
+     * is implemented — so a reverted policy did not merely grey the number out, it dropped
+     * it from the submission while leaving it legible on screen.
+     */
+    const user = userEvent.setup();
+    spinUp.mockResolvedValueOnce({
+      ok: false,
+      error: "Run at most 5 replicas here. Scale further on Railway.",
+      field: "replicas",
+    });
+    renderForm();
+    await waitFor(() => expect(screen.getByLabelText("Region")).not.toBeDisabled());
+
+    await openAdvanced(user);
+    await choose(user, "Restart policy", "On failure");
+    await user.type(screen.getByLabelText("Retries"), "4");
+    await user.type(screen.getByLabelText("Replicas"), "9");
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+    await screen.findByText("Run at most 5 replicas here. Scale further on Railway.");
+
+    // Correct the one field that was refused and send it again, which is the whole shape
+    // of the failure path.
+    await user.clear(screen.getByLabelText("Replicas"));
+    await user.type(screen.getByLabelText("Replicas"), "3");
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
+    const retried = spinUp.mock.calls[1]![1];
+    expect(retried.get("restartPolicy")).toBe("ON_FAILURE");
+    expect(retried.get("restartRetries")).toBe("4");
   });
 
   it("renders an advanced failure beside its field rather than as a toast", async () => {

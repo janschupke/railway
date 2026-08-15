@@ -183,6 +183,38 @@ describe("BulkDestroyDialog", () => {
     expect(box).not.toBeChecked();
   });
 
+  it("keeps the volume box ticked when the batch is refused", async () => {
+    /*
+     * The single destroy's regression run the other way, and worth having twice for that
+     * reason: the defaults are opposites, so React's form reset silently deleted a volume
+     * there and silently kept fifty of them here. Either way the second attempt did
+     * something other than what the first one said, with nothing on screen having changed.
+     */
+    spinDownMany.mockResolvedValue({
+      ok: false,
+      error: "Railway refused the request.",
+    });
+
+    const user = userEvent.setup();
+    renderDialog(undefined, 1);
+    await open(user);
+
+    const box = screen.getByRole("checkbox", { name: /Also delete the volume/i });
+    await user.click(box);
+    await user.type(screen.getByLabelText(CONFIRM_LABEL), CONFIRM_TOKEN);
+    await user.click(submitButton());
+
+    await waitFor(() => expect(spinDownMany).toHaveBeenCalledOnce());
+    expect(spinDownMany.mock.calls[0]![1].get("deleteData")).toBe("on");
+
+    expect(await screen.findByText(/Railway refused the request/i)).toBeInTheDocument();
+    expect(box).toBeChecked();
+
+    await user.click(submitButton());
+    await waitFor(() => expect(spinDownMany).toHaveBeenCalledTimes(2));
+    expect(spinDownMany.mock.calls[1]![1].get("deleteData")).toBe("on");
+  });
+
   it("asks nothing about volumes when none of them has one", async () => {
     const user = userEvent.setup();
     renderDialog();

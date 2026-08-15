@@ -11,6 +11,7 @@ import { Button } from "./ui/button";
 import { Combobox } from "./ui/combobox";
 import { DialogClose, DialogFooter } from "./ui/dialog";
 import { Field } from "./ui/field";
+import { onSubmitWith } from "./ui/form";
 import { Input } from "./ui/input";
 import { KeyValueEditor, type KeyValueRow } from "./ui/key-value-editor";
 import { PendingStatus, Spinner } from "./ui/misc";
@@ -41,12 +42,11 @@ const isVariableField = (field: string | undefined) =>
 /**
  * The edit form itself, mounted only while its dialog is open.
  *
- * Controlled inputs throughout, which is the opposite of what spin-up does and for the
- * reason `create-name-dialog.tsx` writes out: React resets an uncontrolled `<form
- * action={fn}>` once the action settles, so a submission the server refused would clear
- * everything the person had just typed. Spin-up can live with that because its fields start
- * empty; an edit form starts full, and losing a half-finished rename to a validation error
- * would be the worst moment to do it.
+ * Controlled inputs throughout. That used to be what saved this form from React's automatic
+ * reset — see `local/no-function-form-action`, which has since taken the mechanism away
+ * from every form here — and it stays because an edit form starts full: the fields are
+ * seeded from the row, and seeding a DOM value once at mount is the thing that goes wrong
+ * when the row underneath changes.
  *
  * The variable rows arrive separately from the rest of the form, because they cost a Railway
  * round trip and the name and image do not — those are already on the row. So the two halves
@@ -160,7 +160,7 @@ export function EditContainerForm({
   };
 
   return (
-    <form action={submit} className="mt-4 space-y-4">
+    <form onSubmit={onSubmitWith(submit)} className="mt-4 space-y-4">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="environmentId" value={environmentId} />
       <input type="hidden" name="serviceId" value={serviceId} />

@@ -48,7 +48,7 @@ Three kinds, and they are not the same:
 Not everything here can be checked, but more of it can than used to be. Before adding a
 rule to one of these files, ask which of the three it is:
 
-- **A lint rule** if one file's syntax decides it — `eslint-rules/` holds the four this
+- **A lint rule** if one file's syntax decides it — `eslint-rules/` holds the ones this
   repo needed and no linter ships. It reports while you type and names its own fix.
 - **A test** if it needs more than one file: reachability across the import graph
   (`protected-surfaces.test.ts`), agreement between a stylesheet and a component
