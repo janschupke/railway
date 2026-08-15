@@ -32,39 +32,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
-
-/**
- * The clipboard, or an honest failure.
- *
- * `navigator.clipboard` is undefined on an insecure origin, so the property access itself
- * throws and the catch covers it — no separate feature test is needed. It also rejects on
- * a denied permission and when the document is not focused, and all three are the same
- * thing to the caller: the text did not go anywhere, and the user needs to be told rather
- * than left believing it did.
- */
-async function writeClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function downloadText(name: string, text: string) {
-  const url = URL.createObjectURL(
-    new Blob([text], { type: "text/plain;charset=utf-8" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoked on the next task rather than inline: a synchronous revoke can abort the
-  // download the click has only just started, and it fails silently — no error, no file.
-  setTimeout(() => URL.revokeObjectURL(url));
-}
+import { downloadText, writeClipboard } from "@/lib/hand-off";
 
 /**
  * One line, memoised.
