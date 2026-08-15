@@ -27,6 +27,18 @@ import { Text } from "./ui/text";
 import { LiveRegion } from "./ui/live-region";
 
 /**
+ * A stable empty set, for the one render between the list key changing and the reset
+ * below landing.
+ *
+ * Module scope rather than `useMemo(() => new Set(), [])`, which is machinery for a value
+ * with no dependencies — `spin-up-form.tsx`'s NO_NAMES is the same thing done right. What
+ * it must not be is a fresh `new Set()` per render: it feeds the `selected` memo, and an
+ * inline literal would give that memo a new dependency identity every time and turn it
+ * into a no-op.
+ */
+const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+
+/**
  * The filtered, paged container list.
  *
  * A client component holding a server-fetched array, which is the arrangement the data
@@ -101,7 +113,6 @@ export function ContainerList({
    * selection first. Changing what you are looking at clears what you had picked, which is
    * both predictable and what keeps a row hidden by a filter out of the batch.
    */
-  const EMPTY_SELECTION: ReadonlySet<string> = useMemo(() => new Set(), []);
   const [selection, setSelection] = useState({ key: listKey, ids: new Set<string>() });
   if (selection.key !== listKey) setSelection({ key: listKey, ids: new Set() });
   /*
