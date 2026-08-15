@@ -7,7 +7,6 @@ import {
   releaseCrane,
   spreaderZ,
   stepCrane,
-  wagonNoseDistance,
   type CraneState,
   type CraneTarget,
 } from "./crane";
@@ -229,18 +228,5 @@ describe("assignCrane and releaseCrane", () => {
     releaseCrane(crane);
     expect(crane.servingTrainId).toBeNull();
     expect(crane.holding).toBeNull();
-  });
-});
-
-describe("wagonNoseDistance", () => {
-  it("counts back from the locomotive, wagon by wagon", () => {
-    const first = wagonNoseDistance(1000, 0);
-    const second = wagonNoseDistance(1000, 1);
-    expect(first).toBeLessThan(1000);
-    expect(second).toBeLessThan(first);
-    // Even spacing, which is what lets the crane serve wagon k without asking the renderer.
-    expect(first - second).toBeCloseTo(
-      wagonNoseDistance(1000, 1) - wagonNoseDistance(1000, 2),
-    );
   });
 });

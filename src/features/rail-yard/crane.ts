@@ -19,7 +19,7 @@
  * be nine functions each needing a test of its own.
  */
 
-import { CONTAINER, CONVEYOR, CRANE, LOCOMOTIVE, WAGON, YARD } from "./config";
+import { CONTAINER, CONVEYOR, CRANE } from "./config";
 import type { Freight } from "./conveyor";
 
 type Place = "source" | "sink";
@@ -289,20 +289,4 @@ export function releaseCrane(crane: CraneState): void {
   crane.servingTrainId = null;
   crane.holding = null;
   crane.legIndex = 0;
-}
-
-/**
- * The world x of the wagon the crane is working, measured back from a train's nose.
- *
- * The rake hangs *behind* the locomotive, so wagon `k` is a locomotive plus `k` wagons and
- * couplings back along the path. Getting this from the train rather than from a constant is
- * what makes the crane aim at a wagon that is actually there.
- */
-export function wagonNoseDistance(noseDistance: number, index: number): number {
-  return (
-    noseDistance -
-    LOCOMOTIVE.length -
-    YARD.WAGON_GAP -
-    index * (WAGON.length + YARD.WAGON_GAP)
-  );
 }

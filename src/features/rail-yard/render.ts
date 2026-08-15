@@ -46,6 +46,7 @@ import {
 import { localToWorld, type Pose } from "./geometry";
 import { poseAlong } from "./graph";
 import type { YardPalette } from "./palette";
+import { wagonNoseDistance } from "./rake";
 import type { RailScene, SceneStructure } from "./scene";
 import type { TrainState, WorldState } from "./simulation";
 import type { Freight } from "./conveyor";
@@ -246,12 +247,7 @@ function placeTrain(
 
   for (let index = train.wagons.length - 1; index >= 0; index--) {
     const wagon = train.wagons[index]!;
-    const at =
-      nose -
-      LOCOMOTIVE.length -
-      YARD.WAGON_GAP -
-      index * (WAGON.length + YARD.WAGON_GAP);
-    const pose = poseAlong(world.graph, train.path, at);
+    const pose = poseAlong(world.graph, train.path, wagonNoseDistance(nose, index));
     if (!pose) continue;
 
     const { cargo } = wagon;

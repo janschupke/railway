@@ -39,9 +39,9 @@ import {
   createCrane,
   releaseCrane,
   stepCrane,
-  wagonNoseDistance,
   type CraneState,
 } from "./crane";
+import { rakeLength, wagonNoseDistance } from "./rake";
 import {
   createConveyor,
   createFreight,
@@ -164,11 +164,7 @@ export type WorldState = {
 };
 
 export function trainLength(train: TrainState): number {
-  return (
-    LOCOMOTIVE.length +
-    train.wagons.length * (WAGON.length + YARD.WAGON_GAP) +
-    (train.wagons.length > 0 ? YARD.WAGON_GAP : 0)
-  );
+  return rakeLength(train.wagons.length);
 }
 
 /** The stop a phase runs to, or Infinity for a leg that carries on off the side. */
