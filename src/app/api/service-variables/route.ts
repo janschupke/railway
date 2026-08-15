@@ -1,10 +1,9 @@
 import { type NextRequest } from "next/server";
-import { requireSession } from "@/lib/auth/server";
+import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { readServiceVariableNames } from "@/lib/railway/api";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
-import type { RailwaySession } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,14 +63,8 @@ async function handle(request: NextRequest) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  let session: RailwaySession;
-  try {
-    session = await requireSession();
-  } catch {
-    // debug, not warn: a tab left open across an expiry reaches this by opening a dialog.
-    log.debug("variables.read_rejected", { reason: "unauthenticated" });
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const session = await requireSessionOrUnauthorized("variables.read_rejected");
+  if (session instanceof Response) return session;
 
   const names = await readServiceVariableNames(
     session.accessToken,

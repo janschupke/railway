@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
-import { requireSession } from "@/lib/auth/server";
+import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { getProjectContainers } from "@/lib/railway/api";
 import { RailwayApiError } from "@/lib/railway/errors";
 import { fingerprint } from "@/lib/railway/watch-fingerprint";
@@ -13,7 +13,6 @@ import { acquireStreamSlot } from "@/lib/stream-slots";
 import { WATCH } from "@/lib/constants";
 import { env } from "@/env";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
-import type { RailwaySession } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,14 +67,8 @@ async function handle(
     return new Response("Bad Request", { status: 400 });
   }
 
-  let session: RailwaySession;
-  try {
-    session = await requireSession();
-  } catch {
-    // debug: a tab whose session just expired reopens this in a loop.
-    log.debug("watch.rejected", { reason: "unauthenticated" });
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const session = await requireSessionOrUnauthorized("watch.rejected");
+  if (session instanceof Response) return session;
 
   const t = await getTranslations();
 

@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
-import { requireSession } from "@/lib/auth/server";
+import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { monitorDeployment } from "@/lib/railway/deployment-monitor";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
@@ -9,7 +9,6 @@ import { streamCloser, streamDurationMs } from "@/lib/stream-route";
 import { acquireStreamSlot } from "@/lib/stream-slots";
 import { STREAM } from "@/lib/constants";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation";
-import type { RailwaySession } from "@/lib/auth/session";
 
 // `ws` needs Node, and this is a long-lived response.
 export const runtime = "nodejs";
@@ -67,15 +66,8 @@ async function handle(
     return new Response("Bad Request", { status: 400 });
   }
 
-  let session: RailwaySession;
-  try {
-    session = await requireSession();
-  } catch {
-    // debug: a browser whose session just expired retries the EventSource in a loop, so
-    // at info this would be the noisiest line in the system.
-    log.debug("stream.rejected", { reason: "unauthenticated" });
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const session = await requireSessionOrUnauthorized("stream.rejected");
+  if (session instanceof Response) return session;
 
   // Resolved before the slot is taken: nothing between acquiring and returning the
   // response may throw, or the slot is stranded until the process restarts.

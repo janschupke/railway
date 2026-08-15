@@ -1,12 +1,11 @@
 import { type NextRequest } from "next/server";
-import { requireSession } from "@/lib/auth/server";
+import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { REGISTRY, LIMITS } from "@/lib/constants";
 import { IMAGE_PATTERN } from "@/lib/registry/reference";
 import { checkImage } from "@/lib/registry/probe";
 import { acquireStreamSlot } from "@/lib/stream-slots";
-import type { RailwaySession } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,14 +52,8 @@ async function handle(request: NextRequest) {
     return Response.json({ status: "unsupported" }, { status: 400 });
   }
 
-  let session: RailwaySession;
-  try {
-    session = await requireSession();
-  } catch {
-    // debug, not warn: a tab left open across an expiry will do this on the next keystroke.
-    log.debug("image.check_rejected", { reason: "unauthenticated" });
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const session = await requireSessionOrUnauthorized("image.check_rejected");
+  if (session instanceof Response) return session;
 
   /*
    * The same counter the log streams and the project watcher use, under a third namespaced
