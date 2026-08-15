@@ -200,6 +200,82 @@ describe("useDeploymentStream", () => {
     expect(text("logs")).toBe("compiling");
   });
 
+  describe("when a stream re-attaches", () => {
+    /** Replays the server's shape: the backfill lines, then `ready` naming how many. */
+    const attach = (source: FakeEventSource, messages: string[]) =>
+      act(() => {
+        for (const message of messages) {
+          source.emit("log", { line: { timestamp: "t", message } });
+        }
+        source.emit("ready", { backfilled: messages.length });
+      });
+
+    it("does not show the backfill twice", () => {
+      /*
+       * Every attach backfills — that is what closes the gap a dropped connection left —
+       * and the buffer survives a reconnect, so without a cancel the history stacks.
+       */
+      render(<Probe deploymentId="dep_1" />);
+      const source = FakeEventSource.latest();
+
+      attach(source, ["one", "two", "three"]);
+      attach(source, ["one", "two", "three"]);
+
+      expect(text("logs")).toBe("one,two,three");
+    });
+
+    it("keeps the lines the re-attach actually recovered", () => {
+      // The reconnect dropped after "two" and the backfill reaches back past it. Cancelling
+      // the whole backfill would leave the hole the backfill was fetched to close.
+      render(<Probe deploymentId="dep_1" />);
+      const source = FakeEventSource.latest();
+
+      attach(source, ["one", "two"]);
+      attach(source, ["two", "three", "four"]);
+
+      expect(text("logs")).toBe("one,two,three,four");
+    });
+
+    it("keeps both phases when a re-dial brings different output", () => {
+      /*
+       * Build and deploy share nothing, so the cancel finds no overlap and the build
+       * output stays put. This sits beside the phase test above deliberately: that one
+       * pins that the buffer survives, this one pins that the cancel does not eat it.
+       */
+      const { rerender } = render(<Probe deploymentId="dep_1" phase="build" />);
+      attach(FakeEventSource.latest(), ["compiling", "built"]);
+
+      rerender(<Probe deploymentId="dep_1" phase="deploy" />);
+      attach(FakeEventSource.latest(), ["starting", "listening"]);
+
+      expect(text("logs")).toBe("compiling,built,starting,listening");
+    });
+
+    it("ignores a count that cannot describe the buffer", () => {
+      // A `ready` naming more lines than the buffer holds says the two disagree about what
+      // happened, and guessing at a split point there would cancel real output.
+      render(<Probe deploymentId="dep_1" />);
+      const source = FakeEventSource.latest();
+
+      act(() => {
+        source.emit("log", { line: { timestamp: "t", message: "one" } });
+        source.emit("ready", { backfilled: 99 });
+      });
+
+      expect(text("logs")).toBe("one");
+      expect(text("status")).toBe("live");
+    });
+
+    it("stays live when ready carries no count at all", () => {
+      render(<Probe deploymentId="dep_1" />);
+      const source = FakeEventSource.latest();
+
+      act(() => source.emitRaw("ready", "not json"));
+
+      expect(text("status")).toBe("live");
+    });
+  });
+
   it("surfaces warnings without ending the stream", () => {
     render(<Probe deploymentId="dep_1" />);
     const source = FakeEventSource.latest();

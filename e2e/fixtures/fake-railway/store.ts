@@ -574,28 +574,41 @@ export class Store {
       deployment.status = progression[deployment.step]!;
       deployment.updatedAt = new Date().toISOString();
 
-      const line: LogLine = {
-        timestamp: new Date().toISOString(),
-        message: `[fake-railway] ${deployment.status.toLowerCase()} ${deployment.id}`,
-        /*
-         * Three values, so the filter has something to choose between rather than a single
-         * chip that narrows to everything — and so the pane's severity COLOURING has more
-         * than one tone on screen at once. `error` and `warn` map to different tokens;
-         * `info` deliberately maps to none, which is the case that must keep reading as
-         * ordinary output.
-         */
-        severity:
-          deployment.status === "FAILED"
-            ? "error"
-            : deployment.status === "DEPLOYING"
-              ? "warn"
-              : "info",
-      };
+      const at = new Date().toISOString();
+      /*
+       * Three values, so the filter has something to choose between rather than a single
+       * chip that narrows to everything — and so the pane's severity COLOURING has more
+       * than one tone on screen at once. `error` and `warn` map to different tokens;
+       * `info` deliberately maps to none, which is the case that must keep reading as
+       * ordinary output.
+       */
+      const severity =
+        deployment.status === "FAILED"
+          ? "error"
+          : deployment.status === "DEPLOYING"
+            ? "warn"
+            : "info";
+
+      /*
+       * Per phase, and NOT one object pushed into both arrays.
+       *
+       * That is what the split at Deployment.logs is for, and pushing the same line into
+       * both re-created one level down the incapacity the split exists to remove: with
+       * identical content, build and deploy output are indistinguishable, so an
+       * implementation that wrongly cancelled a whole phase's history as a "duplicate"
+       * would look perfect on screen. Real Railway's two feeds share nothing, and now
+       * neither do these.
+       */
+      const lineFor = (phase: "build" | "deploy"): LogLine => ({
+        timestamp: at,
+        message: `[fake-railway] ${phase} ${deployment.status.toLowerCase()} ${deployment.id}`,
+        severity,
+      });
       if (deployment.logPhase === "both" || deployment.logPhase === "build") {
-        deployment.logs.build.push(line);
+        deployment.logs.build.push(lineFor("build"));
       }
       if (deployment.logPhase === "both" || deployment.logPhase === "deploy") {
-        deployment.logs.deploy.push(line);
+        deployment.logs.deploy.push(lineFor("deploy"));
       }
 
       deployment.events.push(this.#eventFor(deployment.status));

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { STREAM } from "@/lib/constants";
+import { dropReattachOverlap } from "@/lib/log-overlap";
 import type { ContainerState, LogLine } from "@/lib/railway/types";
 
 /**
@@ -145,8 +146,26 @@ export function useDeploymentStream(
       }
     };
 
-    source.addEventListener("ready", () => {
-      update((s) => ({ ...s, status: "live", error: null }));
+    source.addEventListener("ready", (event) => {
+      /*
+       * `backfilled` is how many of the lines just appended were history rather than new
+       * output, and cancelling it here is what stops a re-attach showing the last two
+       * hundred lines twice. Every attach backfills — that is deliberate, and it is what
+       * closes the gap a dropped connection left — but a phase re-dial and an EventSource
+       * reconnect both keep the buffer, so without this the history stacks.
+       *
+       * No ref is needed to find the split. `ready` is sent after its own backfill lines
+       * and before any subscription line, so the buffer is exactly `prior ++ backfill` at
+       * this moment. The MAX_BUFFERED_LINES trim cannot move it either: it drops from the
+       * head, and BACKFILL_LINES is well under the buffer bound.
+       */
+      const backfilled = parse<{ backfilled?: number }>(event)?.backfilled ?? 0;
+      update((s) => ({
+        ...s,
+        status: "live",
+        error: null,
+        logs: dropReattachOverlap(s.logs, backfilled),
+      }));
     });
 
     source.addEventListener("log", (event) => {

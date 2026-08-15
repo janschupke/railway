@@ -97,8 +97,33 @@ export const STREAM = {
   DRAIN_MS: 2_000,
   /** Ceiling so a wedged build cannot pin a connection forever. */
   MAX_DURATION_MS: 15 * 60 * 1000,
-  /** Lines fetched on attach and on reconnect, so a drop leaves no hole. */
+  /**
+   * Lines fetched on attach and on reconnect, so a drop leaves no hole.
+   *
+   * Measured against the live API on 2026-08-14 (`pnpm probe:logs`): `limit` selects the
+   * most recent N, oldest first, and Railway returns one or two more than asked for — so
+   * this is a floor rather than an exact count, and nothing may depend on the length.
+   *
+   * Staying above the subscription's own default of 100 is load-bearing, see
+   * REPLAY_SCAN_LINES.
+   */
   BACKFILL_LINES: 200,
+  /**
+   * How many live lines the replay guard will look through before deciding the
+   * subscription is not replaying the backfill after all.
+   *
+   * One, and the measurement is why. Subscribing to `buildLogs` delivers the most recent
+   * 100 lines in a burst before any live output — Railway's documented default `limit` for
+   * the subscription, which takes no `startDate` to bound it with. So the replay is always
+   * the FIRST thing the socket says, never something that starts three lines in.
+   *
+   * Because BACKFILL_LINES (200) is larger than that window, the replay is a suffix of what
+   * the backfill already showed rather than history reaching further back — measured at
+   * 100 of 100 replayed lines suppressed, none of them predating the backfill. Raising this
+   * would keep the guard armed while genuinely new output arrives, and a container printing
+   * the same line twice would have the second one swallowed.
+   */
+  REPLAY_SCAN_LINES: 1,
   /** Bound on the browser-side buffer; a chatty container must not grow the tab. */
   MAX_BUFFERED_LINES: 1000,
   /**

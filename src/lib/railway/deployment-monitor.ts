@@ -3,6 +3,7 @@ import "server-only";
 import { AsyncQueue } from "@/lib/async-queue";
 import { STREAM } from "@/lib/constants";
 import { log } from "@/lib/logger";
+import { expectReplay } from "@/lib/log-overlap";
 import { reportError } from "@/lib/report-error";
 import { sleep } from "@/lib/utils";
 import { getDeployment, getDeploymentFailure, getLogs } from "./api";
@@ -153,17 +154,36 @@ export async function* monitorDeployment(
    */
   let linesEmitted = 0;
 
+  /**
+   * The one place a log line goes on the wire, so the counter cannot drift from it.
+   *
+   * It did not before, but it was three sites away from doing so: the replay guard below
+   * suppresses lines, and a suppressed line must not count as something the reader was
+   * shown — that is the entire question `linesEmitted` exists to answer.
+   */
+  const emit = (line: LogLine) => {
+    queue.push({ type: "log", line });
+    linesEmitted += 1;
+  };
+
+  /*
+   * Hoisted out of the try so a backfill that FAILED leaves this empty rather than
+   * unassigned. An empty guard suppresses nothing, which is the right posture: with no
+   * history on screen, every line the subscription replays is a line the reader has not
+   * seen.
+   */
+  let backfill: LogLine[] = [];
+
   // Backfill first so attaching mid-build does not start from an empty pane.
   try {
-    const backfill = await deps.getLogs(
+    backfill = await deps.getLogs(
       accessToken,
       deploymentId,
       phase,
       STREAM.BACKFILL_LINES,
       signal,
     );
-    for (const line of backfill) queue.push({ type: "log", line });
-    linesEmitted += backfill.length;
+    for (const line of backfill) emit(line);
     queue.push({ type: "ready", deploymentId, phase, backfilled: backfill.length });
   } catch (error) {
     // Missing history is not fatal — the live subscription may still work.
@@ -257,8 +277,7 @@ export async function* monitorDeployment(
         STREAM.BACKFILL_LINES,
         signal,
       );
-      for (const line of lines) queue.push({ type: "log", line });
-      linesEmitted += lines.length;
+      for (const line of lines) emit(line);
       log.debug("railway.deployment.fallback_logs", {
         deployment_id: deploymentId,
         from_phase: other,
@@ -520,6 +539,18 @@ export async function* monitorDeployment(
    */
   let truncationReported = false;
 
+  /*
+   * Railway answers `subscribe` with the most recent 100 lines before any live output —
+   * the subscription's documented default `limit`, and it takes no `startDate` to bound it
+   * with. The backfill above has just shown the reader those same lines, so without this
+   * every attach printed its history twice.
+   *
+   * Armed from the backfill for THIS phase only. `explainFailure` reads the other one, and
+   * it runs on a terminal poll rather than before the socket, so its lines can never be
+   * what this subscription is repeating.
+   */
+  const replayed = expectReplay(backfill, STREAM.REPLAY_SCAN_LINES);
+
   const logs = (async () => {
     try {
       for await (const line of deps.subscribeLogs(
@@ -529,8 +560,8 @@ export async function* monitorDeployment(
         deploymentId,
         signal,
       )) {
-        queue.push({ type: "log", line });
-        linesEmitted += 1;
+        if (replayed(line)) continue;
+        emit(line);
         if (queue.dropped > 0 && !truncationReported) {
           truncationReported = true;
           log.warn("railway.logStream.truncated", {

@@ -405,6 +405,35 @@ describe("GET /api/streams/[deploymentId]", () => {
     for (const response of open.slice(1)) await response.body!.cancel();
   });
 
+  it("tells the browser how much of what it just sent was history", async () => {
+    /*
+     * The client cancels a re-attach's backfill against the buffer it already holds, and
+     * `backfilled` on the ready frame is the only thing that says where the join is.
+     * Nothing pinned it here, so a tidy-up of this payload could have switched the cancel
+     * off with every test still green.
+     */
+    monitorDeployment.mockImplementation(async function* () {
+      yield { type: "log", line: { timestamp: "t", message: "older" } };
+      yield { type: "log", line: { timestamp: "t", message: "newer" } };
+      yield { type: "ready", deploymentId: "dep_1", phase: "deploy", backfilled: 2 };
+      yield { type: "done", deploymentId: "dep_1", state: "running" };
+    });
+
+    const body = await readEvents(
+      await stream(request("/api/streams/dep_1"), params("dep_1")),
+    );
+
+    // After its own lines and before anything the subscription says — the ordering the
+    // client's split depends on.
+    expect(body.match(/event: (\w+)/g)).toEqual([
+      "event: log",
+      "event: log",
+      "event: ready",
+      "event: done",
+    ]);
+    expect(body).toContain('"backfilled":2');
+  });
+
   it("relays monitor events as SSE frames, in order, and stops at done", async () => {
     monitorDeployment.mockImplementation(async function* () {
       yield { type: "ready", deploymentId: "dep_1", phase: "deploy", backfilled: 0 };

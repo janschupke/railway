@@ -53,6 +53,39 @@ test.describe("container lifecycle", () => {
     await expect(log).toContainText("[fake-railway]", { timeout: 20_000 });
   });
 
+  test("shows each line once, however many times the stream sends it", async ({
+    page,
+  }) => {
+    /*
+     * Two sources carry the same history and nothing used to cancel either. Attaching
+     * backfills up to STREAM.BACKFILL_LINES, the subscription opened straight after it
+     * replays what Railway holds, and every reconnect and phase re-dial backfills again —
+     * so three real lines rendered as nine and the pane was a stutter of repeats.
+     *
+     * The pane is opened BEFORE the deployment settles and asserted after, which is what
+     * makes this deterministic rather than a race against the replay: by the time the badge
+     * reads Running the fixture has stopped producing lines, both attaches have happened,
+     * and any duplicate they left is in the buffer for good.
+     *
+     * `logPhase: "deploy"` keeps it to one phase's worth of output. Build and deploy are
+     * two different feeds — the pane deliberately shows both — and an exact list is a
+     * sharper assertion than a count that has to allow for either.
+     */
+    await injectFaults(page, { logPhase: "deploy" });
+    await spinUp(page, "cache");
+
+    const cache = row(page, "cache");
+    await disclosure(page, "cache").click();
+    await expect(cache.getByRole("log")).toBeVisible();
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    // A production attribute, not a test hook: log-pane.tsx keys its rows on it.
+    await expect(cache.locator("[data-log-row]")).toHaveText(
+      [/deploy building/, /deploy deploying/, /deploy success/],
+      { timeout: 20_000 },
+    );
+  });
+
   test("downloads the buffered lines as a file named after the container", async ({
     page,
   }) => {

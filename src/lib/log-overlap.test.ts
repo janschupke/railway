@@ -185,11 +185,22 @@ describe("expectReplay", () => {
     ]);
   });
 
-  it("swallows one repeated line, not the whole run", () => {
-    // Anchoring on the first of three identical dots would suppress every dot that
-    // followed for as long as the guard lived. Anchoring on the last costs exactly one.
+  it("cancels a repeated run exactly once over, and keeps what comes after", () => {
+    /*
+     * The case that decided the design. Committing to one occurrence of a repeated line
+     * gets this wrong in both directions: the last leaves the cursor at the end of the
+     * history so every remaining replayed dot leaks as a duplicate, the first leaves it
+     * too early so the next line diverges. Tracking every alignment cancels exactly the
+     * three that were replayed, and the fourth — which the container really printed — is
+     * shown.
+     */
     const replayed = expectReplay([dot(), dot(), dot()]);
-    expect([dot(), dot(), dot()].map(replayed)).toEqual([true, false, false]);
+    expect([dot(), dot(), dot(), dot()].map(replayed)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
   });
 
   it("disarms for good once the replay diverges", () => {

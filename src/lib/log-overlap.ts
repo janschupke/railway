@@ -19,9 +19,12 @@ import type { LogLine } from "./railway/types";
  * duplicate is untidy and a reader can see it, a missing line is a lie and they cannot.
  *
  * So every cancel here is POSITIONAL. It removes a contiguous run at the join between two
- * sources, in order, and never asks "have I seen this line anywhere before". If Railway
- * ever exposes an id or cursor on a log line, throw all of this away and key on that —
- * `scripts/probe-logs.ts` exists to answer exactly that question.
+ * sources, in order, and never asks "have I seen this line anywhere before".
+ *
+ * Railway's `Log` really does carry no key: `{ attributes, message, severity, tags,
+ * timestamp }`, with `tags` naming the deployment rather than the line. Read off the
+ * committed schema, and printed by `pnpm probe:logs`. If one ever appears, throw all of
+ * this away and key on it — that would be strictly better.
  *
  * Pure and React-free: the two callers are a `server-only` module (the monitor) and a
  * client hook, and neither can import the other.
@@ -98,8 +101,16 @@ export function overlapLength(
  *
  * Returns the input array by identity when nothing cancels, so the common case does not
  * hand a client a fresh array to re-render.
+ *
+ * Generic over the element, so the browser's `BufferedLine` keeps the id it minted on the
+ * way in. `sameLine` reads only the three wire fields, which is what makes that safe: a
+ * re-attach mints fresh ids for lines it has already shown, and comparing them would find
+ * every pair different.
  */
-export function dropReattachOverlap(lines: LogLine[], backfilled: number): LogLine[] {
+export function dropReattachOverlap<T extends LogLine>(
+  lines: T[],
+  backfilled: number,
+): T[] {
   /*
    * A count that cannot describe this buffer is ignored rather than clamped. It means the
    * frame and the buffer disagree about what happened — a `ready` for a stream whose lines
@@ -129,69 +140,87 @@ export type ReplayGuard = (line: LogLine) => boolean;
  * How many non-matching subscription lines a guard tolerates before deciding no replay is
  * coming.
  *
- * One, because a replay that happens at all happens immediately: Railway either sends its
- * history on subscribe or it sends only new lines. Scanning further is not free — it keeps
- * the guard live while genuinely new output is arriving, and a container that prints the
- * same progress dot a minute later would then have that dot swallowed as a "replay". The
- * caller overrides this from STREAM.REPLAY_SCAN_LINES if a real deployment ever shows the
- * replay starting later than the first frame.
+ * One, because a replay that happens at all happens immediately: Railway sends the most
+ * recent 100 lines in a burst before any live output, measured on 2026-08-14. Scanning
+ * further is not free — it keeps the guard live while genuinely new output is arriving, and
+ * a container that prints the same progress dot a minute later would then have that dot
+ * swallowed as a "replay".
+ *
+ * Production passes STREAM.REPLAY_SCAN_LINES rather than relying on this; the default is
+ * what the probe and the tests use, and the two numbers say the same thing.
  */
 const DEFAULT_REPLAY_BUDGET = 1;
 
 /**
  * Arms a replay guard against the lines a backfill has just put on the wire.
  *
- * Anchors on the LAST matching position, where `overlapLength` takes the largest run —
- * and the difference is deliberate. Here the two sources are different (a query and a
- * socket) and the overlap is a guess rather than a window offset, so the guard is built to
- * fail towards showing a duplicate rather than towards deleting a line. With two hundred
- * identical progress dots in the backfill, anchoring on the first occurrence would swallow
- * all two hundred of the dots that follow; anchoring on the last swallows exactly one.
+ * Tracks EVERY alignment still consistent with what has arrived, rather than committing to
+ * one. That is the whole design, and a single anchor is what it replaced: with three
+ * identical progress dots at the end of the backfill, picking the last occurrence left the
+ * cursor at the end of the history and every remaining replayed line leaked as a
+ * duplicate; picking the first left it too early and the next line diverged. Neither is a
+ * guess worth making when the data can decide instead.
+ *
+ * A line is suppressed if and only if SOME alignment explains it as a replay. Once no
+ * alignment does, the guard disarms for good — there is no re-anchoring, because a guard
+ * that could re-anchor mid-stream is a guard that can delete live output minutes later.
  *
  * Three shapes have to work, and the middle one is what a naive version gets wrong:
  *
- *  - The replay is a SUFFIX of what was backfilled. Anchor partway in and run to the end.
+ *  - The replay is a SUFFIX of what was backfilled. Start partway in and run to the end.
  *  - The replay is LONGER than what was backfilled, its head older. Those leading lines
  *    are history the reader has not seen — emit them, and do not let them disarm the
  *    guard, because the overlap is still ahead.
- *  - The replay DIVERGES. Disarm permanently. There is no re-arming: a guard that could
- *    re-anchor mid-stream is a guard that can delete live output much later.
+ *  - The replay DIVERGES, or runs past the end of the history. Disarm; everything after is
+ *    output the reader has not been shown.
+ *
+ * A run of repeated lines survives, which is the property the whole file exists to protect:
+ * three backfilled dots cancel exactly three replayed dots, and a fourth the container
+ * really printed is shown.
  */
 export function expectReplay(
   emitted: readonly LogLine[],
   budget: number = DEFAULT_REPLAY_BUDGET,
 ): ReplayGuard {
   let armed = emitted.length > 0;
-  /** Where in `emitted` the next replayed line is expected; -1 until the replay starts. */
-  let cursor = -1;
+  /**
+   * Where the next replayed line would sit, under each alignment still alive. Null until
+   * the replay starts; an alignment that reaches the end of the history is dropped, since
+   * there is nothing left for it to explain.
+   */
+  let cursors: number[] | null = null;
   let scanned = 0;
+
+  /** The positions among `positions` whose line is this one. */
+  const hits = (positions: number[], line: LogLine) =>
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- positions index emitted
+    positions.filter((at) => sameLine(emitted[at]!, line));
 
   return (line) => {
     if (!armed) return false;
 
-    if (cursor === -1) {
-      for (let i = emitted.length - 1; i >= 0; i--) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- i indexes emitted
-        if (sameLine(emitted[i]!, line)) {
-          cursor = i + 1;
-          armed = cursor < emitted.length;
-          return true;
-        }
+    // Before the replay has started every position is a candidate; which occurrence a
+    // repeated line was is left for the following lines to decide.
+    const found = hits(cursors ?? emitted.map((_, index) => index), line);
+
+    if (found.length === 0) {
+      /*
+       * Nothing explains this line. Before the replay starts that is a live line arriving
+       * ahead of the history, and the budget says how many of those to sit through; after
+       * it starts, the replay has diverged and the guard is done.
+       */
+      if (cursors === null) {
+        scanned += 1;
+        if (scanned >= budget) armed = false;
+      } else {
+        armed = false;
       }
-      scanned += 1;
-      if (scanned >= budget) armed = false;
       return false;
     }
 
-    // `armed` is set false the moment cursor reaches emitted.length, and the guard at the
-    // top of this closure returns before here when it is — so cursor is always in range.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- armed bounds cursor
-    if (!sameLine(emitted[cursor]!, line)) {
-      armed = false;
-      return false;
-    }
-    cursor += 1;
-    armed = cursor < emitted.length;
+    // An alignment that reaches the end of the history has nothing left to explain.
+    cursors = found.map((at) => at + 1).filter((at) => at < emitted.length);
+    armed = cursors.length > 0;
     return true;
   };
 }

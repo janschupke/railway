@@ -76,6 +76,130 @@ describe("monitorDeployment", () => {
     expect(events[2]).toMatchObject({ state: "running", rawStatus: "SUCCESS" });
   });
 
+  describe("when the subscription replays the backfill", () => {
+    /**
+     * Railway answers `subscribe` with the most recent 100 lines before any live output,
+     * and the backfill has just shown the reader the same ones. Measured on 2026-08-14:
+     * 100 of 100 replayed, none of them predating the backfill.
+     */
+    const replaying = (history: LogLine[], live: LogLine[] = []) => ({
+      getLogs: vi.fn(async () => history),
+      subscribeLogs: async function* () {
+        yield* [...history, ...live];
+      },
+    });
+
+    const logsIn = (events: MonitorEvent[]) =>
+      events.filter((e) => e.type === "log").map((e) => e.line.message);
+
+    it("shows the history once, not twice", async () => {
+      const events = await drain(
+        monitorDeployment(
+          params(),
+          deps(replaying([line("pulling"), line("built")], [line("starting")])),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(logsIn(events)).toEqual(["pulling", "built", "starting"]);
+    });
+
+    it("keeps a line the container really printed twice", async () => {
+      /*
+       * The whole reason the cancel is positional. Two identical lines are ordinary
+       * output, and a key-based dedup deletes the second one with nothing on screen to
+       * say it did.
+       */
+      const events = await drain(
+        monitorDeployment(
+          params(),
+          deps(replaying([line("."), line("."), line(".")], [line(".")])),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      // Three backfilled dots cancel the three that are replayed; the fourth is output.
+      expect(logsIn(events)).toEqual([".", ".", ".", "."]);
+    });
+
+    it("shows history the backfill never reached", async () => {
+      // A subscription reaching further back than the query did. Those leading lines are
+      // new to the reader, and suppressing them would be deleting output.
+      const events = await drain(
+        monitorDeployment(
+          params(),
+          deps({
+            getLogs: vi.fn(async () => [line("c")]),
+            subscribeLogs: async function* () {
+              yield* [line("a"), line("b"), line("c"), line("d")];
+            },
+          }),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(logsIn(events)).toEqual(["c", "a", "b", "c", "d"]);
+    });
+
+    it("suppresses nothing when the backfill failed", async () => {
+      // With no history on screen, every replayed line is one the reader has not seen.
+      const events = await drain(
+        monitorDeployment(
+          params(),
+          deps({
+            getLogs: vi.fn(async () => {
+              throw new RailwayApiError("nope", { kind: "server" });
+            }),
+            subscribeLogs: async function* () {
+              yield* [line("pulling"), line("built")];
+            },
+          }),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(logsIn(events)).toEqual(["pulling", "built"]);
+    });
+
+    it("does not count a suppressed line as something the reader was shown", async () => {
+      /*
+       * `linesEmitted` gates the other-phase fallback, and a replay that was cancelled is
+       * not output. Here the subscribed phase produced nothing at all and the socket
+       * replayed nothing either, so a failed deployment must still go and look.
+       */
+      const getLogs = vi.fn(async (_token, _id, kind: "build" | "deploy") =>
+        kind === "build" ? [line("pull failed")] : [],
+      );
+
+      await drain(
+        monitorDeployment(
+          params(),
+          deps({
+            getLogs,
+            getDeployment: vi.fn(async () => ({
+              id: "dep_1",
+              status: "FAILED",
+              updatedAt: null,
+            })),
+          }),
+        ),
+        async () => {
+          await vi.advanceTimersByTimeAsync(STREAM.DRAIN_MS + 100);
+        },
+      );
+
+      expect(getLogs.mock.calls.map((c) => c[2])).toEqual(["deploy", "build"]);
+    });
+  });
+
   it("waits DRAIN_MS after a terminal status so trailing logs still land", async () => {
     // A build's last lines routinely arrive after the status flips to SUCCESS.
     let emit: ((l: LogLine) => void) | undefined;

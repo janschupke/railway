@@ -608,10 +608,16 @@ export function execute(
       const deployment = store.deployments.get(variables.deploymentId as string);
       const isBuild = operationName === "BuildLogs";
       const field = isBuild ? "buildLogs" : "deploymentLogs";
-      // Per phase, because the two are not the same output — see Deployment.logs.
-      return {
-        data: { [field]: deployment?.logs[isBuild ? "build" : "deploy"] ?? [] },
-      };
+      const lines = deployment?.logs[isBuild ? "build" : "deploy"] ?? [];
+      /*
+       * Per phase, because the two are not the same output — see Deployment.logs. `limit`
+       * slices the TAIL: measured against the live API, it selects the most recent N and
+       * returns them oldest first. Ignoring it here meant the fixture could not express a
+       * backfill that does not reach all the way back, which is the ordinary case for any
+       * build longer than STREAM.BACKFILL_LINES.
+       */
+      const limit = Number(variables.limit ?? lines.length);
+      return { data: { [field]: lines.slice(-limit) } };
     }
 
     default:
