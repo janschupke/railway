@@ -14,7 +14,7 @@
  *
  * It prints every event verbatim, then what `pickFailureReason` chose from them. If the
  * populated member is not the one the picker preferred, reorder TEXT_MEMBERS in
- * src/lib/railway/failure-reason.ts and correct the README's Limitations entry — nothing
+ * src/lib/railway/failure-reason.ts and correct the docs/limitations.md entry — nothing
  * else in the app depends on which one won.
  *
  * Uses the *session's own OAuth access token* rather than an account token, for the same
@@ -185,7 +185,7 @@ async function main() {
   console.log(
     dim(
       "\nIf a populated member above is not the one the picker chose, reorder\n" +
-        "TEXT_MEMBERS in src/lib/railway/failure-reason.ts and update README Limitations.",
+        "TEXT_MEMBERS in src/lib/railway/failure-reason.ts and update docs/limitations.md.",
     ),
   );
 }

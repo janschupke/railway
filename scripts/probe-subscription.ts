@@ -234,7 +234,7 @@ async function main() {
 
   if (!deploymentId) {
     // Not fatal when it fails. An account token is refused `me { projects }` outright —
-    // "Not Authorized", which is the shape README's "Known non-issues" describes — and the
+    // "Not Authorized", which is the shape docs/testing.md's "Known non-issues" describes — and the
     // existence question can still be answered without a real id. See NONEXISTENT_DEPLOYMENT.
     const found = await findDeployment(token).catch((error: unknown) => {
       console.log(

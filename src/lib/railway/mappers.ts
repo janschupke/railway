@@ -334,7 +334,7 @@ export type VolumeInstanceNode = {
  *     service it was mounted on, so this is an orphan — most often one left behind by a
  *     destroy where the user chose to keep the data. Real, billable, and not something this
  *     app has any surface for: it lists containers, and an orphan volume is not one. Railway's
- *     own project page is where it is visible, and README Limitations says so.
+ *     own project page is where it is visible, and docs/limitations.md says so.
  *   - **A second volume on a service already seen.** Railway permits several, this app
  *     creates exactly one, and the first wins. Rendering "2 volumes" in a row that offers
  *     one mount path would be the readout describing a service this app did not create the

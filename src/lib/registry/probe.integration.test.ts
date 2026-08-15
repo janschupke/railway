@@ -69,7 +69,7 @@ describe("checkImage", () => {
      * pull budget untouched (ratelimit-remaining held at 100;w=3600 across two of them)
      * while a GET decrements it. A refactor that reached for GET would cost a pull per
      * keystroke against an IP every user of a deployed instance shares, which is the
-     * exact failure the README argued this feature could not avoid.
+     * exact failure docs/limitations.md argues this feature could not avoid.
      */
     const methods: string[] = [];
     server.use(
@@ -241,7 +241,7 @@ describe("checkImage", () => {
   describe("the allowlist", () => {
     /*
      * No handlers are registered for any of these, so `onUnhandledRequest: "error"` fails
-     * the test if a single byte leaves. That is the assertion: the SSRF the README refused
+     * the test if a single byte leaves. That is the assertion: the SSRF docs/limitations.md refuses
      * to create is refused by never dereferencing the host, not by inspecting it.
      */
     it.each([

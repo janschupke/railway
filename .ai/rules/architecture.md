@@ -1,13 +1,13 @@
 ---
 meta:
-  updated: 2026-08-14
+  updated: 2026-08-15
 ---
 
 # Architecture
 
 The reasoning behind each decision is argued at length in
-[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-14); the README carries a summary
-table under `## Decisions`. This file states what the decisions oblige you to do. When
+[`docs/adr/`](../../docs/adr/README.md) (ADR-1 … ADR-14); the
+[walkthrough](../../walkthrough.md#the-decisions) carries a one-line summary of each. This file states what the decisions oblige you to do. When
 the two disagree, the ADR is the record and this file is stale — fix it.
 
 ## What the app is
@@ -82,9 +82,10 @@ first by failing the second. The retry backoff _is_ cancellable — `backoff` in
 ## `src/features/**` is decoration, and takes part in none of the above
 
 `src/features/rail-yard/` is the canvas animation on the landing page. It is the largest
-body of code outside `src/lib` — about nine thousand lines of simulation, geometry and
-2D drawing — and it is worth saying plainly what it is, because its size otherwise invites
-a reader looking for container logic to open it.
+body of code outside `src/lib` — simulation, geometry and 2D drawing — and it is worth saying
+plainly what it is, because its size otherwise invites a reader looking for container logic
+to open it. The reader-facing version of this section is
+[the walkthrough](../../walkthrough.md#the-rail-yard-is-decoration).
 
 **It is in no lane.** One consumer, `src/app/page.tsx`, and no import anywhere under it of
 `lib/railway/**`, `lib/auth/**`, `lib/logger`, `fetch` or `EventSource`. No Railway data

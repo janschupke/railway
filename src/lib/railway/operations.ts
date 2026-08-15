@@ -9,7 +9,7 @@
  *
  * `pnpm verify:schema` is what says whether that committed schema still matches the live
  * API. It validates these same documents against Railway's current schema and diffs the
- * surface they reach — see README, "Schema verification".
+ * surface they reach — see docs/schema.md.
  *
  * The type annotations are the load-bearing part of each export. `TypedDocument<Result,
  * Variables>` is what `gql`/`gqlPartial` read the shapes from, so a document and its types
@@ -620,7 +620,7 @@ export const SERVICE_DOMAIN_CREATE_MUTATION: TypedDocument<
  *
  * There is no size member on the input at all — Railway provisions at the deployer's plan
  * default (500 MB when this was probed) — so this app cannot offer a size and does not
- * pretend to. README Limitations says so.
+ * pretend to. docs/limitations.md says so.
  */
 export const VOLUME_CREATE_MUTATION: TypedDocument<
   VolumeCreateMutation,

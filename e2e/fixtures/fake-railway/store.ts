@@ -206,7 +206,7 @@ export type Faults = {
    *
    * A different classifier entirely — there is no status code to read, so `isAuthEntry`
    * has to recognise it from the message. While it did not, every permission problem was
-   * reported as a generic failure with a Retry that could not work. README's "Known
+   * reported as a generic failure with a Retry that could not work. docs/testing.md's "Known
    * non-issues" records that shape; this is the knob that exercises it.
    */
   notAuthorizedField: number;

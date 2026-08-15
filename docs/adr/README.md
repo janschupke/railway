@@ -1,13 +1,18 @@
 # Decisions
 
-Fourteen architectural decision records, extracted from
-[the README](../../README.md#decisions), which carries the summary table.
+Fourteen architectural decision records. Each one states the context, the decision, what was
+rejected and what it costs. The one-line summary of each is in
+[the walkthrough](../../walkthrough.md#the-decisions).
+
+Every record has a `Status` and a `Decided` date. Where one has been revised since, it carries a
+`Last revised` date and the body states what is true now rather than narrating what it used to
+say.
 
 1. [ADR-1 — Railway OIDC directly, not an auth vendor](0001-railway-oidc-directly-not-an-auth-vendor.md)
 2. [ADR-2 — Token refresh runs in the proxy layer](0002-token-refresh-runs-in-the-proxy-layer.md)
 3. [ADR-3 — SSE downstream, WebSocket upstream](0003-sse-downstream-websocket-upstream.md)
 4. [ADR-4 — No database](0004-no-database.md)
-5. [ADR-5 — The app only destroys what it created](0005-the-app-only-destroys-what-it-created.md)
+5. [ADR-5 — The app only acts on containers it created](0005-the-app-only-destroys-what-it-created.md)
 6. [ADR-6 — Docker images only; GitHub sources are a stated limitation](0006-docker-images-only.md)
 7. [ADR-7 — The URL is the state; there is no client store](0007-the-url-is-the-state.md)
 8. [ADR-8 — A hand-rolled GraphQL client, not Apollo](0008-a-hand-rolled-graphql-client-not-apollo.md)
@@ -17,3 +22,7 @@ Fourteen architectural decision records, extracted from
 12. [ADR-12 — Idempotency keys on create, and a repeat is replayed rather than rejected](0012-idempotency-keys-replay-rather-than-reject.md)
 13. [ADR-13 — The origin is the request, not a variable](0013-the-origin-is-the-request-not-a-variable.md)
 14. [ADR-14 — A volume belongs to the service that mounts it](0014-a-volume-belongs-to-the-service-that-mounts-it.md)
+
+---
+
+[Walkthrough](../../walkthrough.md) · [Railway Freight Loader](../../README.md)

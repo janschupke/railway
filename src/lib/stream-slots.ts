@@ -19,8 +19,8 @@ import { STREAM } from "@/lib/constants";
  * endpoint lets one session exhaust this process's sockets and burn the account's
  * Railway rate limit at the same time. There was no cap at all.
  *
- * In-memory, and per replica — see "SSE pins a client to one replica" in README
- * Limitations, which is where that constraint and its consequences are argued. If it ever
+ * In-memory, and per replica — see "SSE pins a client to one replica" in
+ * docs/limitations.md, which is where that constraint and its consequences are argued. If it ever
  * changes, this map moves to shared state along with everything else that is per replica.
  *
  * Note that `next dev`'s module reloading resets the map; production does not.

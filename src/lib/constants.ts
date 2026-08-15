@@ -465,7 +465,7 @@ export const LIMITS = {
    * Railway publishes a per-service ceiling of 8 vCPU on Hobby and 32 on Pro, and this is
    * the lower of the two on purpose. A value Railway refuses costs a created, un-deployed
    * service the person has to go and destroy; a form error costs a sentence. A Pro user who
-   * wants more sizes the service on Railway, and the README says so.
+   * wants more sizes the service on Railway, and docs/limitations.md says so.
    */
   VCPU_MAX: 8,
   /**
@@ -512,7 +512,7 @@ export const LIMITS = {
  * The whole subsystem is affordable because of one measured fact: **a manifest HEAD does
  * not consume Docker Hub's anonymous pull budget, and a GET does.** Measured against
  * `library/redis:7-alpine` — two HEADs left `ratelimit-remaining` at `100;w=3600`, a GET
- * took it to 99, and a HEAD after that left it at 99. The README used to argue that a
+ * took it to 99, and a HEAD after that left it at 99. It used to be argued that a
  * shared egress IP made this check unaffordable; that argument was about pulls, and this
  * is not one.
  *

@@ -328,7 +328,7 @@ export async function getProjectMetrics(
  * One caveat with a real window on it: Railway lists a volume instance a few seconds after
  * `volumeCreate` returns (about three, measured). A container destroyed inside that window
  * has a volume this read cannot see yet, so the data is kept — which the toast states, so
- * the outcome is wrong-but-visible rather than silent. README Limitations says so too.
+ * the outcome is wrong-but-visible rather than silent. docs/limitations.md says so too.
  */
 export async function getEnvironmentVolumes(
   accessToken: string,

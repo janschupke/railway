@@ -154,7 +154,7 @@ export type Container = {
    * Distinct from `createdAt`, which is the *service* — a service redeployed this morning
    * has been around for a month. Railway exposes no started-at anywhere, so this counts the
    * build and the deploy as uptime: seconds of overstatement for an image source, which is
-   * all this app creates (ADR-6). Stated in README Limitations rather than rounded away.
+   * all this app creates (ADR-6). Stated in docs/limitations.md rather than rounded away.
    */
   deployedAt: string | null;
   /**
@@ -186,7 +186,7 @@ export type Container = {
  * `Deployment.meta` is an opaque `scalar`, so Railway will not say what a given deployment
  * ran, and a row therefore identifies itself by when it happened and how it ended — "the
  * deployment from 14:32 that succeeded". That is the honest form of the choice, and it is a
- * narrower limitation than the one the README used to state.
+ * narrower limitation than the one this app used to state.
  *
  * `canRollback` is Railway's answer, not a rule derived here, in the same way `canRedeploy`
  * is. The panel renders an entry it says no to rather than dropping it, so the absence of the
@@ -240,7 +240,7 @@ export type ContainerMetrics = {
    *
    * What Railway is enforcing, which is not necessarily what the spin-up form asked for — a
    * plan that clamps the request reports the clamped figure here, and that is the more useful
-   * number to show. README Limitations says so.
+   * number to show. docs/limitations.md says so.
    */
   cpuLimitCores: number | null;
   memoryLimitGb: number | null;

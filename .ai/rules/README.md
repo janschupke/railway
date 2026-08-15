@@ -17,15 +17,23 @@ and required a broken link to keep passing.
 So: **the surface that owns a fact is the one that argues it. Every other mention is a
 sentence and a link.**
 
-| Surface                  | Owns                                                                                                                | Never                                              |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Inline comment           | Why _this code_ is shaped this way — a framework trap, a measurement local to the file, an alternative deleted here | Restating an ADR's argument. Link to it.           |
-| `docs/adr/`              | The decision, its context, and what was rejected                                                                    | Being edited after the fact. Supersede it instead. |
-| `.ai/rules/`             | What you must do before writing code                                                                                | Reasoning at length. That is the ADR's job.        |
-| `README.md`              | What a reader needs to run, evaluate and review the app                                                             | Restating a rule. Link to it.                      |
-| `SECURITY.md`            | The threat model, the findings and the accepted risks                                                               | —                                                  |
-| `AGENTS.md`              | An index, and the excerpt an agent trips over first                                                                 | Anything not derivable from the files it links     |
-| `.cursor/rules/main.mdc` | Nothing. It is generated from `AGENTS.md`                                                                           | Being edited by hand — `pnpm cursor:check` fails   |
+| Surface                  | Owns                                                                                                                | Never                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Inline comment           | Why _this code_ is shaped this way — a framework trap, a measurement local to the file, an alternative deleted here | Restating an ADR's argument. Link to it.                       |
+| `docs/adr/`              | The decision, its context, and what was rejected                                                                    | Narrating its own history. A revision states what is true now. |
+| `.ai/rules/`             | What you must do before writing code                                                                                | Reasoning at length. That is the ADR's job.                    |
+| `README.md`              | Running it, deploying it, and the gates                                                                             | Restating a rule. Link to it.                                  |
+| `walkthrough.md`         | The tour: what the app does, where its code is, and the index of every other surface                                | Arguing anything. It is signposts and links.                   |
+| `docs/*.md`              | The long-form reference a reviewer wants and a runner does not — limitations, schema, tests, UI, performance, logs  | Restating a rule that has a home in `.ai/rules/`. Link to it.  |
+| `SECURITY.md`            | The threat model, the findings and the accepted risks                                                               | —                                                              |
+| `AGENTS.md`              | An index, and the excerpt an agent trips over first                                                                 | Anything not derivable from the files it links                 |
+| `.cursor/rules/main.mdc` | Nothing. It is generated from `AGENTS.md`                                                                           | Being edited by hand — `pnpm cursor:check` fails               |
+
+An ADR **is** revised in place rather than superseded, and the header carries a `Last revised`
+date when it has been. Superseding suits a decision that was reversed; every revision here so far
+has been the same decision holding under a new fact, and splitting those across two files made a
+reader assemble the current position from a history. What is banned is the trace: an ADR states
+what is true now, not what it used to claim.
 
 ## Numbers in prose rot, so prefer one that cannot
 

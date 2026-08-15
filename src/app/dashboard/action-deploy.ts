@@ -236,8 +236,8 @@ export async function rollback(formData: FormData): Promise<ActionResult> {
  *
  * For an image the catalog has never heard of, `targetPort` is omitted and Railway infers a
  * port from the running deployment. That inference is undocumented and is why the spin-up
- * form takes a port at all — a custom image says its port there. Stated in README
- * Limitations rather than hidden behind a control that sometimes picks wrong.
+ * form takes a port at all — a custom image says its port there. Stated in
+ * docs/limitations.md rather than hidden behind a control that sometimes picks wrong.
  */
 export async function mintDomain(formData: FormData): Promise<ActionResult> {
   return withManagedContainer("domain", formData, async (context) => {

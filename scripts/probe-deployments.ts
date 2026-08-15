@@ -20,8 +20,8 @@
  * or mints a new one. That mutation returns a Boolean, so the only way to observe it is to
  * perform a real rollback on a real account — and every probe here is read-only. Nothing in
  * the app depends on the answer: the row re-keys its log stream on whatever `deploymentId`
- * the refreshed container list reports, exactly as it does after a redeploy. README
- * Limitations records it as open.
+ * the refreshed container list reports, exactly as it does after a redeploy.
+ * docs/limitations.md records it as open.
  *
  * Uses the *session's own OAuth access token* rather than an account token, for the reason
  * probe-projects.ts gives: those two credentials have different visibility, and an account

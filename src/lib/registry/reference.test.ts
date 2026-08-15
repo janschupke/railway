@@ -60,7 +60,7 @@ describe("parseImageReference", () => {
   });
 
   /*
-   * The README's SSRF claim, made executable.
+   * The SSRF claim in docs/limitations.md, made executable.
    *
    * A first component containing a dot is a registry under Docker's own rules, so a
    * metadata address is a well-formed reference and this parser says so plainly. What

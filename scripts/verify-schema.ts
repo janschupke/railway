@@ -89,7 +89,7 @@ const REQUIRED_MEMBERS: Record<string, string> = {
  * See the Limitations entry and the accepted risk in SECURITY.md.
  *
  * Checked here because the whole limitation rests on it. The day either appears, the
- * README is wrong, the sign-out notice is wrong, and there is a real feature to build —
+ * docs/limitations.md entry is wrong, the sign-out notice is wrong, and there is a real feature to build —
  * a red line on every push is how anyone finds that out.
  */
 const ABSENT_ENDPOINTS = ["revocation_endpoint", "end_session_endpoint"] as const;
@@ -431,7 +431,7 @@ function namedTypeOf(type: { toString: () => string }): string {
  *
  * Printed, never gating: a deprecation is an announcement, not a withdrawal, and the app
  * keeps working until the field goes. It earns its place because two of them are live right
- * now and both sit on reads this app cannot do without — see README's Limitations.
+ * now and both sit on reads this app cannot do without — see docs/limitations.md.
  */
 function reportDeprecations(deprecations: string[]) {
   if (deprecations.length === 0) return;

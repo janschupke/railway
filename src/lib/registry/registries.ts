@@ -19,7 +19,7 @@ export type RegistryEndpoints = {
  * added.
  *
  * These four strings are the entire SSRF control, and the shape of the control is worth
- * stating precisely, because the README spent a paragraph explaining why the naive version
+ * stating precisely, because docs/limitations.md spends a paragraph explaining why the naive version
  * could not be built. `IMAGE_PATTERN` admits a bare host as the first component, and
  * Docker's own rules make a first component containing a dot a registry — so
  * `169.254.169.254/foo/bar` is a *valid reference* that names a registry. `parseImageReference`

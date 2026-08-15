@@ -125,7 +125,7 @@ export async function destroy(formData: FormData): Promise<ActionResult> {
      * Degrades to `{}`: EnvironmentVolumes is in DEGRADING_OPERATIONS, so a refused read
      * finds no volume and the plain sentence is used. That is the honest answer rather than
      * a cautious one — with the read refused this app does not know a volume exists, and
-     * claiming one was kept would be a statement it cannot support. README Limitations says
+     * claiming one was kept would be a statement it cannot support. docs/limitations.md says
      * where that leaves the user.
      */
     const volumes = await getEnvironmentVolumes(

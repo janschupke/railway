@@ -1,6 +1,6 @@
 # ADR-13 — The origin is the request, not a variable
 
-**Status:** accepted
+**Status:** accepted · **Decided:** 2026-08-14
 
 ## Context
 
@@ -106,3 +106,7 @@ nothing downstream is exploitable by naming a host you already control:
 - **The fallback is the rollback.** If Railway's edge ever stops forwarding the public
   host, the app behaves exactly as it did before and setting `APP_URL` restores the old
   behaviour without a redeploy.
+
+---
+
+[All decisions](README.md) · [Walkthrough](../../walkthrough.md) · [Railway Freight Loader](../../README.md)

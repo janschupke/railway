@@ -375,7 +375,7 @@ describe("spinDown", () => {
        * not know a volume exists, and claiming one was kept would be a statement it cannot
        * support. The same branch covers a volume Railway has not finished provisioning.
        *
-       * README Limitations states what that leaves the user with, because it is a real gap
+       * docs/limitations.md states what that leaves the user with, because it is a real gap
        * rather than a tidy one.
        */
       server.use(

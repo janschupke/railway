@@ -25,7 +25,7 @@ type CacheEntry = { status: ImageCheckStatus; expiresAt: number };
  * Two process-global maps, and the usual caveats apply to both.
  *
  * Per replica, like the stream-slot counter in lib/stream-slots.ts and for the same reason
- * (README Limitations). Reset by `next dev`'s module reloading and not in
+ * (docs/limitations.md). Reset by `next dev`'s module reloading and not in
  * production. And there is exactly one copy of each, because src/proxy.ts does not import
  * this module — the two-instances-across-the-proxy-boundary hazard in architecture.md
  * applies to anything it does.

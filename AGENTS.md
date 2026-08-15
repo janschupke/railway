@@ -20,6 +20,13 @@ reasoning behind each decision lives in [`docs/adr/`](docs/adr/README.md) (fourt
 and [SECURITY.md](SECURITY.md) (the OWASP review, the findings, and the accepted risks). Read
 the relevant rule before touching auth, the design tokens, the log stream, or a CI gate.
 
+For orientation rather than rules, [walkthrough.md](walkthrough.md) maps the features onto the
+code, indexes the ADRs, and marks the boundary of `src/features/rail-yard/` — decoration that no
+application lane touches. The long-form reference a change may need to keep in step is under
+[`docs/`](docs/): [limitations](docs/limitations.md), [schema](docs/schema.md),
+[testing](docs/testing.md), [frontend](docs/frontend.md), [performance](docs/performance.md),
+[logs](docs/logs.md).
+
 ## Rules
 
 [`.ai/rules/README.md`](.ai/rules/README.md) states the rule about the rules: one fact, one

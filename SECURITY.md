@@ -442,8 +442,9 @@ mean is that one user can learn, from timing, that another recently asked about 
 public image — which is a fact about Docker Hub, not about them.
 
 **The stream cap and the idempotency map are in-memory and per replica.** Honest rather
-than lazy: SSE pins a client to one replica — argued in README Limitations, which is where
-that constraint lives. If that changes, both move to shared state along with everything
+than lazy: SSE pins a client to one replica — argued in
+[docs/limitations.md](docs/limitations.md#single-replica-and-the-state-that-says-so), which
+is where that constraint lives. If that changes, both move to shared state along with everything
 else. The idempotency map (`src/lib/idempotency.ts`) is keyed `userId:key`, so one user can
 neither claim nor observe another's submission, and what it holds for
 `IDEMPOTENCY.RETAIN_SECONDS` is an `ActionResult` — catalog copy and Railway ids. No

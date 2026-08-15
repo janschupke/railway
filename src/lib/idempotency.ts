@@ -33,7 +33,7 @@ type Entry = {
  * Keyed by user so one person's key can neither burn nor observe another's; the key alone
  * is client-supplied, and two browsers can mint whatever they like.
  *
- * In-memory, and per replica — see README Limitations. The consequence specific to this
+ * In-memory, and per replica — see docs/limitations.md. The consequence specific to this
  * map, and the reason it is named there: a rolling restart between the two halves of a
  * double submit creates two services. A much narrower window than the one this closes, but
  * not zero. Note that `next dev`'s module reloading resets the map; production does not.

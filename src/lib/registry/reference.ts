@@ -62,7 +62,7 @@ const DOCKER_HUB_ALIASES = new Set([
  * The one rule worth stating: **the first path component is a registry host if and only if
  * it contains a dot or a colon, or is exactly `localhost`.** That is Docker's own
  * disambiguation, and it is why `169.254.169.254/foo/bar` is a well-formed reference naming
- * a registry rather than a Docker Hub repository — the fact SECURITY.md and the README both
+ * a registry rather than a Docker Hub repository — the fact SECURITY.md and docs/limitations.md both
  * cite as the SSRF hazard in checking existence at all.
  *
  * This function does not resolve that hazard and must not try. It reports what the string

@@ -13,7 +13,7 @@ import type { BrowserContext, Page } from "@playwright/test";
  * production build at all: the only `<link rel=preload>` the production server emits is
  * Next's own error-boundary chunk, at fetchPriority=low, and the browser does not complain
  * about it. In `next dev` there is exactly one preload and it is Turbopack's HMR client
- * — dev-only, framework-emitted, and never shipped. See "Known non-issues" in the README.
+ * — dev-only, framework-emitted, and never shipped. See "Known non-issues" in docs/testing.md.
  *
  * So the value of this file is not what it tolerates; it is that any *new* console
  * warning fails CI.

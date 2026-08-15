@@ -1,6 +1,6 @@
 ---
 meta:
-  updated: 2026-08-14
+  updated: 2026-08-15
 ---
 
 # Security
@@ -219,7 +219,8 @@ Three rules hold that boundary, and all three are load-bearing:
 
 - **No host, port or scheme is derived from user input.** A reference naming anything else
   parses fine and is then refused — `registryFor` returns null rather than resolving it.
-  That is what closes the SSRF the README spent a paragraph explaining could not be closed.
+  That is what closes the SSRF docs/limitations.md spends a paragraph explaining could not
+  be closed.
 - **No host is derived from a registry _response_ either.** The OCI spec says to find the
   token endpoint by reading `realm` off a `WWW-Authenticate` challenge. It is not read.
   Three registries, three constants, verified once.
