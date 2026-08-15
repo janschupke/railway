@@ -252,12 +252,15 @@ export function pairVariableRows(data: {
  * meant, and `Number` accepts `"0x50"` and `"1e3"` as 80 and 1000 — a field whose own
  * `inputMode` says numeric should not be quietly reading hex. A port is decimal digits.
  */
-const PORT_PATTERN = /^\d+$/;
+const DIGITS_PATTERN = /^\d+$/;
 
 const port = z
   .string()
   .trim()
-  .refine((value) => value === "" || PORT_PATTERN.test(value), "validation.portInvalid")
+  .refine(
+    (value) => value === "" || DIGITS_PATTERN.test(value),
+    "validation.portInvalid",
+  )
   .transform((value) => (value === "" ? undefined : Number(value)))
   .refine(
     (value) =>
@@ -278,8 +281,10 @@ const port = z
  * Two messages, not one: a value that is not a number and a value that is out of range are
  * different mistakes with different corrections, and the ceiling one interpolates the bound
  * so the sentence can say what it is.
+ *
+ * Shares `DIGITS_PATTERN` with `port` rather than declaring the same regex again four lines
+ * from the docblock saying it is the same regex.
  */
-const COUNT_PATTERN = /^\d+$/;
 
 const optionalCount = (bounds: {
   min: number;
@@ -290,7 +295,7 @@ const optionalCount = (bounds: {
   z
     .string()
     .trim()
-    .refine((value) => value === "" || COUNT_PATTERN.test(value), bounds.invalid)
+    .refine((value) => value === "" || DIGITS_PATTERN.test(value), bounds.invalid)
     .transform((value) => (value === "" ? undefined : Number(value)))
     .refine((value) => value === undefined || value >= bounds.min, bounds.invalid)
     .refine((value) => value === undefined || value <= bounds.max, bounds.tooLarge)

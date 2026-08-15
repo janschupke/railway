@@ -46,7 +46,6 @@ next-env.d.ts
 # playwright
 /playwright-report
 /test-results
-/coverage
 
 # Lighthouse. The session cookie lh-auth.ts mints lives inside .lighthouseci/, so one
 # entry covers it; the old root-level /.lighthouse-cookie is kept so a tree that still

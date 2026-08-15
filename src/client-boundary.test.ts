@@ -31,10 +31,32 @@ const SRC = path.resolve(import.meta.dirname);
  * a channel that does not exist.
  */
 const SERVER_ONLY = [
-  /@\/lib\/auth\/(session|refresh|server)/,
-  /@\/lib\/logger/,
-  /@\/lib\/log\//,
+  /^lib\/auth\/(session|refresh|server)$/,
+  /^lib\/logger$/,
+  /^lib\/log\//,
 ];
+
+/**
+ * A specifier as a path from `src/`, so a relative import is checked like an aliased one.
+ *
+ * These patterns were anchored on the literal `@/lib/…`, which meant they only ever saw
+ * the spelling this repo happens to prefer. `../lib/logger` from a component, or
+ * `./ui/../../lib/auth/session`, matched nothing — in the file that exists specifically to
+ * close the hole the eslint rule leaves at `src/app/dashboard/error.tsx`.
+ *
+ * Nothing exploited it. But a structural assertion that only recognises one spelling of the
+ * thing it forbids is the same class of gap as a lint rule scoped to one file extension,
+ * and this file's whole purpose is to be the backstop for that.
+ */
+function fromSrc(specifier: string, file: string): string | null {
+  if (specifier.startsWith("@/")) return specifier.slice(2);
+  if (!specifier.startsWith(".")) return null;
+  const resolved = path.resolve(path.dirname(file), specifier);
+  const relative = path.relative(SRC, resolved);
+  // Outside src/ entirely — a package or a repo-root file, neither of which these name.
+  if (relative.startsWith("..")) return null;
+  return relative.split(path.sep).join("/");
+}
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -71,9 +93,12 @@ describe("the client boundary", () => {
         .replace(/\/\/.*$/gm, "");
 
       const imports = [...code.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]!);
-      const forbidden = imports.filter((specifier) =>
-        SERVER_ONLY.some((pattern) => pattern.test(specifier)),
-      );
+      const forbidden = imports.filter((specifier) => {
+        const normalised = fromSrc(specifier, file);
+        return (
+          normalised !== null && SERVER_ONLY.some((pattern) => pattern.test(normalised))
+        );
+      });
 
       expect(forbidden).toEqual([]);
     },

@@ -28,7 +28,11 @@ export function GET() {
      * deployment is already broken. The detail goes to the log; the body says only that
      * the check failed.
      */
-    log.error("health.env_invalid", { issues: (error as Error).message });
+    log.error("health.env_invalid", {
+      // Narrowed for the reason proxy.ts gives: a non-Error throw here logs `undefined`
+      // and takes the issue list with it.
+      issues: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ status: "misconfigured" }, { status: 503 });
   }
   return Response.json({ status: "ok" });

@@ -36,8 +36,16 @@ function readEnv() {
   } catch (error) {
     if (!envFailureLogged) {
       envFailureLogged = true;
-      // The zod issue list names variables, never values — see env.ts.
-      log.error("proxy.env_invalid", { issues: (error as Error).message });
+      /*
+       * The zod issue list names variables, never values — see env.ts.
+       *
+       * Narrowed rather than asserted: this is the one boot-failure path in the app, and a
+       * non-Error throw would have logged `undefined` — losing the issue list that is the
+       * entire reason the line exists, on the one occasion nobody can debug it any other way.
+       */
+      log.error("proxy.env_invalid", {
+        issues: error instanceof Error ? error.message : String(error),
+      });
     }
     throw error;
   }
