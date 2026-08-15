@@ -42,7 +42,7 @@ this repo.
 
 Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 
-- **`pnpm check` is the gate** — `format:check && lint && typecheck && knip && test:coverage`. Run it before saying anything is done.
+- **`pnpm check` is the gate** — `format:check && lint && typecheck && codegen:check && knip && test:coverage`. Run it before saying anything is done.
 - **No raw palette colour, type step, hex literal or `-[var(--…)]` in a feature component** — appearance belongs to `src/components/ui/**` or to a token. It is a lint error, not a guideline.
 - **No hardcoded user-facing string in JSX** — it goes in `messages/en.json`. Also a lint error.
 - **No `console.*` in `src/**`** — use `src/lib/logger.ts`. This is a security ratchet: a stray `console.error(error)` is how a live access token reached stdout once.

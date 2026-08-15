@@ -10,8 +10,8 @@ restatement of the diff. If an alternative was rejected, name it and why.
 ## Gates
 
 `pnpm check` is the local gate — `format:check`, `lint` at zero warnings, `typecheck`,
-`knip`, and `test:coverage` against the thresholds in `vitest.config.mts`. Nothing is
-ready before it passes.
+`codegen:check`, `knip`, and `test:coverage` against the thresholds in `vitest.config.mts`.
+Nothing is ready before it passes.
 
 - [ ] `pnpm check`
 

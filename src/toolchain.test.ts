@@ -21,14 +21,39 @@ import { describe, expect, it } from "vitest";
  * `FROM` lines against each other. Nothing at runtime would notice a disagreement, and a
  * deploy would notice it late.
  *
- * The last assertion is a different shape and belongs here for the same reason: ci.yml's
- * job list against the aggregator's `needs`. A job that gates nothing is a check that is
- * not a check, and this repository ran without one building the deployment image for long
- * enough to prove nothing else was going to say so.
+ * Two assertions are a different shape and belong here for the same reason: a claim about
+ * the build restated in a second file, where nothing at runtime would ever compare them.
+ *
+ * ci.yml's job list against the aggregator's `needs` — a job that gates nothing is a check
+ * that is not a check, and this repository ran without one building the deployment image
+ * for long enough to prove nothing else was going to say so.
+ *
+ * And `package.json`'s `check` script against the four files that describe it. Three of
+ * them dropped `codegen:check`, which is the step that catches an edited `operations.ts`
+ * whose types were never regenerated — so anyone following AGENTS.md, the Cursor rules or
+ * the pull-request template ran five sixths of the gate and reported it green.
  */
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   engines?: { node?: string };
   packageManager?: string;
+  scripts?: Record<string, string>;
+};
+
+/**
+ * Every file that tells a reader what `pnpm check` runs.
+ *
+ * workflow.md is the rule; the other three are the ones somebody actually has open —
+ * AGENTS.md and main.mdc when it is an agent, the template when it is a person ticking
+ * boxes. All three had drifted from the script.
+ */
+const gateDocs = {
+  "AGENTS.md": readFileSync("AGENTS.md", "utf8"),
+  ".cursor/rules/main.mdc": readFileSync(".cursor/rules/main.mdc", "utf8"),
+  ".ai/rules/workflow.md": readFileSync(".ai/rules/workflow.md", "utf8"),
+  ".github/pull_request_template.md": readFileSync(
+    ".github/pull_request_template.md",
+    "utf8",
+  ),
 };
 
 const dockerfile = readFileSync("Dockerfile", "utf8");
@@ -153,6 +178,41 @@ describe("the toolchain", () => {
     expect(gated.toSorted()).toEqual(
       jobs.filter((job) => job !== "required").toSorted(),
     );
+  });
+
+  it("is described by every file that lists what `pnpm check` runs", () => {
+    /*
+     * Four files state the composition of the gate and three of them were wrong the same
+     * way: AGENTS.md, .cursor/rules/main.mdc and the pull-request template all omitted
+     * `codegen:check`. Only workflow.md had it.
+     *
+     * That is the worst of the four to lose. `codegen:check` regenerates the documents'
+     * types and fails if the result differs from what is committed, so it is the step that
+     * catches an edited `operations.ts` whose types were never regenerated — and the three
+     * files that dropped it are the ones an agent reads first and a contributor ticks off
+     * by hand. Someone following any of them ran five sixths of the gate and reported it
+     * green.
+     *
+     * Derived from package.json rather than restated here, so this assertion cannot become
+     * the fifth copy of the same list.
+     */
+    const script = packageJson.scripts?.check;
+    expect(script, "package.json must define a `check` script").toBeDefined();
+
+    const steps = script!
+      .split("&&")
+      .map((part) => part.trim().replace(/^pnpm\s+/, ""));
+
+    expect(steps.length).toBeGreaterThan(0);
+
+    for (const [file, text] of Object.entries(gateDocs)) {
+      for (const step of steps) {
+        expect(
+          text,
+          `${file} omits \`${step}\` from what \`pnpm check\` runs`,
+        ).toContain(step);
+      }
+    }
   });
 
   it("lets the Dockerfile decide how the app starts", () => {
