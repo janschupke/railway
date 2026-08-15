@@ -128,13 +128,30 @@ function importedFiles(code: string, file: string): string[] {
   });
 }
 
+/**
+ * Whether this file calls a guard, or imports one for something it hands on.
+ *
+ * `code.includes(guard)` was the whole check, and a substring match is satisfied by more
+ * than it looks: a variable called `requireSessionLater`, a string carrying the name, a
+ * type-only import. Comments were already stripped, so those are what was left. Both
+ * forms are needed rather than the call alone — an intermediate module in the two-hop
+ * walk may import the guard and pass it on rather than call it.
+ */
+function namesGuard(code: string, guard: string): boolean {
+  const called = new RegExp(`\\b${guard}\\s*\\(`).test(code);
+  const imported = new RegExp(`import[^;]*\\b${guard}\\b[^;]*from\\s*["']`, "s").test(
+    code,
+  );
+  return called || imported;
+}
+
 /** Whether a guard is named in this file or in anything it imports, up to `depth` hops. */
 function reachesGuard(file: string, depth: number, seen = new Set<string>()): boolean {
   if (seen.has(file) || depth < 0) return false;
   seen.add(file);
 
   const code = read(file);
-  if (GUARDS.some((guard) => code.includes(guard))) return true;
+  if (GUARDS.some((guard) => namesGuard(code, guard))) return true;
 
   return importedFiles(code, file).some((next) => reachesGuard(next, depth - 1, seen));
 }

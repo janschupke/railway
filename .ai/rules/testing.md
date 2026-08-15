@@ -25,10 +25,21 @@ Server Component be rendered by awaiting it. The two are additive: `setup-dom` m
 
 ## Coverage is a ratchet, not a floor, and the exclude list is not a lever
 
-`include: ["src/**"]`. Thresholds sit **just under the measured figures**, not at a round
-number below them, and there are per-directory floors for `src/lib/**`, `src/hooks/**`,
-`src/features/**` and `src/components/**` as well as the global four. A miss fails
-`pnpm test:coverage`, which fails `pnpm check` and CI.
+`include: ["src/**"]`. Thresholds are **counts of what is not covered**, not percentages —
+a negative number in `vitest.config.mts` means "at most this many uncovered", and each sits
+about a tenth above the measured figure. There are per-directory floors for `src/lib/**`,
+`src/hooks/**`, `src/features/**` and `src/components/**` as well as the global four. A
+miss fails `pnpm test:coverage`, which fails `pnpm check` and CI, and it names the count:
+`Uncovered lines (81) exceed global threshold (75)`.
+
+**Counts rather than percentages, because a percentage measures the wrong thing here.** Its
+denominator moves with the code, so the gate changes meaning when nothing about the testing
+has. Adding a well-tested module can fail a percentage that a smaller and worse-tested tree
+passed — the global lines gate had about thirteen uncovered lines of headroom, so a new
+forty-line module with twenty-five covered lines was a red build however well it was tested
+— and deleting code silently loosens it. A count says what the ratchet has always meant:
+this many lines in the app are not exercised, and the number may go down. It also survives a
+refactor that only moves code between files, which a per-directory percentage does not.
 
 Both halves of that matter, and both were once wrong. The thresholds were 80 against an
 actual of ~94, so a change could delete a third of the branch coverage and still pass —

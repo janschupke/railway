@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { declaredValue } from "@/test/css";
 
 /**
  * The type scale, asserted against the files that define it.
@@ -32,8 +33,7 @@ const VARIANTS = [
   "mono",
 ] as const;
 
-const declared = (css: string, name: string) =>
-  new RegExp(`^\\s*${name.replace(/[-]/g, "\\-")}:\\s*([^;]+);`, "m").exec(css)?.[1];
+const declared = (css: string, name: string) => declaredValue(css, name);
 
 describe("the type scale", () => {
   it.each(VARIANTS)("defines a size and a line-height for %s", (variant) => {

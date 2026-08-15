@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { atRuleBody, declaredValue } from "@/test/css";
 
 /**
  * Control geometry and motion, asserted against the files that define them.
@@ -25,27 +26,19 @@ const ui = (file: string) =>
 const STEPS = ["sm", "md", "lg"] as const;
 const DURATIONS = ["fast", "base", "slow"] as const;
 
-const declared = (css: string, name: string) =>
-  new RegExp(`^\\s*${name.replace(/[-]/g, "\\-")}:\\s*([^;]+);`, "m").exec(css)?.[1];
+const declared = (css: string, name: string) => declaredValue(css, name);
 
 /**
  * The body of `@theme inline { … }`, or a thrown error.
  *
- * The throw is the fix. Both callers used to slice between two `indexOf` results and use
- * whatever came back — so reformatting that one line to `@theme inline{`, which changes
- * nothing about the generated CSS, made `indexOf` return −1, made `slice(-1, -1)` return
- * the empty string, and made every `not.toMatch` below pass against nothing. The two
- * assertions that exist to catch a token declared in the wrong namespace were the two
- * most likely to go quiet.
+ * Both callers used to slice between two `indexOf` results and use whatever came back —
+ * so reformatting that one line to `@theme inline{`, which changes nothing about the
+ * generated CSS, made `indexOf` return −1, made `slice(-1, -1)` return the empty string,
+ * and made every `not.toMatch` below pass against nothing. The two assertions that exist
+ * to catch a token declared in the wrong namespace were the two most likely to go quiet.
+ * `atRuleBody` parses, and throws when the block is absent.
  */
-function themeBlock(css: string): string {
-  const opening = /@theme\s+inline\s*\{/.exec(css);
-  if (!opening) throw new Error("globals.css declares no `@theme inline` block");
-  const start = opening.index + opening[0].length;
-  const end = css.indexOf("\n}", start);
-  if (end === -1) throw new Error("`@theme inline` block is never closed");
-  return css.slice(start, end);
-}
+const themeBlock = (css: string) => atRuleBody(css, "theme", "inline");
 
 describe("control geometry", () => {
   it.each(STEPS)("defines a height and an inline inset for %s", (step) => {

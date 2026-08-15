@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FREIGHT_TOKENS, RAIL_YARD_TOKENS } from "@/features/rail-yard/palette";
+import { CONTAINER_STATES } from "@/lib/railway/types";
+import { propertiesFor, propertiesInAtRule } from "@/test/css";
 
 /**
  * WCAG AA contrast, asserted against the token file itself.
@@ -44,62 +46,21 @@ const FREIGHT_SEPARATION = 60;
 type Rgb = [number, number, number];
 
 /**
- * Strips @media blocks before parsing.
+ * Every custom property declared at the top level under `selector`.
  *
- * The `prefers-color-scheme: light` block contains its own nested `:root { … }`, which
- * a naive scan folds into the base declarations and silently makes both themes
- * identical. Those values are duplicated by the explicit `[data-theme]` overrides,
- * which is what the app's own cascade relies on, so dropping them here loses nothing.
+ * Two hand-written brace matchers used to do this and the media extractor below — one
+ * stripping `@media` blocks, one walking `([^{}]+)\{([^{}]*)\}` — plus a comment strip to
+ * keep prose above a rule out of its selector. `propertiesFor` parses instead, and takes
+ * only top-level rules for the same reason the strip existed: the
+ * `prefers-color-scheme: light` block carries its own nested `:root`, and folding it into
+ * the base declarations makes both themes read as identical. Those values are duplicated
+ * by the explicit `[data-theme]` overrides, which is what the app's own cascade relies on.
+ *
+ * The old version compared selector text with `===` after a trim, so
+ * `:root[data-theme='dark']` in single quotes, or an extra space inside the brackets,
+ * returned an empty map and every assertion over it passed.
  */
-function stripMediaBlocks(css: string): string {
-  let out = "";
-  let index = 0;
-  for (;;) {
-    const start = css.indexOf("@media", index);
-    if (start === -1) {
-      out += css.slice(index);
-      return out;
-    }
-    out += css.slice(index, start);
-
-    let depth = 0;
-    let cursor = css.indexOf("{", start);
-    if (cursor === -1) return out;
-    for (; cursor < css.length; cursor++) {
-      if (css[cursor] === "{") depth += 1;
-      else if (css[cursor] === "}") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    index = cursor + 1;
-  }
-}
-
-// Comments sit between rules and would otherwise be captured as part of the selector.
-const FLAT = stripMediaBlocks(TOKENS.replace(/\/\*[\s\S]*?\*\//g, ""));
-
-function declarationsOf(body: string): Map<string, string> {
-  const declarations = new Map<string, string>();
-  for (const line of body.split(";")) {
-    const [name, ...rest] = line.split(":");
-    if (!name || rest.length === 0) continue;
-    const key = name.trim();
-    if (!key.startsWith("--")) continue;
-    declarations.set(key, rest.join(":").trim());
-  }
-  return declarations;
-}
-
-/** `selector` is matched exactly against the rule's selector text. */
-function block(selector: string): Map<string, string> {
-  const merged = new Map<string, string>();
-  for (const match of FLAT.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (match[1]!.trim() !== selector) continue;
-    for (const [key, value] of declarationsOf(match[2]!)) merged.set(key, value);
-  }
-  return merged;
-}
+const block = (selector: string) => propertiesFor(TOKENS, selector);
 
 const PRIMITIVES = block(":root");
 const DARK = new Map([...PRIMITIVES, ...block(':root[data-theme="dark"]')]);
@@ -189,17 +150,14 @@ const TEXT_ON_SURFACE: Array<[fg: string, bg: string]> = [
   ["--rc-warning", "--rc-surface"],
 ];
 
-const STATES = [
-  "pending",
-  "building",
-  "deploying",
-  "running",
-  "failed",
-  "sleeping",
-  "removing",
-  "removed",
-  "unknown",
-];
+/*
+ * Imported rather than restated, which is what makes this a gate rather than a list.
+ * A tenth container state used to be free here: it would render a badge whose tokens
+ * nothing had checked, because the copy in this file did not know about it. Now the case
+ * set follows the union, and adding a state without its two tokens fails on `resolve`,
+ * which throws for an unknown one.
+ */
+const STATES = [...CONTAINER_STATES];
 
 const SIGNALS = ["danger", "success", "warning", "info"];
 
@@ -614,27 +572,7 @@ describe("token parity across themes", () => {
    * scan. Read from the raw source instead: it is the theme an OS preference selects,
    * so a token missing here is missing for every user who never touched the toggle.
    */
-  const MEDIA = (() => {
-    const source = TOKENS.replace(/\/\*[\s\S]*?\*\//g, "");
-    const start = source.indexOf("@media (prefers-color-scheme: light)");
-    if (start === -1) return new Map<string, string>();
-    const open = source.indexOf("{", start);
-    let depth = 0;
-    let cursor = open;
-    for (; cursor < source.length; cursor++) {
-      if (source[cursor] === "{") depth += 1;
-      else if (source[cursor] === "}") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    const body = source.slice(open + 1, cursor);
-    const merged = new Map<string, string>();
-    for (const match of body.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      for (const [key, value] of declarationsOf(match[2]!)) merged.set(key, value);
-    }
-    return merged;
-  })();
+  const MEDIA = propertiesInAtRule(TOKENS, "media", "(prefers-color-scheme: light)");
 
   /** Semantic tokens only: --rc-*. Primitives and geometry are not themed. */
   const semantic = (names: Iterable<string>) =>

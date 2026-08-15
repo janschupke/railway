@@ -75,7 +75,12 @@ export default defineConfig({
 
     coverage: {
       provider: "v8",
-      reporter: ["text", "lcov", "html"],
+      /*
+       * `json-summary` is here for the thresholds below, which are counts rather than
+       * percentages and therefore need a number a person can read off the run. `text` is
+       * for the terminal, `lcov` for the CI artefact, `html` for reading a file's misses.
+       */
+      reporter: ["text", "lcov", "html", "json-summary"],
       include: ["src/**"],
       exclude: [
         "src/test/**",
@@ -118,17 +123,32 @@ export default defineConfig({
        */
       thresholds: {
         /*
-         * Raised with T-485, which is what this ratchet is for: the measured figures moved
-         * to 98.34 / 91.09 / 97.79 / 96.94, and thresholds left at the old numbers would
-         * have let a later change delete every test the domain work brought with it and
-         * still pass. Each sits a point or so under its measurement, which is the margin
-         * the previous set carried — close enough to defend the figure, far enough that one
-         * branch of legitimate refactoring is not a red build.
+         * Counts, not percentages, and the sign is what selects between them: vitest reads
+         * a positive number as "at least X% covered" and a negative one as "at most X
+         * uncovered".
+         *
+         * A percentage measures the wrong thing for a ratchet. Its denominator moves with
+         * the code, so the gate changes meaning when nothing about the testing has: adding
+         * a well-tested module can *fail* a percentage that a smaller, worse-tested tree
+         * passed, and deleting code silently loosens it. Both happened here in miniature —
+         * the global lines gate had about thirteen uncovered lines of headroom, so a new
+         * forty-line module with twenty-five covered lines was a red build regardless of
+         * how well it was tested.
+         *
+         * A count says what the ratchet has always meant: this many lines in the app are
+         * not exercised, and the number may go down. It is also stable across a refactor
+         * that only moves code between files, which is the next thing happening to this
+         * repository.
+         *
+         * Measured, at the commit that introduced these: 68 lines, 247 branches, 21
+         * functions, 137 statements. Each threshold carries roughly a tenth of that as
+         * headroom — the same margin the percentages carried, expressed in the unit
+         * anybody reading a failure will see.
          */
-        lines: 98,
-        branches: 90,
-        functions: 97,
-        statements: 96,
+        lines: -75,
+        branches: -265,
+        functions: -25,
+        statements: -150,
 
         /*
          * Per-directory, because a global aggregate cannot see a single file at zero.
@@ -143,7 +163,8 @@ export default defineConfig({
          * exclude list, which testing.md forbids for exactly this reason. Directory
          * floors put the pressure where the logic is without inviting that.
          */
-        "src/lib/**": { lines: 98, branches: 93, functions: 97, statements: 97 },
+        // Measured: 18 lines, 66 branches, 4 functions, 36 statements.
+        "src/lib/**": { lines: -22, branches: -73, functions: -6, statements: -42 },
         /*
          * The one file with a threshold of its own, and it earns it by name.
          *
@@ -162,7 +183,8 @@ export default defineConfig({
           functions: 100,
           statements: 100,
         },
-        "src/hooks/**": { lines: 98, branches: 94, functions: 98, statements: 97 },
+        // Measured: 2 lines, 6 branches, 1 function, 4 statements.
+        "src/hooks/**": { lines: -4, branches: -9, functions: -3, statements: -7 },
         /*
          * The rail yard. It gets a floor of its own for the same reason lib and hooks do:
          * it is the largest body of logic in the app outside those two, and a global
@@ -180,7 +202,8 @@ export default defineConfig({
          * tests to be deleted without a red build, which is the only thing a ratchet is
          * for. Same correction for src/hooks/**, at 91 against 94.29.
          */
-        "src/features/**": { lines: 98, branches: 87, functions: 98, statements: 95 },
+        // Measured: 6 lines, 67 branches, 1 function, 34 statements.
+        "src/features/**": { lines: -9, branches: -74, functions: -3, statements: -40 },
         /*
          * The directory the ratchet above was missing, and the one it could least afford to.
          *
@@ -200,7 +223,13 @@ export default defineConfig({
          * mostly optional-prop and empty-collection guards on primitives, which need a
          * caller per branch to reach and assert nothing anyone relies on.
          */
-        "src/components/**": { lines: 96, branches: 89, functions: 95, statements: 95 },
+        // Measured: 31 lines, 83 branches, 15 functions, 46 statements.
+        "src/components/**": {
+          lines: -36,
+          branches: -91,
+          functions: -18,
+          statements: -53,
+        },
       },
     },
   },

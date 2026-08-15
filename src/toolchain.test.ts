@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 /**
  * One Node, one pnpm, agreed by every file that names one.
@@ -166,15 +167,26 @@ describe("the toolchain", () => {
      * This repository shipped for months with no job building the deployment image at all,
      * which is the same failure one layer out. So the list is derived rather than trusted.
      */
-    const jobs = [
-      ...ci.slice(ci.indexOf("\njobs:\n")).matchAll(/^ {2}(\w[\w-]*):$/gm),
-    ].map((match) => match[1]!);
-    const declared = /^ {4}needs: \[([^\]]+)\]$/m.exec(ci);
+    /*
+     * Parsed, not matched. This read the job names with `^ {2}(\w[\w-]*):$` and the
+     * aggregator's list with `^ {4}needs: \[([^\]]+)\]$`, which hardcodes both the
+     * indent width and the flow-sequence spelling — so rewriting `needs: [a, b]` as a
+     * block list, which is the same document to GitHub Actions, made this red for no
+     * behavioural reason. The two-space indent was load-bearing in the other direction
+     * too: any nested key two levels down would have been read as a job.
+     */
+    const workflow = parse(ci) as {
+      jobs?: Record<string, { needs?: string | string[] }>;
+    };
 
-    expect(declared, "ci.yml must have an aggregator with a needs list").not.toBeNull();
+    const jobs = Object.keys(workflow.jobs ?? {});
+    expect(jobs, "ci.yml must define jobs").not.toHaveLength(0);
     expect(jobs).toContain("required");
 
-    const gated = declared![1]!.split(",").map((name) => name.trim());
+    const needs = workflow.jobs?.required?.needs;
+    expect(needs, "`required` must have a needs list").toBeDefined();
+
+    const gated = typeof needs === "string" ? [needs] : (needs ?? []);
     expect(gated.toSorted()).toEqual(
       jobs.filter((job) => job !== "required").toSorted(),
     );

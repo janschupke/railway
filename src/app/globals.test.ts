@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { rulesMatching as parseRules } from "@/test/css";
 
 /**
  * Global stylesheet invariants that no rendering test can reach.
@@ -18,15 +19,14 @@ const ui = (file: string) =>
 /**
  * Declaration blocks whose selector mentions `needle`.
  *
- * Comments are stripped first, or a rule that merely *explains* the selector in prose
- * above itself would be read as using it.
+ * A parse rather than `split("}")`. The split version read a rule's selector as
+ * "everything since the previous closing brace", which folds the comment above it into
+ * the selector — hence the strip it needed — and breaks outright on anything nested,
+ * where the text between two braces is not one rule's worth. It was also the reason the
+ * popper case below found nothing at all.
  */
 const rulesMatching = (css: string, needle: string) =>
-  css
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("}")
-    .filter((block) => block.split("{")[0]?.includes(needle))
-    .map((block) => block.split("{").slice(1).join("{"));
+  parseRules(css, needle).map((rule) => rule.body);
 
 describe("popper animation", () => {
   it("never targets the positioning wrapper at all", () => {

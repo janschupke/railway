@@ -574,13 +574,15 @@ Four tiers, each answering something the others cannot.
 | **integration** | node + MSW  | Server Actions and route handlers against a mocked Railway        |
 | **e2e**         | Playwright  | The real OAuth flow and lifecycle against a fake Railway          |
 
-`pnpm test:coverage` enforces **98 lines / 91 branches / 98 functions / 96 statements**
-across `src/**`, with per-directory floors for `src/lib`, `src/hooks`, `src/features` and
-`src/components` on top, and one file-level floor at 100 for
-`src/lib/railway/subscribe.ts`. The thresholds sit a point under the measured figures
-rather than at a round number below them — see
-[`.ai/rules/testing.md`](.ai/rules/testing.md), which has the reasoning and is where the
-numbers are maintained. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
+`pnpm test:coverage` gates on **how many lines, branches, functions and statements are
+not covered** rather than on a percentage, across `src/**`, with per-directory budgets for
+`src/lib`, `src/hooks`, `src/features` and `src/components` on top, and one file-level
+floor at 100 for `src/lib/railway/subscribe.ts`. A count is stable when the denominator
+moves, which a percentage is not — see
+[`.ai/rules/testing.md`](.ai/rules/testing.md), which has the reasoning, and
+`vitest.config.mts`, which is where the numbers are maintained. They are not restated here,
+because the copy that was here said 98/91/98/96 against a config that read 98/90/97/96: the
+figures it quoted were the _measured_ ones, not the enforced ones. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
 are excluded and covered end-to-end instead — counting them would either inflate the
 number or invite render tests that assert nothing. E2E does not feed the figure, so
 component tests have to carry the UI.
