@@ -530,10 +530,14 @@ export const TRACK = {
   /** A siding is lighter track than the main line. */
   sidingScale: 0.85,
   /**
-   * How long a switch blade is drawn at a crossover's foot, and how long the vee of a
-   * diamond is. Cosmetic, but their absence was most of why the junctions read as two
-   * pieces of track meeting rather than as one piece of railway.
+   * How long a switch blade is drawn at a crossover's foot. Cosmetic, but its absence was
+   * most of why the junctions read as two pieces of track meeting rather than as one piece
+   * of railway.
+   *
+   * There is no `frogLength` beside it any more. It was declared for the vee of a diamond
+   * and never read once, because this scene has no diamond to draw one at — the roads are
+   * joined by a ladder, and a ladder has no crossing in it (`scene.ts`). A number
+   * describing geometry the scene cannot contain is not a setting.
    */
   bladeLength: 26,
-  frogLength: 20,
 } as const;

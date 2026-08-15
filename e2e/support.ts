@@ -1,10 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base, type Locator, type Page } from "@playwright/test";
-import type {
-  FailureFieldFault,
-  LogPhaseFault,
-  ProjectsSource,
-} from "./fixtures/fake-railway/store";
+import type { Faults } from "./fixtures/fake-railway/store";
 
 const FIXTURE_URL = `http://localhost:${process.env.FAKE_RAILWAY_PORT ?? 4010}`;
 
@@ -18,38 +14,15 @@ export const test = base.extend<{ page: Page }>({
 
 export { expect };
 
-export async function injectFaults(
-  page: Page,
-  faults: Partial<{
-    rateLimit: number;
-    rateLimitRetryAfter: number;
-    unauthorized: number;
-    notAuthorizedField: number;
-    refreshFails: boolean;
-    accessTokenTtl: number;
-    deploymentsFail: boolean;
-    logPhase: LogPhaseFault;
-    failureField: FailureFieldFault;
-    deploymentEventsFail: boolean;
-    deploymentListFail: boolean;
-    variablesFail: boolean;
-    domainFails: boolean;
-    volumeCreateFail: boolean;
-    volumesFail: boolean;
-    settingsFail: boolean;
-    limitsFail: boolean;
-    metricsFail: boolean;
-    idleMetrics: boolean;
-    workspaceFail: boolean;
-    noWorkspace: boolean;
-    projectsSource: ProjectsSource;
-    rejectWorkspaces: boolean;
-    rejectPersonal: boolean;
-    projectsEmpty: boolean;
-    slowMs: number;
-    registryStatus: number;
-  }>,
-) {
+/*
+ * `Partial<Faults>` rather than a list of knobs written out again.
+ *
+ * The copy that used to be here restated all twenty-seven by hand, so it could only ever
+ * be as current as the last person to add one — and it had already fallen behind by
+ * three. Worse, a knob the store does not have was not a type error, so a typo silently
+ * posted a fault nothing would ever read and the spec failed somewhere else entirely.
+ */
+export async function injectFaults(page: Page, faults: Partial<Faults>) {
   await page.request.post(`${FIXTURE_URL}/__test/faults`, { data: faults });
 }
 

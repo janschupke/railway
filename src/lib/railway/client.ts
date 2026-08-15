@@ -87,7 +87,7 @@ export type GqlOptions = {
  * nothing comparing them.
  *
  * The cost of a disagreement is not only a mislabelled log line. `DEGRADING_OPERATIONS` in
- * `operations.ts` is keyed by operation name, and `scripts/verify-schema.ts` matches on the
+ * `schema-policy.ts` is keyed by operation name, and `scripts/verify-schema.ts` matches on the
  * name it parses out of the **document** — so a call site whose literal had drifted would
  * quietly stop being recognised as degrading, and a validation failure this app is designed
  * to survive would start failing the schema job instead. A gate going wrong quietly is the

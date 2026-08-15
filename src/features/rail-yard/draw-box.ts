@@ -13,7 +13,7 @@
  * There is no sign to get wrong here, because there is nothing to negate.
  */
 
-import { GANTRY, VIEW, type Box } from "./config";
+import { CONTAINER, GANTRY, VIEW, type Box } from "./config";
 import { localToWorld, type Pose } from "./geometry";
 import type { YardPalette } from "./palette";
 import { toScreenX, toScreenY, type ViewTransform } from "./view";
@@ -228,9 +228,16 @@ export function drawRibs(
   const top = bottom + height;
 
   ctx.save();
-  ctx.globalAlpha = 0.24;
+  /*
+   * Read off the sprite rather than written here. Both numbers were declared on CONTAINER
+   * and neither was ever read: the alpha was repeated as a literal that happened to agree,
+   * and the width was implied by scaling by 1. A corrugation that only a box has is the
+   * box's to describe, and a constant nothing reads is one edit away from disagreeing
+   * with the thing it claims to configure.
+   */
+  ctx.globalAlpha = CONTAINER.ribAlpha;
   ctx.strokeStyle = palette.locoTrim;
-  ctx.lineWidth = Math.max(VIEW.MIN_FEATURE_PX, view.scale);
+  ctx.lineWidth = Math.max(VIEW.MIN_FEATURE_PX, view.scale * CONTAINER.ribWidth);
   for (let rib = 1; rib <= ribs; rib++) {
     const forward = ax - noseOffset + (length * rib) / (ribs + 1);
     const [wx, wy] = localToWorld(pose, forward, across);

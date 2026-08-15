@@ -156,7 +156,7 @@ export const TICK_MS = 400;
  * never caught a real account whose projects arrive somewhere else: the only shape it
  * knew was the shape that worked. These are the shapes that have to keep working.
  */
-export type ProjectsSource =
+type ProjectsSource =
   | "personal" // me.projects only
   | "workspace" // me.workspaces[].team.projects only
   | "both" // in both connections — the de-duplication case
@@ -170,7 +170,7 @@ export type ProjectsSource =
  * actually produces: output in one phase only, or — for a pull that never resolves —
  * nothing anywhere, which is the case that reaches the user as an empty pane.
  */
-export type LogPhaseFault = "both" | "build" | "deploy" | "none";
+type LogPhaseFault = "both" | "build" | "deploy" | "none";
 
 /**
  * Which member of DeploymentEventPayload carries the failure text, if any.
@@ -181,7 +181,7 @@ export type LogPhaseFault = "both" | "build" | "deploy" | "none";
  * evidence available that it copes with each. `none` is the feed that answers with steps
  * and no words at all.
  */
-export type FailureFieldFault = "error" | "reason" | "detail" | "none";
+type FailureFieldFault = "error" | "reason" | "detail" | "none";
 
 export type Faults = {
   /** Next N GraphQL calls answer 429. */

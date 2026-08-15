@@ -299,7 +299,7 @@ const containerList = cache(
      *
      * Degrades to `{}`, which is the same value "no container here has a volume" produces —
      * deliberately, and safe because every consequence of the empty answer is the
-     * conservative one. See DEGRADING_OPERATIONS in lib/railway/operations.ts.
+     * conservative one. See DEGRADING_OPERATIONS in lib/railway/schema-policy.ts.
      */
     const storage = getEnvironmentVolumes(session.accessToken, environmentId).catch(
       (error: unknown) => {
@@ -385,7 +385,7 @@ export async function managedNames(
  *
  * `[]` is that designed answer rather than a failure: the select renders disabled with a
  * reason and Railway picks the region, which is what happened before this app offered a
- * choice at all. See DEGRADING_OPERATIONS in lib/railway/operations.ts.
+ * choice at all. See DEGRADING_OPERATIONS in lib/railway/schema-policy.ts.
  *
  * Unlike `managedNames` it does not share `loadContainers`' memo — nothing else reads
  * regions — so it is the one read on this page with a cache of its own. See
