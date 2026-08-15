@@ -48,7 +48,7 @@ import { poseAlong } from "./graph";
 import type { YardPalette } from "./palette";
 import { wagonNoseDistance } from "./rake";
 import type { RailScene, SceneStructure } from "./scene";
-import type { TrainState, WorldState } from "./simulation";
+import type { TrainState, WorldState } from "./world-state";
 import type { Freight } from "./conveyor";
 import { spreaderZ } from "./crane";
 import { aspectOf } from "./traffic";

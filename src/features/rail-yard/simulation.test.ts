@@ -6,19 +6,45 @@ import { poseAlong } from "./graph";
 import { FREIGHT_TOKENS } from "./palette";
 import { createRng } from "./rng";
 import { RAIL_YARD_SCENE } from "./scene";
+import { createWorld } from "./create-world";
+import { EXPRESS_RING, YARD_RING } from "./phases";
+import { step } from "./simulation";
 import {
-  EXPRESS_RING,
-  YARD_RING,
-  createWorld,
-  snapshot,
-  step,
-  stepsFor,
   trainLength,
   type TrainPhase,
   type TrainState,
   type WorldState,
-} from "./simulation";
+} from "./world-state";
 import { fitView, toScreenX } from "./view";
+
+/**
+ * A JSON-safe deep copy, for the determinism assertions. The graph is scene data.
+ *
+ * A test helper rather than a production export, which is what it always was: nothing in
+ * the app ever called it, so it sat in `simulation.ts` widening that module's surface for
+ * the benefit of this file alone.
+ */
+function snapshot(world: WorldState): unknown {
+  return {
+    elapsedMs: world.elapsedMs,
+    puffs: world.puffs.map((puff) => ({ ...puff })),
+    crane: { ...world.crane },
+    conveyor: {
+      ...world.conveyor,
+      boxes: world.conveyor.boxes.map((box) => ({ ...box })),
+    },
+    trains: world.trains.map((train) => ({
+      ...train,
+      wagons: train.wagons.map((wagon) => ({ ...wagon })),
+      itinerary: { ...train.itinerary },
+      path: {
+        ...train.path,
+        edges: [...train.path.edges],
+        marks: [...train.path.marks],
+      },
+    })),
+  };
+}
 
 /** The ring a train goes round, which is now a property of the train rather than the file. */
 const ringFor = (train: TrainState): readonly TrainPhase[] =>
@@ -687,24 +713,6 @@ describe("smoke", () => {
     run(world, rng, 20);
     expect(puff!.z).toBeGreaterThan(startZ);
     expect(puff!.y).toBe(startY);
-  });
-});
-
-describe("stepsFor", () => {
-  it("turns a frame delta into whole steps and a remainder", () => {
-    expect(stepsFor(0, 100)).toEqual({ steps: 5, rest: 0 });
-    expect(stepsFor(0, 30)).toEqual({ steps: 1, rest: 10 });
-    expect(stepsFor(10, 30)).toEqual({ steps: 2, rest: 0 });
-  });
-
-  it("clamps a long stall instead of running the catch-up", () => {
-    // A tab that wakes after four seconds must not run two hundred steps on the frame it
-    // wakes on: that is a visible freeze followed by every train teleporting.
-    expect(stepsFor(0, 5_000).steps).toBe(SIM.MAX_CATCHUP_MS / SIM.STEP_MS);
-  });
-
-  it("ignores a clock that went backwards", () => {
-    expect(stepsFor(0, -50)).toEqual({ steps: 0, rest: 0 });
   });
 });
 

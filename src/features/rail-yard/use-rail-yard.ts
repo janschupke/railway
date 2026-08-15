@@ -6,9 +6,31 @@ import { drawFrame, type Layer } from "./render";
 import { composeStaticLayer } from "./draw-scene";
 import { createRng } from "./rng";
 import { RAIL_YARD_SCENE } from "./scene";
-import { createWorld, step, stepsFor } from "./simulation";
+import { createWorld } from "./create-world";
+import { step } from "./simulation";
 import { createThemeSource, type MediaQueryLike } from "./theme-source";
 import { fitView, type ViewTransform } from "./view";
+
+/**
+ * How many fixed steps a frame's delta is worth, and what is left over.
+ *
+ * Here rather than in `simulation.ts`, where it used to live among the rules: it takes no
+ * world and knows nothing about trains. It is bookkeeping for *this* loop — the remainder
+ * becomes the renderer's interpolation alpha, so the simulation stays on its fixed grid
+ * while a 120 Hz display still gets smooth motion.
+ *
+ * The clamp is the spiral-of-death guard: a tab that wakes after four seconds must not run
+ * two hundred steps on the frame it wakes on, which is a visible freeze followed by every
+ * train teleporting. The excess is dropped rather than repaid — nobody was watching.
+ */
+export function stepsFor(
+  accumulator: number,
+  deltaMs: number,
+): { steps: number; rest: number } {
+  const total = accumulator + Math.max(0, Math.min(deltaMs, SIM.MAX_CATCHUP_MS));
+  const steps = Math.floor(total / SIM.STEP_MS);
+  return { steps, rest: total - steps * SIM.STEP_MS };
+}
 
 /**
  * Everything the loop touches that is not a pure function.

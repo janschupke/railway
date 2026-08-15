@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeContext } from "@/test/fake-canvas-2d";
 import { SIM } from "./config";
 import { RAIL_YARD_TOKENS, FREIGHT_TOKENS } from "./palette";
-import { DEFAULT_DEPS, useRailYard, type RailYardDeps } from "./use-rail-yard";
+import {
+  DEFAULT_DEPS,
+  stepsFor,
+  useRailYard,
+  type RailYardDeps,
+} from "./use-rail-yard";
 import type { MediaQueryLike } from "./theme-source";
 
 /**
@@ -157,6 +162,24 @@ function Host({ deps }: { deps: RailYardDeps }) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("stepsFor", () => {
+  it("turns a frame delta into whole steps and a remainder", () => {
+    expect(stepsFor(0, 100)).toEqual({ steps: 5, rest: 0 });
+    expect(stepsFor(0, 30)).toEqual({ steps: 1, rest: 10 });
+    expect(stepsFor(10, 30)).toEqual({ steps: 2, rest: 0 });
+  });
+
+  it("clamps a long stall instead of running the catch-up", () => {
+    // A tab that wakes after four seconds must not run two hundred steps on the frame it
+    // wakes on: that is a visible freeze followed by every train teleporting.
+    expect(stepsFor(0, 5_000).steps).toBe(SIM.MAX_CATCHUP_MS / SIM.STEP_MS);
+  });
+
+  it("ignores a clock that went backwards", () => {
+    expect(stepsFor(0, -50)).toEqual({ steps: 0, rest: 0 });
+  });
 });
 
 describe("useRailYard", () => {
