@@ -79,12 +79,74 @@ const VARIABLE_VALUE_PATTERN = /^[^\u0000-\u0008\u000A-\u001F\u007F]*$/;
 export const RESERVED_VARIABLE_PREFIX = "RAILWAY_";
 
 /**
+ * Every catalog key a rule in this file can name, declared once.
+ *
  * Every rule carries a catalog key as its message, and every rule carries one — the
  * silent `.min(1)` calls used to fall through to zod's own built-in English, which no
- * amount of translation would have reached.
+ * amount of translation would have reached. The action resolves them; see
+ * `messageForIssue` in `src/app/dashboard/actions.ts`.
  *
- * The action resolves these keys; see `messageForIssue` in ./validation-messages.
+ * Referenced by the rules rather than restated by them, and that is the whole point. The
+ * rules used to carry bare `"validation.…"` literals and `VALIDATION_KEYS` below was a
+ * hand-maintained mirror of them, linked by nothing. A rule added with its key forgotten
+ * there did not fail — `messageForIssue` fell through to the generic `actions.invalidForm`
+ * and the specific sentence was silently replaced by "check the form". Now a mistyped or
+ * missing key is a typecheck error at the rule site, which is where it can be fixed.
+ *
+ * Several keys are named by two or three rules — `portInvalid` by both of `port`'s
+ * refinements, `regionInvalid` by a length rule and a charset rule, `submissionInvalid` by
+ * both halves of the idempotency check. Those are the sites that were free to drift.
  */
+const KEYS = {
+  nameRequired: "validation.nameRequired",
+  nameTooLong: "validation.nameTooLong",
+  imageRequired: "validation.imageRequired",
+  imageTooLong: "validation.imageTooLong",
+  imageInvalid: "validation.imageInvalid",
+  projectRequired: "validation.projectRequired",
+  environmentRequired: "validation.environmentRequired",
+  serviceRequired: "validation.serviceRequired",
+  referenceInvalid: "validation.referenceInvalid",
+  variableNameRequired: "validation.variableNameRequired",
+  variableNameTooLong: "validation.variableNameTooLong",
+  variableNameInvalid: "validation.variableNameInvalid",
+  variableNameReserved: "validation.variableNameReserved",
+  variableNameDuplicate: "validation.variableNameDuplicate",
+  variableValueTooLong: "validation.variableValueTooLong",
+  variableValueInvalid: "validation.variableValueInvalid",
+  variablesTooMany: "validation.variablesTooMany",
+  variablesTooLarge: "validation.variablesTooLarge",
+  variablesMalformed: "validation.variablesMalformed",
+  portInvalid: "validation.portInvalid",
+  regionInvalid: "validation.regionInvalid",
+  replicasInvalid: "validation.replicasInvalid",
+  replicasTooMany: "validation.replicasTooMany",
+  cpuInvalid: "validation.cpuInvalid",
+  cpuTooLarge: "validation.cpuTooLarge",
+  memoryInvalid: "validation.memoryInvalid",
+  memoryTooLarge: "validation.memoryTooLarge",
+  restartPolicyInvalid: "validation.restartPolicyInvalid",
+  restartRetriesInvalid: "validation.restartRetriesInvalid",
+  restartRetriesTooMany: "validation.restartRetriesTooMany",
+  startCommandInvalid: "validation.startCommandInvalid",
+  startCommandTooLong: "validation.startCommandTooLong",
+  tooManyContainers: "validation.tooManyContainers",
+  submissionInvalid: "validation.submissionInvalid",
+  projectNameRequired: "validation.projectNameRequired",
+  projectNameTooLong: "validation.projectNameTooLong",
+  environmentNameRequired: "validation.environmentNameRequired",
+  environmentNameTooLong: "validation.environmentNameTooLong",
+} as const;
+
+/**
+ * The key a rule may name — the union of the table above, and nothing else.
+ *
+ * Load-bearing on the three helpers that take a message as an argument (`railwayId`,
+ * `optionalCount`, `optionalAmount`): those literals live at the call site rather than in
+ * the rule, so a bare string there would reopen exactly the hole the table closes.
+ */
+type ValidationKey = (typeof KEYS)[keyof typeof KEYS];
+
 /**
  * A Railway identifier arriving from a form rather than from a URL.
  *
@@ -94,27 +156,27 @@ export const RESERVED_VARIABLE_PREFIX = "RAILWAY_";
  * fields were `.min(1)` only, so a ten-megabyte serviceId reached a full project query
  * before anything looked at it.
  */
-const railwayId = (missing: string) =>
+const railwayId = (missing: ValidationKey) =>
   z
     .string()
     .min(1, missing)
     // The pattern carries the 64-character ceiling itself, so no separate .max().
-    .regex(RAILWAY_ID_PATTERN, "validation.referenceInvalid");
+    .regex(RAILWAY_ID_PATTERN, KEYS.referenceInvalid);
 
 const variableName = z
   .string()
-  .min(1, "validation.variableNameRequired")
-  .max(LIMITS.VARIABLE_NAME_MAX, "validation.variableNameTooLong")
-  .regex(VARIABLE_NAME_PATTERN, "validation.variableNameInvalid")
+  .min(1, KEYS.variableNameRequired)
+  .max(LIMITS.VARIABLE_NAME_MAX, KEYS.variableNameTooLong)
+  .regex(VARIABLE_NAME_PATTERN, KEYS.variableNameInvalid)
   .refine(
     (name) => !name.toUpperCase().startsWith(RESERVED_VARIABLE_PREFIX),
-    "validation.variableNameReserved",
+    KEYS.variableNameReserved,
   );
 
 const variableValue = z
   .string()
-  .max(LIMITS.VARIABLE_VALUE_MAX, "validation.variableValueTooLong")
-  .regex(VARIABLE_VALUE_PATTERN, "validation.variableValueInvalid");
+  .max(LIMITS.VARIABLE_VALUE_MAX, KEYS.variableValueTooLong)
+  .regex(VARIABLE_VALUE_PATTERN, KEYS.variableValueInvalid);
 
 /*
  * The environment editor arrives as two parallel arrays rather than an array of pairs, and
@@ -145,17 +207,17 @@ const containerFields = {
   name: z
     .string()
     .trim()
-    .min(1, "validation.nameRequired")
-    .max(LIMITS.CONTAINER_NAME_MAX, "validation.nameTooLong"),
+    .min(1, KEYS.nameRequired)
+    .max(LIMITS.CONTAINER_NAME_MAX, KEYS.nameTooLong),
   image: z
     .string()
     .trim()
-    .min(1, "validation.imageRequired")
-    .max(LIMITS.IMAGE_REF_MAX, "validation.imageTooLong")
-    .regex(IMAGE_PATTERN, "validation.imageInvalid"),
+    .min(1, KEYS.imageRequired)
+    .max(LIMITS.IMAGE_REF_MAX, KEYS.imageTooLong)
+    .regex(IMAGE_PATTERN, KEYS.imageInvalid),
   variableKey: z
     .array(variableName)
-    .max(LIMITS.VARIABLES_MAX, "validation.variablesTooMany")
+    .max(LIMITS.VARIABLES_MAX, KEYS.variablesTooMany)
     .default([]),
   variableValue: z.array(variableValue).default([]),
 };
@@ -176,7 +238,7 @@ const refineVariableRows = (
     ctx.addIssue({
       code: "custom",
       path: ["variableKey"],
-      message: "validation.variablesMalformed",
+      message: KEYS.variablesMalformed,
     });
     return;
   }
@@ -189,7 +251,7 @@ const refineVariableRows = (
       ctx.addIssue({
         code: "custom",
         path: ["variableKey", index],
-        message: "validation.variableNameDuplicate",
+        message: KEYS.variableNameDuplicate,
       });
     }
     seen.add(key);
@@ -202,7 +264,7 @@ const refineVariableRows = (
     ctx.addIssue({
       code: "custom",
       path: ["variableKey"],
-      message: "validation.variablesTooLarge",
+      message: KEYS.variablesTooLarge,
     });
   }
 };
@@ -257,15 +319,12 @@ const DIGITS_PATTERN = /^\d+$/;
 const port = z
   .string()
   .trim()
-  .refine(
-    (value) => value === "" || DIGITS_PATTERN.test(value),
-    "validation.portInvalid",
-  )
+  .refine((value) => value === "" || DIGITS_PATTERN.test(value), KEYS.portInvalid)
   .transform((value) => (value === "" ? undefined : Number(value)))
   .refine(
     (value) =>
       value === undefined || (value >= LIMITS.PORT_MIN && value <= LIMITS.PORT_MAX),
-    "validation.portInvalid",
+    KEYS.portInvalid,
   )
   .optional();
 
@@ -289,8 +348,8 @@ const port = z
 const optionalCount = (bounds: {
   min: number;
   max: number;
-  invalid: string;
-  tooLarge: string;
+  invalid: ValidationKey;
+  tooLarge: ValidationKey;
 }) =>
   z
     .string()
@@ -311,7 +370,11 @@ const optionalCount = (bounds: {
  */
 const AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
 
-const optionalAmount = (bounds: { max: number; invalid: string; tooLarge: string }) =>
+const optionalAmount = (bounds: {
+  max: number;
+  invalid: ValidationKey;
+  tooLarge: ValidationKey;
+}) =>
   z
     .string()
     .trim()
@@ -369,25 +432,25 @@ const advancedFields = {
   region: z
     .string()
     .trim()
-    .max(LIMITS.REGION_MAX, "validation.regionInvalid")
-    .regex(REGION_PATTERN, "validation.regionInvalid")
+    .max(LIMITS.REGION_MAX, KEYS.regionInvalid)
+    .regex(REGION_PATTERN, KEYS.regionInvalid)
     .transform((value) => (value === "" ? undefined : value))
     .optional(),
   replicas: optionalCount({
     min: 1,
     max: LIMITS.REPLICAS_MAX,
-    invalid: "validation.replicasInvalid",
-    tooLarge: "validation.replicasTooMany",
+    invalid: KEYS.replicasInvalid,
+    tooLarge: KEYS.replicasTooMany,
   }),
   cpu: optionalAmount({
     max: LIMITS.VCPU_MAX,
-    invalid: "validation.cpuInvalid",
-    tooLarge: "validation.cpuTooLarge",
+    invalid: KEYS.cpuInvalid,
+    tooLarge: KEYS.cpuTooLarge,
   }),
   memory: optionalAmount({
     max: LIMITS.MEMORY_GB_MAX,
-    invalid: "validation.memoryInvalid",
-    tooLarge: "validation.memoryTooLarge",
+    invalid: KEYS.memoryInvalid,
+    tooLarge: KEYS.memoryTooLarge,
   }),
   restartPolicy: z
     .string()
@@ -395,7 +458,7 @@ const advancedFields = {
     .refine(
       (value) =>
         value === "" || (RESTART_POLICIES as readonly string[]).includes(value),
-      "validation.restartPolicyInvalid",
+      KEYS.restartPolicyInvalid,
     )
     .transform((value) => (value === "" ? undefined : (value as RestartPolicyType)))
     .optional(),
@@ -406,27 +469,27 @@ const advancedFields = {
   restartRetries: optionalCount({
     min: 0,
     max: LIMITS.RESTART_RETRIES_MAX,
-    invalid: "validation.restartRetriesInvalid",
-    tooLarge: "validation.restartRetriesTooMany",
+    invalid: KEYS.restartRetriesInvalid,
+    tooLarge: KEYS.restartRetriesTooMany,
   }),
   startCommand: z
     .string()
     .trim()
-    .max(LIMITS.START_COMMAND_MAX, "validation.startCommandTooLong")
+    .max(LIMITS.START_COMMAND_MAX, KEYS.startCommandTooLong)
     /*
      * The exclusion a variable value carries, for the same reason: a line break is invisible
      * in a single-line input — the browser's own sanitiser strips it out of a pasted string
      * — and it changes the shape of what is being set rather than its content.
      */
-    .regex(VARIABLE_VALUE_PATTERN, "validation.startCommandInvalid")
+    .regex(VARIABLE_VALUE_PATTERN, KEYS.startCommandInvalid)
     .transform((value) => (value === "" ? undefined : value))
     .optional(),
 };
 
 export const spinUpSchema = z
   .object({
-    projectId: railwayId("validation.projectRequired"),
-    environmentId: railwayId("validation.environmentRequired"),
+    projectId: railwayId(KEYS.projectRequired),
+    environmentId: railwayId(KEYS.environmentRequired),
     ...containerFields,
     /*
      * On spin-up only, and deliberately not in `containerFields` beside the image it goes
@@ -451,8 +514,8 @@ export const spinUpSchema = z
      */
     idempotencyKey: z
       .string()
-      .min(1, "validation.submissionInvalid")
-      .regex(IDEMPOTENCY_KEY_PATTERN, "validation.submissionInvalid"),
+      .min(1, KEYS.submissionInvalid)
+      .regex(IDEMPOTENCY_KEY_PATTERN, KEYS.submissionInvalid),
   })
   .superRefine(refineVariableRows);
 
@@ -472,9 +535,9 @@ export const spinUpSchema = z
  */
 export const containerEditSchema = z
   .object({
-    projectId: railwayId("validation.projectRequired"),
-    environmentId: railwayId("validation.environmentRequired"),
-    serviceId: railwayId("validation.serviceRequired"),
+    projectId: railwayId(KEYS.projectRequired),
+    environmentId: railwayId(KEYS.environmentRequired),
+    serviceId: railwayId(KEYS.serviceRequired),
     ...containerFields,
   })
   .superRefine(refineVariableRows);
@@ -493,17 +556,17 @@ export const projectCreateSchema = z.object({
   name: z
     .string()
     .trim()
-    .min(1, "validation.projectNameRequired")
-    .max(LIMITS.PROJECT_NAME_MAX, "validation.projectNameTooLong"),
+    .min(1, KEYS.projectNameRequired)
+    .max(LIMITS.PROJECT_NAME_MAX, KEYS.projectNameTooLong),
 });
 
 export const environmentCreateSchema = z.object({
-  projectId: railwayId("validation.projectRequired"),
+  projectId: railwayId(KEYS.projectRequired),
   name: z
     .string()
     .trim()
-    .min(1, "validation.environmentNameRequired")
-    .max(LIMITS.ENVIRONMENT_NAME_MAX, "validation.environmentNameTooLong"),
+    .min(1, KEYS.environmentNameRequired)
+    .max(LIMITS.ENVIRONMENT_NAME_MAX, KEYS.environmentNameTooLong),
 });
 
 /**
@@ -515,9 +578,9 @@ export const environmentCreateSchema = z.object({
  * from Railway rather than accepted from the browser.
  */
 export const containerActionSchema = z.object({
-  projectId: railwayId("validation.projectRequired"),
-  environmentId: railwayId("validation.environmentRequired"),
-  serviceId: railwayId("validation.serviceRequired"),
+  projectId: railwayId(KEYS.projectRequired),
+  environmentId: railwayId(KEYS.environmentRequired),
+  serviceId: railwayId(KEYS.serviceRequired),
 });
 
 /**
@@ -537,31 +600,36 @@ export const containerActionSchema = z.object({
  * answer says whether this app may touch them. See `resolveManagedTarget`.
  */
 export const containerBulkActionSchema = z.object({
-  projectId: railwayId("validation.projectRequired"),
-  environmentId: railwayId("validation.environmentRequired"),
+  projectId: railwayId(KEYS.projectRequired),
+  environmentId: railwayId(KEYS.environmentRequired),
   serviceId: z
-    .array(railwayId("validation.serviceRequired"))
-    .min(1, "validation.serviceRequired")
-    .max(LIMITS.BULK_DESTROY_MAX, "validation.tooManyContainers"),
+    .array(railwayId(KEYS.serviceRequired))
+    .min(1, KEYS.serviceRequired)
+    .max(LIMITS.BULK_DESTROY_MAX, KEYS.tooManyContainers),
 });
 
-/** Catalog keys a validation issue can name, plus the values each interpolates. */
+/**
+ * The values each interpolating key needs, keyed by the same table the rules read.
+ *
+ * Only the keys whose sentence states a bound are here; the rest interpolate nothing.
+ * `portInvalid` is the one that needs two, because its sentence names a range.
+ */
 export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
-  "validation.nameTooLong": { max: LIMITS.CONTAINER_NAME_MAX },
-  "validation.imageTooLong": { max: LIMITS.IMAGE_REF_MAX },
-  "validation.variableNameTooLong": { max: LIMITS.VARIABLE_NAME_MAX },
-  "validation.variableValueTooLong": { max: LIMITS.VARIABLE_VALUE_MAX },
-  "validation.variablesTooMany": { max: LIMITS.VARIABLES_MAX },
-  "validation.variablesTooLarge": { max: LIMITS.VARIABLES_TOTAL_MAX },
-  "validation.portInvalid": { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
-  "validation.replicasTooMany": { max: LIMITS.REPLICAS_MAX },
-  "validation.cpuTooLarge": { max: LIMITS.VCPU_MAX },
-  "validation.memoryTooLarge": { max: LIMITS.MEMORY_GB_MAX },
-  "validation.restartRetriesTooMany": { max: LIMITS.RESTART_RETRIES_MAX },
-  "validation.startCommandTooLong": { max: LIMITS.START_COMMAND_MAX },
-  "validation.tooManyContainers": { max: LIMITS.BULK_DESTROY_MAX },
-  "validation.projectNameTooLong": { max: LIMITS.PROJECT_NAME_MAX },
-  "validation.environmentNameTooLong": { max: LIMITS.ENVIRONMENT_NAME_MAX },
+  [KEYS.nameTooLong]: { max: LIMITS.CONTAINER_NAME_MAX },
+  [KEYS.imageTooLong]: { max: LIMITS.IMAGE_REF_MAX },
+  [KEYS.variableNameTooLong]: { max: LIMITS.VARIABLE_NAME_MAX },
+  [KEYS.variableValueTooLong]: { max: LIMITS.VARIABLE_VALUE_MAX },
+  [KEYS.variablesTooMany]: { max: LIMITS.VARIABLES_MAX },
+  [KEYS.variablesTooLarge]: { max: LIMITS.VARIABLES_TOTAL_MAX },
+  [KEYS.portInvalid]: { min: LIMITS.PORT_MIN, max: LIMITS.PORT_MAX },
+  [KEYS.replicasTooMany]: { max: LIMITS.REPLICAS_MAX },
+  [KEYS.cpuTooLarge]: { max: LIMITS.VCPU_MAX },
+  [KEYS.memoryTooLarge]: { max: LIMITS.MEMORY_GB_MAX },
+  [KEYS.restartRetriesTooMany]: { max: LIMITS.RESTART_RETRIES_MAX },
+  [KEYS.startCommandTooLong]: { max: LIMITS.START_COMMAND_MAX },
+  [KEYS.tooManyContainers]: { max: LIMITS.BULK_DESTROY_MAX },
+  [KEYS.projectNameTooLong]: { max: LIMITS.PROJECT_NAME_MAX },
+  [KEYS.environmentNameTooLong]: { max: LIMITS.ENVIRONMENT_NAME_MAX },
 };
 
 /**
@@ -570,44 +638,24 @@ export const VALIDATION_VALUES: Record<string, Record<string, number>> = {
  * Exists so the action can tell "a key one of these rules named" from "whatever zod
  * generated when no rule applied" — the two are both strings on `issue.message`, and
  * treating the second as a key is how zod's own English reached a toast.
+ *
+ * Derived from the table rather than restating it. This was a second hand-written list of
+ * the same 38 strings, so the set and the rules could disagree and only a user would find
+ * out — the missing key degraded to `actions.invalidForm` rather than failing anything.
  */
-export const VALIDATION_KEYS: ReadonlySet<string> = new Set([
-  "validation.nameRequired",
-  "validation.nameTooLong",
-  "validation.imageRequired",
-  "validation.imageTooLong",
-  "validation.imageInvalid",
-  "validation.projectRequired",
-  "validation.environmentRequired",
-  "validation.serviceRequired",
-  "validation.referenceInvalid",
-  "validation.variableNameRequired",
-  "validation.variableNameTooLong",
-  "validation.variableNameInvalid",
-  "validation.variableNameReserved",
-  "validation.variableNameDuplicate",
-  "validation.variableValueTooLong",
-  "validation.variableValueInvalid",
-  "validation.variablesTooMany",
-  "validation.variablesTooLarge",
-  "validation.variablesMalformed",
-  "validation.portInvalid",
-  "validation.regionInvalid",
-  "validation.replicasInvalid",
-  "validation.replicasTooMany",
-  "validation.cpuInvalid",
-  "validation.cpuTooLarge",
-  "validation.memoryInvalid",
-  "validation.memoryTooLarge",
-  "validation.restartPolicyInvalid",
-  "validation.restartRetriesInvalid",
-  "validation.restartRetriesTooMany",
-  "validation.startCommandInvalid",
-  "validation.startCommandTooLong",
-  "validation.tooManyContainers",
-  "validation.submissionInvalid",
-  "validation.projectNameRequired",
-  "validation.projectNameTooLong",
-  "validation.environmentNameRequired",
-  "validation.environmentNameTooLong",
-]);
+export const VALIDATION_KEYS: ReadonlySet<string> = new Set(Object.values(KEYS));
+
+/**
+ * The fields behind the spin-up form's Advanced disclosure, by name.
+ *
+ * Exported for a test rather than for the form. `spin-up-form.tsx` keeps its own copy of
+ * this list — it opens the collapsed `<details>` when a failure names one, and an inline
+ * error inside a closed panel is silence — but it cannot import it from here: importing
+ * anything from this module drags zod into /dashboard's first load, which is the reason
+ * IMAGE_PATTERN lives in lib/registry/reference.ts and not in this file.
+ *
+ * So the two lists stay separate and a test holds them together, which costs a bundle
+ * nothing. Without it, adding a seventh advanced field leaves the form silently unable to
+ * reveal its error.
+ */
+export const ADVANCED_FIELD_NAMES: readonly string[] = Object.keys(advancedFields);

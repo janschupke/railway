@@ -86,8 +86,12 @@ const isVariableField = (field: string | undefined) =>
  * naming one of these opens the panel before the browser paints. `region` and
  * `restartPolicy` are absent because neither is an `ActionField` at all — see the note on
  * that type.
+ *
+ * A second copy of `advancedFields` in lib/validation.ts, and deliberately so: importing
+ * that module here would drag zod into /dashboard's first load. `spin-up-form.test.tsx`
+ * holds the two together — it may import validation.ts, because a test has no bundle.
  */
-const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
+export const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
   "replicas",
   "cpu",
   "memory",

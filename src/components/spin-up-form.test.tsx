@@ -3,7 +3,8 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import { REGISTRY } from "@/lib/constants";
-import type { ActionResult } from "@/lib/action-result";
+import { ACTION_FIELDS, type ActionResult } from "@/lib/action-result";
+import { ADVANCED_FIELD_NAMES } from "@/lib/validation";
 import type { RegionOption } from "@/lib/railway/types";
 
 const spinUp = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
@@ -11,7 +12,7 @@ vi.mock("@/app/dashboard/actions", () => ({
   spinUp: (prev: unknown, formData: FormData) => spinUp(prev, formData),
 }));
 
-const { SpinUpForm } = await import("./spin-up-form");
+const { SpinUpForm, ADVANCED_FIELDS } = await import("./spin-up-form");
 const { ToastProvider } = await import("./ui/toast");
 // Mounted once in the dashboard layout in the app; the variable editor's row
 // tooltips need one above them, and a bare Tooltip is a Radix error.
@@ -897,6 +898,26 @@ describe("the public port", () => {
 });
 
 describe("the advanced panel", () => {
+  it("knows every advanced field the schema has", () => {
+    /*
+     * `ADVANCED_FIELDS` is a second copy of `advancedFields` in lib/validation.ts, kept
+     * separate on purpose: importing that module into a client component drags zod into
+     * /dashboard's first load. A test has no bundle, so it can hold the two together.
+     *
+     * Intersected with ACTION_FIELDS rather than compared outright, so the two exclusions
+     * follow from the data instead of from a docblock somebody has to keep true: `region`
+     * and `restartPolicy` are closed-set selects and deliberately not attributable, so a
+     * failure never names them and the panel would have nothing to open for.
+     *
+     * Without this, a seventh advanced field leaves the form silently unable to reveal its
+     * own error — the message is announced for a control inside a closed <details>.
+     */
+    const attributable = ADVANCED_FIELD_NAMES.filter((name) =>
+      (ACTION_FIELDS as readonly string[]).includes(name),
+    );
+    expect([...ADVANCED_FIELDS].sort()).toEqual([...attributable].sort());
+  });
+
   beforeEach(() => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
