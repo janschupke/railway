@@ -209,26 +209,41 @@ test.describe("popup motion", () => {
  * be caught nowhere but here.
  */
 test.describe("the freight yard", () => {
-  /** Two frames of the canvas, a beat apart. */
-  const sample = async (page: import("@playwright/test").Page, apartMs: number) => {
-    const canvas = page.locator("main canvas");
-    await expect(canvas).toBeAttached();
-    const read = () =>
-      canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
-    const first = await read();
-    await page.waitForTimeout(apartMs);
-    return [first, await read()] as const;
+  const canvas = (page: import("@playwright/test").Page) => page.locator("main canvas");
+
+  const read = async (page: import("@playwright/test").Page) => {
+    await expect(canvas(page)).toBeAttached();
+    return canvas(page).evaluate((element) =>
+      (element as HTMLCanvasElement).toDataURL(),
+    );
   };
+
+  /**
+   * Roughly twenty frames at 60Hz.
+   *
+   * The one number in this describe, and it is a bound rather than a wait: long enough
+   * that a running yard has certainly repainted, short enough to keep the reduced-motion
+   * case from costing a second. Expressed as frames because that is the unit the thing
+   * under test schedules in.
+   */
+  const TWENTY_FRAMES_MS = 20 * 17;
 
   test("runs by default", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto("/");
 
-    const [first, second] = await sample(page, 400);
-    // Something has to have moved. A blank canvas would also differ from nothing, so the
-    // frames are checked for content as well as for change.
+    const first = await read(page);
+    // A blank canvas would also differ from nothing, so there has to be something there
+    // before "it changed" means anything.
     expect(first.length).toBeGreaterThan(1_000);
-    expect(second).not.toBe(first);
+
+    /*
+     * Polled rather than slept, because this asserts a *presence*: the canvas has to have
+     * repainted. testing.md allows a sleep only for an absence, and a fixed one here was
+     * both slower than it needed to be and one busy CI worker away from flaking — a yard
+     * that repaints on the very next frame still had to wait out the whole 400ms.
+     */
+    await expect.poll(() => read(page), { timeout: TWENTY_FRAMES_MS }).not.toBe(first);
   });
 
   test("holds a single frame under reduced motion", async ({ page }) => {
@@ -240,9 +255,13 @@ test.describe("the freight yard", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
 
-    const [first, second] = await sample(page, 400);
+    const first = await read(page);
     expect(first.length).toBeGreaterThan(1_000);
-    expect(second).toBe(first);
+
+    // An absence, which is the one thing testing.md says a bounded sleep is for: there is
+    // no event that means "no frame was drawn", only time in which none was.
+    await page.waitForTimeout(TWENTY_FRAMES_MS);
+    expect(await read(page)).toBe(first);
   });
 
   test("stops the loop while the tab is hidden", async ({ page }) => {
@@ -272,7 +291,10 @@ test.describe("the freight yard", () => {
 
     // The probe's own frames still run; the point is the page did not throw or wedge.
     expect(frames).toBeGreaterThan(0);
-    const [first, second] = await sample(page, 300);
-    expect(second).toBe(first);
+
+    // An absence again — no frame is drawn while hidden — so a bounded wait is the tool.
+    const first = await read(page);
+    await page.waitForTimeout(TWENTY_FRAMES_MS);
+    expect(await read(page)).toBe(first);
   });
 });
