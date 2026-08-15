@@ -28,6 +28,25 @@ const DURATIONS = ["fast", "base", "slow"] as const;
 const declared = (css: string, name: string) =>
   new RegExp(`^\\s*${name.replace(/[-]/g, "\\-")}:\\s*([^;]+);`, "m").exec(css)?.[1];
 
+/**
+ * The body of `@theme inline { … }`, or a thrown error.
+ *
+ * The throw is the fix. Both callers used to slice between two `indexOf` results and use
+ * whatever came back — so reformatting that one line to `@theme inline{`, which changes
+ * nothing about the generated CSS, made `indexOf` return −1, made `slice(-1, -1)` return
+ * the empty string, and made every `not.toMatch` below pass against nothing. The two
+ * assertions that exist to catch a token declared in the wrong namespace were the two
+ * most likely to go quiet.
+ */
+function themeBlock(css: string): string {
+  const opening = /@theme\s+inline\s*\{/.exec(css);
+  if (!opening) throw new Error("globals.css declares no `@theme inline` block");
+  const start = opening.index + opening[0].length;
+  const end = css.indexOf("\n}", start);
+  if (end === -1) throw new Error("`@theme inline` block is never closed");
+  return css.slice(start, end);
+}
+
 describe("control geometry", () => {
   it.each(STEPS)("defines a height and an inline inset for %s", (step) => {
     expect(declared(TOKENS, `--control-h-${step}`), "height").toBeDefined();
@@ -82,11 +101,7 @@ describe("motion tokens", () => {
 
   it("never declares --duration-* inside the theme, which generates nothing", () => {
     // The tokens live in tokens.css; the theme keys are spelled differently on purpose.
-    const theme = GLOBALS.slice(
-      GLOBALS.indexOf("@theme inline {"),
-      GLOBALS.indexOf("\n}", GLOBALS.indexOf("@theme inline {")),
-    );
-    expect(theme).not.toMatch(/^\s*--duration-[\w-]+:/m);
+    expect(themeBlock(GLOBALS)).not.toMatch(/^\s*--duration-[\w-]+:/m);
   });
 });
 
@@ -119,10 +134,7 @@ describe("stacking and pane tokens", () => {
   });
 
   it("never declares --z-* or --layer-* inside the theme, which generates nothing", () => {
-    const theme = GLOBALS.slice(
-      GLOBALS.indexOf("@theme inline {"),
-      GLOBALS.indexOf("\n}", GLOBALS.indexOf("@theme inline {")),
-    );
+    const theme = themeBlock(GLOBALS);
     expect(theme).not.toMatch(/^\s*--z-(?!index)[\w-]+:/m);
     expect(theme).not.toMatch(/^\s*--layer-[\w-]+:/m);
   });

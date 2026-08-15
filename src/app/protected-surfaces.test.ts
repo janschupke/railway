@@ -64,13 +64,49 @@ function sourceFiles(dir: string): string[] {
 const stripComments = (code: string) =>
   code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 
+/**
+ * Whether the file's first *statement* is `"use server"`.
+ *
+ * The leading-comment strip is the whole point. This used to test the raw text, so a
+ * Server Action file that opened with a docblock — which is the house style, and which
+ * `actions.ts` itself only escapes by putting the directive above its imports — was not
+ * recognised as an action file at all and skipped the guard case below in silence. Line
+ * 119 catches exactly one file by name; the next one would not have been caught.
+ *
+ * Looped rather than a single replace: two comment blocks before the directive is one
+ * more than a non-global `^` anchor removes.
+ */
+function opensWithUseServer(code: string): boolean {
+  let head = code.trimStart();
+  let previous = "";
+  while (head !== previous) {
+    previous = head;
+    head = head.replace(/^(\/\*[\s\S]*?\*\/|\/\/.*)/, "").trimStart();
+  }
+  return /^["']use server["']/.test(head);
+}
+
 const read = (file: string) => stripComments(readFileSync(file, "utf8"));
 
-/** Local `@/…` imports, resolved to files on disk. */
-function importedFiles(code: string): string[] {
-  const specifiers = [...code.matchAll(/from\s+"(@\/[^"]+)"/g)].map((m) => m[1]!);
+/**
+ * Local imports, aliased or relative, resolved to files on disk.
+ *
+ * The `@/…` spelling used to be the only one recognised, which is the same hole
+ * client-boundary.test.ts was rewritten to close and it fails in the more dangerous
+ * direction here: a route reaching its guard through `./helpers` was reported as
+ * unprotected, so the fix for a red build was to add it to PUBLIC. A guard walk that
+ * cannot see half the import graph teaches people to widen the exemption list.
+ */
+function importedFiles(code: string, file: string): string[] {
+  const specifiers = [...code.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]!);
   return specifiers.flatMap((specifier) => {
-    const base = path.join(SRC, specifier.slice("@/".length));
+    const base = specifier.startsWith("@/")
+      ? path.join(SRC, specifier.slice("@/".length))
+      : specifier.startsWith(".")
+        ? path.resolve(path.dirname(file), specifier)
+        : // A package. Nothing outside src/ declares a guard.
+          null;
+    if (base === null) return [];
     for (const candidate of [
       `${base}.ts`,
       `${base}.tsx`,
@@ -95,7 +131,7 @@ function reachesGuard(file: string, depth: number, seen = new Set<string>()): bo
   const code = read(file);
   if (GUARDS.some((guard) => code.includes(guard))) return true;
 
-  return importedFiles(code).some((next) => reachesGuard(next, depth - 1, seen));
+  return importedFiles(code, file).some((next) => reachesGuard(next, depth - 1, seen));
 }
 
 describe("protected surfaces", () => {
@@ -104,7 +140,7 @@ describe("protected surfaces", () => {
     .map((file) => path.relative(APP, file));
 
   const actionFiles = sourceFiles(SRC)
-    .filter((file) => /^\s*"use server"/.test(readFileSync(file, "utf8")))
+    .filter((file) => opensWithUseServer(readFileSync(file, "utf8")))
     .map((file) => path.relative(SRC, file));
 
   it("finds the surfaces it is meant to be checking", () => {

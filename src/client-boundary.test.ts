@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -29,12 +29,29 @@ const SRC = path.resolve(import.meta.dirname);
  * The auth trio because they hold the token and the key derivation; the logger because
  * it is pino writing to the server's stdout, which in a browser is both dead weight and
  * a channel that does not exist.
+ *
+ * Paths rather than patterns, and that is the point: these were regexes anchored at
+ * `^lib/auth/…`, so renaming a guarded module — `lib/logger.ts` becoming
+ * `lib/observability/logger.ts` — left every pattern matching nothing and this suite
+ * green over an unguarded boundary. A path can be checked against the disk, which is
+ * what "the modules exist" below does, so the same rename now fails loudly here rather
+ * than quietly nowhere.
  */
-const SERVER_ONLY = [
-  /^lib\/auth\/(session|refresh|server)$/,
-  /^lib\/logger$/,
-  /^lib\/log\//,
+const SERVER_ONLY_MODULES = [
+  "lib/auth/session",
+  "lib/auth/refresh",
+  "lib/auth/server",
+  "lib/logger",
 ];
+
+/** Every module under these is server-only, so the whole directory is named once. */
+const SERVER_ONLY_DIRECTORIES = ["lib/log"];
+
+const isServerOnly = (fromSrcPath: string) =>
+  SERVER_ONLY_MODULES.includes(fromSrcPath) ||
+  SERVER_ONLY_DIRECTORIES.some(
+    (dir) => fromSrcPath === dir || fromSrcPath.startsWith(`${dir}/`),
+  );
 
 /**
  * A specifier as a path from `src/`, so a relative import is checked like an aliased one.
@@ -85,6 +102,29 @@ describe("the client boundary", () => {
     expect(clientComponents.length).toBeGreaterThan(10);
   });
 
+  it.each([
+    ...SERVER_ONLY_MODULES.map((module) => [module, "module"] as const),
+    ...SERVER_ONLY_DIRECTORIES.map((dir) => [dir, "directory"] as const),
+  ])("still guards %s, which is a real %s", (guarded, kind) => {
+    /*
+     * The other half of the vacuity guard above, and the one that was missing. A list of
+     * things nothing imports is satisfied by every file in the tree, so a guarded module
+     * that has moved has to fail here — otherwise the case below asserts nothing and says
+     * so in green.
+     */
+    const full = path.join(SRC, guarded);
+    if (kind === "directory") {
+      expect(statSync(full).isDirectory(), `${guarded} is no longer a directory`).toBe(
+        true,
+      );
+      return;
+    }
+    const resolved = [`${full}.ts`, `${full}.tsx`].find((candidate) =>
+      existsSync(candidate),
+    );
+    expect(resolved, `${guarded} names no module under src/`).toBeDefined();
+  });
+
   it.each(clientComponents.map((file) => [path.relative(SRC, file), file] as const))(
     "%s imports nothing that belongs to the server",
     (_relative, file) => {
@@ -95,9 +135,7 @@ describe("the client boundary", () => {
       const imports = [...code.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]!);
       const forbidden = imports.filter((specifier) => {
         const normalised = fromSrc(specifier, file);
-        return (
-          normalised !== null && SERVER_ONLY.some((pattern) => pattern.test(normalised))
-        );
+        return normalised !== null && isServerOnly(normalised);
       });
 
       expect(forbidden).toEqual([]);

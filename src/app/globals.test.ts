@@ -29,7 +29,7 @@ const rulesMatching = (css: string, needle: string) =>
     .map((block) => block.split("{").slice(1).join("{"));
 
 describe("popper animation", () => {
-  it("never animates the positioning wrapper", () => {
+  it("never targets the positioning wrapper at all", () => {
     /*
      * [data-radix-popper-content-wrapper] carries Radix's inline positioning transform,
      * and a running animation outranks an inline style. Animating it — with *any*
@@ -37,13 +37,20 @@ describe("popper animation", () => {
      * dropdown painted at the viewport's top-left corner for the duration and then
      * snapped into place.
      *
-     * Stated as "no animation on that element", not "animate opacity instead", because
-     * the opacity-only version is the fix people reach for next and it still costs a
-     * frame of misplacement.
+     * Stated as "no rule names it", not "no rule animates it", and the difference is the
+     * whole assertion. The second is what this used to say, as `for (rule of matches)
+     * expect(rule).not.toMatch(/animation:/)` — and no rule has ever named that selector
+     * outside the comment above the content rule, which is stripped before matching. So
+     * the loop ran zero times and the test reported success for as long as it existed.
+     *
+     * Nothing was wrong with the stylesheet; the wrapper is untargeted, which is the
+     * strongest form of "never animated" and exactly what globals.css sets out to do. The
+     * fix is to assert that rather than to assert a property of an empty set. A rule
+     * appearing here is then a red build and a prompt to re-read the comment in
+     * globals.css, which is where the reasoning lives — including the part about
+     * `animation: opacity` being the fix people reach for next and still costing a frame.
      */
-    for (const rule of rulesMatching(GLOBALS, "[data-radix-popper-content-wrapper]")) {
-      expect(rule).not.toMatch(/\banimation\s*:/);
-    }
+    expect(rulesMatching(GLOBALS, "[data-radix-popper-content-wrapper]")).toEqual([]);
   });
 
   it("covers Tooltip's own spelling of open", () => {
@@ -82,8 +89,11 @@ describe("popper animation", () => {
 
 describe("the text-link affordance", () => {
   it("is a utility, and underlines on focus as well as hover", () => {
-    const [rule] = rulesMatching(GLOBALS, ".link");
-    expect(rule).toBeDefined();
+    const rules = rulesMatching(GLOBALS, ".link");
+    // Stated, not assumed: `.link` is a utility the app applies, so zero rules here is
+    // the utility having been renamed out from under this test rather than a pass.
+    expect(rules).not.toHaveLength(0);
+    const [rule] = rules;
     expect(rule).toContain("hover:underline");
     // Hover-only is the usual half-implementation; a keyboard user gets nothing from it.
     expect(rule).toContain("focus-visible:underline");
