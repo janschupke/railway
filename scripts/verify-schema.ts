@@ -94,6 +94,33 @@ const REQUIRED_MEMBERS: Record<string, string> = {
  */
 const ABSENT_ENDPOINTS = ["revocation_endpoint", "end_session_endpoint"] as const;
 
+/**
+ * The subscriptions the app opens. Missing one is a broken log pane.
+ *
+ * Both are reached through `streamLogs`, not through a document validated above — the two
+ * `Stream*Logs` documents are in DOCUMENTS and are checked there — so this is the field
+ * list rather than a second validation. It is here because the pair below needs a home and
+ * a list of what Railway offers is worth having in one place.
+ */
+const EXPECTED_SUBSCRIPTIONS = ["buildLogs", "deploymentLogs"] as const;
+
+/**
+ * Subscriptions whose absence an architectural decision rests on.
+ *
+ * ADR-3 and ADR-10 argue that the dashboard has to poll because Railway publishes nothing
+ * to subscribe to at the project or service level. That is true, and it is the whole reason
+ * `/api/watch` exists and costs a Railway request every WATCH_POLL_MS. The day either
+ * appears, the watcher is the wrong design and two ADRs are stale.
+ *
+ * ADR-10 already claimed this was checked — "pnpm verify:schema introspects the live API and
+ * would say otherwise if that changed". It was not: this file contained no reference to
+ * `Subscription` at all, so the guard would never have fired. This is that guard, built to
+ * match the claim, and deliberately narrower than the claim was: it names the two levels the
+ * argument actually depends on rather than asserting that no deployment subscription exists,
+ * because one does. `checkSubscriptions` prints that one instead.
+ */
+const ABSENT_SUBSCRIPTIONS = ["project", "service"] as const;
+
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
@@ -209,6 +236,68 @@ async function checkDiscovery() {
  * that constant for why the two exceptions exist and why the exemption being per document
  * costs nothing.
  */
+/**
+ * What Railway lets a client subscribe to, and what this app does with it.
+ *
+ * Runs against the committed schema so it gates in CI, which holds no token. That is the
+ * same reasoning `checkDocuments` gives for its tokenless half, and it is the difference
+ * between a guard and an intention: a check that only runs on a developer's machine with a
+ * credential is a check nobody runs.
+ *
+ * The third section is the one that would have caught the drift this was written for.
+ * Asserting an absence only reports fields nobody thought about; printing what exists and
+ * goes unused puts `deployment` — "Subscribe to updates for a specific deployment", which
+ * carries `status` — in front of whoever runs this, next to the note saying the app polls
+ * instead. Three ADRs and a constant said that field did not exist.
+ */
+function checkSubscriptions(schema: GraphQLSchema) {
+  console.log("\nSubscriptions");
+
+  const subscription = schema.getSubscriptionType();
+  if (!subscription) {
+    console.log(bad("the schema declares no Subscription type at all"));
+    failed = true;
+    return;
+  }
+
+  const fields = subscription.getFields();
+
+  for (const name of EXPECTED_SUBSCRIPTIONS) {
+    if (fields[name]) {
+      console.log(ok(`${name} — the log stream depends on it`));
+    } else {
+      console.log(bad(`${name} is gone; the log pane has nothing to open`));
+      failed = true;
+    }
+  }
+
+  for (const name of ABSENT_SUBSCRIPTIONS) {
+    if (!fields[name]) {
+      console.log(
+        ok(`no ${name} subscription — ADR-10's watcher is still the only way`),
+      );
+    } else {
+      console.log(
+        bad(
+          `${name} is now subscribable — /api/watch polls for a reason that no longer holds (ADR-3, ADR-10)`,
+        ),
+      );
+      failed = true;
+    }
+  }
+
+  const unused = Object.keys(fields)
+    .filter((name) => !EXPECTED_SUBSCRIPTIONS.includes(name as never))
+    .sort();
+
+  if (unused.length > 0) {
+    console.log(dim(`  available and unused: ${unused.join(", ")}`));
+    console.log(
+      dim("  deployment/deploymentEvents exist; ADR-3 records why status is polled."),
+    );
+  }
+}
+
 function checkDocuments(
   schema: GraphQLSchema,
   documents: ParsedDocument[],
@@ -542,6 +631,7 @@ async function main() {
    * regenerating — the same failure `pnpm codegen` catches, in the job that has no token.
    */
   checkDocuments(committed, documents, "the committed schema");
+  checkSubscriptions(committed);
   const surface = collectSurface(committed, documents);
   reportDeprecations(surface.deprecations);
 
