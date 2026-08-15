@@ -176,6 +176,33 @@ function toActionError(t: Translator, error: unknown): ActionResult {
 }
 
 /**
+ * The two audit fields describing a service's environment, split by who chose the names.
+ *
+ * SECURITY.md's bounded-cardinality rule, expressed once. Preset-derived names come from
+ * this app's own catalog, so they are a closed set and safe to name; everything else a
+ * person typed is unbounded and attacker-chosen in exactly the way the rejected
+ * `deploymentId` is, so it is counted instead. The record says how many variables a user
+ * set, not which — an accepted loss, argued in SECURITY.md.
+ *
+ * `container.created` and `container.updated` each computed this inline, identically. Two
+ * copies of a redaction rule is one copy that can quietly start logging the names.
+ */
+function variableAudit(
+  image: string,
+  variables: Record<string, string> | undefined,
+): { variable_names: string; user_variable_count: number } {
+  const presetNames = new Set(
+    (presetFor(image)?.variables ?? []).map((variable) => variable.name),
+  );
+  const sentNames = variables ? Object.keys(variables) : [];
+  const presetSent = sentNames.filter((sent) => presetNames.has(sent));
+  return {
+    variable_names: presetSent.join(","),
+    user_variable_count: sentNames.length - presetSent.length,
+  };
+}
+
+/**
  * A FormData field as a string.
  *
  * `formData.get` returns null for a field the browser never sent, and null fails zod's
@@ -430,10 +457,6 @@ async function attempt(
     throw error;
   }
 
-  const presetNames = new Set((preset?.variables ?? []).map((v) => v.name));
-  const sentNames = variables ? Object.keys(variables) : [];
-  const presetSent = sentNames.filter((sent) => presetNames.has(sent));
-
   /*
    * The audit trail. This action creates billable infrastructure, and once a service is
    * deleted Railway retains no record that it existed — so without this line there is
@@ -468,8 +491,7 @@ async function attempt(
      * The consequence, stated because it is a real loss: this record no longer says what
      * environment a service was actually created with. SECURITY.md says so too.
      */
-    variable_names: presetSent.join(","),
-    user_variable_count: sentNames.length - presetSent.length,
+    ...variableAudit(image, variables),
     /*
      * Whether this container was put on the public internet, and on which port. Part of the
      * audit trail rather than diagnostics: "reachable from anywhere" is the single most
@@ -1198,33 +1220,72 @@ async function destroyMany(formData: FormData): Promise<ActionResult> {
   }
 }
 
-export async function stopContainer(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
-  return withRequestScope("stopContainer", { trustInboundId: true }, () =>
-    withManagedContainer("stop", formData, async (context) => {
+/**
+ * Stop and restart: the same action with one Railway call swapped.
+ *
+ * They were written out twice, identical down to the `nothingRunning` guard and the
+ * `revalidatePath`, differing only in which mutation ran and which key names the success
+ * message. `LIFECYCLE_EVENTS` already parameterises the verb for the log records, so the
+ * message key was the only thing left holding two copies apart — and the client made this
+ * same collapse for these exact three verbs, where `LifecycleActionDialog` is one component
+ * rather than three.
+ *
+ * Redeploy is deliberately NOT folded in. It reads no deployment id off the target — it is
+ * the one path that works on a service whose first deploy Railway refused, which is the row
+ * a user most wants the control on — so it has a different precondition rather than a
+ * different argument. See `redeployContainer`.
+ *
+ * **The mutation is branched on rather than passed in, and that is not a style choice.**
+ * Taking `mutate` as a parameter removed the literal `stopDeployment(` and
+ * `restartDeployment(` from this file, and `mutation-callsites.test.ts` reads exactly that:
+ * it asserts every infrastructure-changing call appears textually below the one
+ * `!target.managed` guard. An indirect call satisfies nothing it can see, so the first
+ * version of this helper turned a verified structural property into an unverified one while
+ * every behavioural test stayed green. The test caught it. Two lines of branch is the price
+ * of the guard staying checkable, and it is worth paying on a path that changes somebody
+ * else's infrastructure.
+ */
+function deploymentAction(
+  verb: "stop" | "restart",
+  message: "actions.stopped" | "actions.restarted",
+) {
+  return (formData: FormData): Promise<ActionResult> =>
+    withManagedContainer(verb, formData, async (context) => {
       const t = await getTranslations();
       const { deploymentId } = context.target;
       /*
-       * Nothing to stop is a state the UI does not offer — the control is gated on the row
-       * having a deployment — so this is the stale-page case, and it says so rather than
-       * sending Railway an id it does not have.
+       * Nothing to stop or restart is a state the UI does not offer — both controls are
+       * gated on the row having a deployment — so this is the stale-page case, and it says
+       * so rather than sending Railway an id it does not have.
        */
       if (!deploymentId) {
         return { ok: false, error: t("actions.nothingRunning") };
       }
 
-      await stopDeployment(context.accessToken, deploymentId);
+      if (verb === "stop") await stopDeployment(context.accessToken, deploymentId);
+      else await restartDeployment(context.accessToken, deploymentId);
 
-      logLifecycle("stop", context, { deployment_id: deploymentId });
+      /*
+       * The deployment id is recorded although restart does not change it — that is the
+       * point of restart rather than redeploy, and a record naming it is what lets an
+       * operator line this up with the log stream the user was watching at the time.
+       */
+      logLifecycle(verb, context, { deployment_id: deploymentId });
 
       revalidatePath("/dashboard");
       return {
         ok: true,
-        message: t("actions.stopped", { name: context.target.displayName }),
+        message: t(message, { name: context.target.displayName }),
       };
-    }),
+    });
+}
+
+export async function stopContainer(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  return withRequestScope("stopContainer", { trustInboundId: true }, () =>
+    deploymentAction("stop", "actions.stopped")(formData),
   );
 }
 
@@ -1233,28 +1294,7 @@ export async function restartContainer(
   formData: FormData,
 ): Promise<ActionResult> {
   return withRequestScope("restartContainer", { trustInboundId: true }, () =>
-    withManagedContainer("restart", formData, async (context) => {
-      const t = await getTranslations();
-      const { deploymentId } = context.target;
-      if (!deploymentId) {
-        return { ok: false, error: t("actions.nothingRunning") };
-      }
-
-      await restartDeployment(context.accessToken, deploymentId);
-
-      /*
-       * The deployment id is recorded although it does not change — that is the point of
-       * restart rather than redeploy, and a record that names it is what lets an operator
-       * line this up with the log stream the user was watching at the time.
-       */
-      logLifecycle("restart", context, { deployment_id: deploymentId });
-
-      revalidatePath("/dashboard");
-      return {
-        ok: true,
-        message: t("actions.restarted", { name: context.target.displayName }),
-      };
-    }),
+    deploymentAction("restart", "actions.restarted")(formData),
   );
 }
 
@@ -1488,12 +1528,6 @@ async function edit(formData: FormData): Promise<ActionResult> {
      * counted. `previous_name` and `previous_image` are here because this is the only
      * record anywhere of what the container used to be — Railway keeps no history of either.
      */
-    const presetNames = new Set(
-      (presetFor(image)?.variables ?? []).map((variable) => variable.name),
-    );
-    const sentNames = Object.keys(variables);
-    const presetSent = sentNames.filter((sent) => presetNames.has(sent));
-
     logLifecycle("edit", context, {
       service_name: managedName,
       previous_name: target.rawName,
@@ -1501,8 +1535,7 @@ async function edit(formData: FormData): Promise<ActionResult> {
       previous_image: target.image,
       deployment_id: updated.deploymentId,
       outcome: updated.outcome,
-      variable_names: presetSent.join(","),
-      user_variable_count: sentNames.length - presetSent.length,
+      ...variableAudit(image, variables),
       variables_removed_count: removeVariables.length,
     });
 
