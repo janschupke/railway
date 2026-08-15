@@ -8,6 +8,7 @@ import { reportError } from "@/lib/report-error";
 import { sleep } from "@/lib/utils";
 import { getDeployment, getDeploymentFailure, getLogs } from "./deployment-reads";
 import { RailwayApiError } from "./errors";
+import { backoffFor, healthyInterval } from "./poll-cadence";
 import { BUILD_LOGS_SUBSCRIPTION, DEPLOYMENT_LOGS_SUBSCRIPTION } from "./operations";
 import {
   createLogClient,
@@ -206,46 +207,14 @@ export async function* monitorDeployment(
    * poll alone could exhaust the plan this app is meant to run on, before the project
    * watcher or a dashboard render had asked for anything.
    *
-   * `sameStatePolls` counts polls that reported what the one before them did. A deployment
-   * that is genuinely moving resets it at every transition and keeps the base cadence from
-   * end to end; one that sits in BUILDING for four minutes does not need asking twenty-four
-   * times a minute, because its output is arriving over the log subscription anyway and the
-   * poll is only there to notice the state change at the end of it.
+   * `sameStatePolls` counts polls that reported what the one before them did, and the reset
+   * below — at every transition — is the half of the cadence that belongs here rather than in
+   * `poll-cadence.ts`: how far to back off is arithmetic, but what counts as progress is a
+   * statement about this deployment.
    */
   let lastState: ContainerState | undefined;
   let sameStatePolls = 0;
   let interval: number = STREAM.STATUS_POLL_MS;
-
-  /*
-   * Derived from the counter rather than doubled in place, so recovering from a failure
-   * backoff lands on the rung this deployment's own progress had earned rather than on
-   * whatever the last error left behind.
-   */
-  const healthyInterval = () =>
-    Math.min(
-      STREAM.STATUS_POLL_MS *
-        2 ** Math.floor(sameStatePolls / STREAM.POLLS_BEFORE_ESCALATION),
-      STREAM.MAX_POLL_MS,
-    );
-
-  /*
-   * The same doubling the project watcher uses (api/watch/[projectId]/route.ts), kept local
-   * rather than shared: the two loops have different ceilings and different reset
-   * conditions, and what they have in common is three lines of arithmetic.
-   *
-   * A 429 carries the only informed number in this system. The client has already waited
-   * Railway's Retry-After out once per attempt and given up, so polling again before that
-   * window closes spends another NETWORK.MAX_ATTEMPTS requests to be told the same thing.
-   * Clamped anyway — a Retry-After is a hint from a system under load, not a mandate to
-   * hold a stream open doing nothing.
-   */
-  const backoffFor = (error: unknown): number => {
-    const retryAfterMs =
-      error instanceof RailwayApiError && error.kind === "rate_limit"
-        ? (error.retryAfterSeconds ?? 0) * 1000
-        : 0;
-    return Math.min(Math.max(interval * 2, retryAfterMs), STREAM.MAX_BACKOFF_MS);
-  };
 
   /**
    * Last resort for a failure that showed the reader nothing.
@@ -389,7 +358,7 @@ export async function* monitorDeployment(
         lastState = state;
         sameStatePolls = 0;
       }
-      interval = healthyInterval();
+      interval = healthyInterval(sameStatePolls);
 
       if (isTerminal(state)) {
         /*
@@ -492,7 +461,7 @@ export async function* monitorDeployment(
        * indistinguishable from one that is not happening.
        */
       consecutiveFailures += 1;
-      interval = backoffFor(error);
+      interval = backoffFor(error, interval);
       const fields = {
         deployment_id: deploymentId,
         consecutive: consecutiveFailures,
