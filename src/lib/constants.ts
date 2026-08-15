@@ -597,21 +597,14 @@ export const REGIONS = {
   CACHE_MAX_ENTRIES: 200,
 } as const;
 
-/**
- * Where the reader's theme choice is remembered, and what it may say.
- *
- * Its own group because it is read from two places that cannot share code: the toggle,
- * and the inline `<script>` in layout.tsx that applies the stored value before first
- * paint. That script runs before any module does, so it cannot import — but it is built
- * from a template literal, so it can interpolate these. Before, both spelled `"theme"`
- * and `"light"|"dark"` out by hand, and renaming the key in the toggle would have left
- * every visitor with a permanent theme flash and nothing failing.
+/*
+ * The theme's storage key is NOT here, and that is a bundle decision rather than an
+ * oversight. It lives in lib/theme.ts because `ThemeToggle` needs it and sits in the root
+ * layout, so an import of this module from there put all of the above into the shared
+ * client graph of every route — measured at +1.5 kB gzip on / and /_not-found, and
+ * /dashboard 0.1 kB over its budget. Same reason IMAGE_PATTERN lives in
+ * lib/registry/reference.ts rather than in lib/validation.ts.
  */
-export const THEME = {
-  STORAGE_KEY: "theme",
-  /** The two explicit choices. Absent means "follow the OS", which stores nothing. */
-  VALUES: ["light", "dark"],
-} as const;
 
 /** Presentation thresholds that are not styling. */
 export const UI = {

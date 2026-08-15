@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ToggleGroup } from "radix-ui";
-import { THEME } from "@/lib/constants";
+import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 type ThemeChoice = "light" | "dark" | "system";

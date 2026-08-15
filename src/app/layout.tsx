@@ -4,7 +4,7 @@ import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
-import { THEME } from "@/lib/constants";
+import { THEME } from "@/lib/theme";
 import { AppHeader } from "@/components/app-header";
 import { Footer } from "@/components/footer";
 import { SkipLink } from "@/components/ui/page";
