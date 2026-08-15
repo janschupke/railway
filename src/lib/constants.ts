@@ -1,10 +1,24 @@
 /**
- * Every tuned number in the app, grouped by the concern that owns it.
+ * Every tuned number the application proper runs on, grouped by the concern that owns it.
  *
  * These were previously scattered as inline literals across the client, the stream
  * route, the session layer and three components. Collecting them means a reviewer can
  * see the whole tuning surface at once, and means the same value cannot drift between
  * two files (the log backfill limit had already diverged from its default).
+ *
+ * Two exclusions, both deliberate, because "every tuned number in the app" was written
+ * here when it was true and had stopped being so.
+ *
+ * `WATCH_POLL_MS` and `METRICS_POLL_MS` live in `src/env.ts`, because the right value for
+ * each depends on the rate limit of the plan behind the token. The `WATCH` and `METRICS`
+ * groups below say so where a reader would otherwise look for them.
+ *
+ * `src/features/**` owns its own — `src/features/rail-yard/config.ts` holds roughly ninety
+ * of them. That is the right home rather than an oversight: the rail yard is decoration
+ * with one consumer and no application data flowing through it, so its timestep and its
+ * track geometry are not part of this app's tuning surface and would only make this file
+ * harder to read whole. A number that a Railway request, a session or a rendered container
+ * depends on belongs here; a number that only moves a pixel belongs there.
  */
 
 /** Talking to Railway's HTTP API. */

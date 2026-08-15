@@ -116,8 +116,16 @@ const PROJECT_FIELDS = /* GraphQL */ `
  * selection away from. Railway's rate limit is the binding constraint on this app
  * (1000/hour on Hobby), so a whole request per dashboard load for three scalars is the
  * expensive kind of tidy. A token refused these two fields degrades to a nameless
- * header rather than an empty dashboard: they are optional on ViewerNode, and gqlPartial
- * keeps whatever `me` did return.
+ * header rather than an empty dashboard, and the mechanism is `gqlPartial` keeping
+ * whatever `me` did return — not the schema making the fields optional.
+ *
+ * That distinction was stated backwards here, and it is worth getting right because it
+ * says which layer the resilience lives in. There is no `ViewerNode` type in Railway's
+ * schema; `me` returns `User!`, on which `email: String!` is **non-null** (`name` is
+ * nullable). So a refusal of `email` is a field-level error on an otherwise valid
+ * response, and what survives it is the partial-data path in the client. `ViewerNode` is
+ * this app's own name, in `mappers.ts`, for the shape it reads back — where every member
+ * genuinely is optional, because that type describes a response rather than the schema.
  */
 export const PROJECTS_PERSONAL_QUERY: TypedDocument<
   ProjectsPersonalQuery,

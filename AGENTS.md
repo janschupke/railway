@@ -43,7 +43,7 @@ this repo.
 Full set in [`.ai/rules/`](.ai/rules/). The ones an agent trips over first:
 
 - **`pnpm check` is the gate** — `format:check && lint && typecheck && codegen:check && knip && test:coverage`. Run it before saying anything is done.
-- **No raw palette colour, type step, hex literal or `-[var(--…)]` in a feature component** — appearance belongs to `src/components/ui/**` or to a token. It is a lint error, not a guideline.
+- **No raw palette colour, type step, hex literal or `-[var(--…)]` in a feature component** — appearance belongs to `src/components/ui/**` or to a token. It is a lint error, not a guideline: palette and type-step strings are banned anywhere in a `src/**` file, not just inside `className`, and hex is banned in `style={{…}}`. `src/components/ui/**` and `src/features/**` are exempt and are the only two places a literal belongs.
 - **No hardcoded user-facing string in JSX** — it goes in `messages/en.json`. Also a lint error.
 - **No `console.*` in `src/**`** — use `src/lib/logger.ts`. This is a security ratchet: a stray `console.error(error)` is how a live access token reached stdout once.
 - **Never log** a token, `Error.cause`, an email, the sealed cookie, or container stdout. Never render upstream failure text — route it through `reportError`.

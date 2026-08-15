@@ -142,11 +142,26 @@ Two footguns in the CSP path, both load-bearing: the nonce must be set on
 `SECURITY.md`. Removing it produces 12 `style-src-attr` violations on the dashboard alone.
 Do not try.
 
-## The request id is minted, never adopted
+## The request id is minted, and adopted only from behind the proxy
 
-`src/proxy.ts` generates it. Taking a client-supplied `x-request-id` would put
+`src/proxy.ts` generates it and `headers.set` overwrites any inbound value unconditionally,
+on every path the matcher covers. Taking a client-supplied `x-request-id` would otherwise put
 attacker-chosen bytes into a field operators grep and give the log store an unbounded label.
 The same reasoning applies to any new identifier you are tempted to read off a request.
+
+**What a handler downstream reads is therefore the proxy's own value, and that is the whole
+of why `trustInboundId: true` is safe.** This section used to say "minted, never adopted",
+which reads as an absolute and is not one: sixteen call sites pass `trustInboundId: true` —
+every Server Action, both data loaders and the four non-auth route handlers — because the
+proxy has already overwritten the header before their handler runs. `resolveId` in
+`src/lib/log/request-scope.ts` still holds the value to `REQUEST_ID_PATTERN` before accepting
+it, so a bypass yields a fresh id rather than the caller's bytes.
+
+The four handlers the matcher **excludes** are the ones that must not trust it, and they
+pass `trustInboundId: false` for exactly this reason: `api/auth/login`, `api/auth/callback`,
+`api/auth/logout` and `api/health`. Each says so at its own call site. A new route added
+under `api/auth/**`, or any other path added to the matcher's exclusion list, inherits that
+obligation — the proxy is not running, so the header is raw client input.
 
 Relatedly: the rejected `deploymentId` is **deliberately not logged**. It is unbounded,
 attacker-controlled string straight off the URL; `id_length` carries the diagnostic content

@@ -70,6 +70,30 @@ synthetic deadline: it cannot tell an abandoned render from a slow one, so it bo
 first by failing the second. The retry backoff _is_ cancellable — `backoff` in
 `src/lib/railway/client.ts` — which is what the callers holding a real signal needed.
 
+## `src/features/**` is decoration, and takes part in none of the above
+
+`src/features/rail-yard/` is the canvas animation on the landing page. It is the largest
+body of code outside `src/lib` — about nine thousand lines of simulation, geometry and
+2D drawing — and it is worth saying plainly what it is, because its size otherwise invites
+a reader looking for container logic to open it.
+
+**It is in no lane.** One consumer, `src/app/page.tsx`, and no import anywhere under it of
+`lib/railway/**`, `lib/auth/**`, `lib/logger`, `fetch` or `EventSource`. No Railway data
+reaches it, no session touches it, it reads no application state and it renders nothing a
+user acts on. Deleting it would change the landing page and nothing else.
+
+Three consequences, each recorded where it applies rather than here:
+
+- It **owns its own tuned numbers**, in `src/features/rail-yard/config.ts` — see the
+  constants section below.
+- It is **exempt from `@typescript-eslint/no-non-null-assertion`** in `eslint.config.mjs`,
+  because nothing a caller supplied reaches the arrays it indexes.
+- It is **not exempt from coverage**. It carries a directory floor like `lib` and `hooks`
+  do ([testing.md](testing.md)); decorative is not the same as untested, and a large
+  isolated module is exactly the kind that decays unobserved.
+
+If anything under `features/` ever reads Railway data, the first two go with it.
+
 ## `src/proxy.ts` is Next 16's middleware, and it is where refresh lives
 
 Server Components can read cookies but cannot write them, so a token that expires
@@ -256,7 +280,7 @@ when the app bundle has its own copy.**
 ## Every tuned number lives in `src/lib/constants.ts`
 
 Grouped by the concern that owns it (`NETWORK`, `STREAM`, `WATCH`, `METRICS`, `SESSION`,
-`IDEMPOTENCY`, `LIMITS`, `UI`, `LIST`, `LINKS`),
+`IDEMPOTENCY`, `LIMITS`, `UI`, `LIST`, `LINKS`, `REGISTRY`, `REGIONS`),
 each with a comment saying why the value is what it is. These were scattered as inline
 literals across the client, the stream route, the session layer and three components, and
 the log backfill limit had already drifted from its default.
@@ -264,10 +288,16 @@ the log backfill limit had already drifted from its default.
 A new timeout, retry count, buffer size or ceiling goes there, in its group, with a
 rationale. Do not inline it "just this once".
 
-The two numbers that are not there are the watcher's poll interval and the usage-readout
-staleness window — `WATCH_POLL_MS` and `METRICS_POLL_MS` in `src/env.ts`, because the right
-value for each depends on the rate limit of the plan behind the token. `src/lib/constants.ts`
-says so at the `WATCH` and `METRICS` groups.
+**Two exclusions, and they are the whole list.** `WATCH_POLL_MS` and `METRICS_POLL_MS` are
+in `src/env.ts`, because the right value for each depends on the rate limit of the plan
+behind the token; `src/lib/constants.ts` says so at the `WATCH` and `METRICS` groups.
+
+And **`src/features/**` owns its own** — `src/features/rail-yard/config.ts` holds roughly
+ninety. That is the right home rather than a violation, for the reason the decoration
+section above gives: no application data reaches the rail yard, and its timestep and track
+geometry are not part of this app's tuning surface. The test is what the number
+affects, not where it is declared: anything a Railway request, a session or a rendered
+container depends on goes in `constants.ts`, and a number that only moves a pixel does not.
 
 ## Configuration goes through `src/env.ts`
 

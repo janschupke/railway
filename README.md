@@ -558,8 +558,13 @@ Four tiers, each answering something the others cannot.
 | **integration** | node + MSW  | Server Actions and route handlers against a mocked Railway        |
 | **e2e**         | Playwright  | The real OAuth flow and lifecycle against a fake Railway          |
 
-`pnpm test:coverage` enforces **80%** on lines, branches, functions and statements
-across `src/**`. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
+`pnpm test:coverage` enforces **98 lines / 91 branches / 98 functions / 96 statements**
+across `src/**`, with per-directory floors for `src/lib`, `src/hooks`, `src/features` and
+`src/components` on top, and one file-level floor at 100 for
+`src/lib/railway/subscribe.ts`. The thresholds sit a point under the measured figures
+rather than at a round number below them — see
+[`.ai/rules/testing.md`](.ai/rules/testing.md), which has the reasoning and is where the
+numbers are maintained. Framework shells (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`)
 are excluded and covered end-to-end instead — counting them would either inflate the
 number or invite render tests that assert nothing. E2E does not feed the figure, so
 component tests have to carry the UI.

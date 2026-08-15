@@ -76,7 +76,9 @@ One JSON line per event on stdout. `msg` is an identifier, not a sentence:
 `auth.session.refreshed`, `container.created`, `container.destroy_refused`,
 `proxy.env_invalid`, `railway.request.retry`, `stream.opened`, `watch.poll_failed`.
 
-Fields that recur: `request_id` (minted in `src/proxy.ts`, never adopted from the request),
+Fields that recur: `request_id` (minted in `src/proxy.ts`, which overwrites any inbound
+value; handlers behind the matcher adopt that — see
+[security.md](security.md#the-request-id-is-minted-and-adopted-only-from-behind-the-proxy)),
 `subject_id`, `route` as a **static pattern** — `/api/streams/[deploymentId]`, not the
 resolved path — `incident`, and `err.*`.
 

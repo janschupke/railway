@@ -22,21 +22,25 @@ const APPEARANCE_BANS = [
      * should reach for on the rare element a primitive cannot wrap.
      */
     pattern: `(^|\\s)(text-(xs|sm|base|lg|xl|[2-9]xl)|font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)|tracking-(tighter|tight|normal|wide|wider|widest)|leading-\\S+)(\\s|$)`,
+    scope: "anywhere",
     message:
       "Raw type step in a feature component. Use <Text variant=…> or <Heading> from src/components/ui/text.tsx; the scale lives in src/app/tokens.css.",
   },
   {
     pattern: `(^|[^a-z-])(bg|text|border|ring|fill|stroke|from|via|to|divide|outline|decoration|placeholder|caret|accent|shadow)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|grey|zinc|neutral|stone|white|black)(\\/|-[0-9]|\\b)`,
+    scope: "anywhere",
     message:
       "Raw palette colour in a feature component. Use a semantic token (bg-surface, text-text-muted, border-danger-border…); palette ramps live in src/app/tokens.css and literals only in src/components/ui.",
   },
   {
     pattern: `#[0-9a-fA-F]{3,8}\\b`,
+    scope: "style",
     message:
       "Hex colour in markup. Add a semantic token in src/app/tokens.css and map it in globals.css instead.",
   },
   {
     pattern: `-\\[var\\(--`,
+    scope: "className",
     message:
       "Arbitrary value reaching past the Tailwind theme at a CSS variable. Map the token in globals.css and use the generated utility (fill-raised, not fill-[var(--rc-raised)]).",
   },
@@ -64,11 +68,45 @@ const publicEnvBans = [
   },
 ];
 
-const appearanceBans = APPEARANCE_BANS.flatMap(({ pattern, message }) =>
-  ["Literal[value=", "TemplateElement[value.raw="].map((node) => ({
-    selector: `JSXAttribute[name.name="className"] ${node}/${pattern}/]`,
-    message,
-  })),
+/**
+ * Both node types, because only `Literal` was matched once and a template literal escaped
+ * all four — `` className={`text-sm ${x}`} `` is a `TemplateElement`.
+ */
+const STRING_NODES = ["Literal[value=", "TemplateElement[value.raw="];
+
+/**
+ * Where each ban has to look, which is not the same question for all four.
+ *
+ * `className` was the only ancestor any of them matched, and that left three holes. A
+ * literal assigned to a variable and used as a class — `const ROW = "text-sm text-gray-400"`
+ * — matched nothing. `.ts` files were outside the block entirely, so a `cva` recipe or a
+ * class lookup table could carry anything. And `style={{ color: "#6c3fe7" }}` is not a
+ * `className` attribute, so the hex ban never saw the one place hex is actually spelled.
+ *
+ * So the reach is now per pattern rather than uniform:
+ *
+ * - **anywhere** — the type-step and palette patterns. These match Tailwind class shapes
+ *   and nothing else plausible, so they are safe to ban on any string in the file and that
+ *   is what closes the variable and `.ts` holes.
+ * - **style** — the hex pattern, on `style={{…}}`. Deliberately not "anywhere": `#` plus
+ *   hex digits is also an id selector, a URL fragment and a git sha, and a ban that fires
+ *   on those is a ban people learn to disable.
+ * - **className** — the `-[var(--…)]` pattern, which is a Tailwind arbitrary value and
+ *   cannot appear anywhere else by construction.
+ */
+const BAN_ANCESTORS = {
+  anywhere: [""],
+  className: [`JSXAttribute[name.name="className"] `],
+  style: [`JSXAttribute[name.name="style"] `],
+};
+
+const appearanceBans = APPEARANCE_BANS.flatMap(({ pattern, scope, message }) =>
+  BAN_ANCESTORS[scope].flatMap((ancestor) =>
+    STRING_NODES.map((node) => ({
+      selector: `${ancestor}${node}/${pattern}/]`,
+      message,
+    })),
+  ),
 );
 
 const eslintConfig = defineConfig([
@@ -118,18 +156,28 @@ const eslintConfig = defineConfig([
      * switch the appearance bans off — a config change that turns four ratchets into
      * nothing while lint still passes.
      */
-    files: ["src/**/*.tsx"],
-    ignores: ["src/components/ui/**"],
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/components/ui/**",
+      // Decoration, and the only place in src/ that legitimately names colours: the
+      // canvas has no CSS to inherit them from. See architecture.md.
+      "src/features/**",
+      "src/**/*.test.{ts,tsx}",
+      "src/test/**",
+    ],
     rules: {
       "no-restricted-syntax": ["error", ...appearanceBans, ...publicEnvBans],
     },
   },
 
   {
-    // Everything the block above does not cover: .ts files, and src/components/ui.
+    // Everything the block above does not cover. The appearance bans do not apply here;
+    // NEXT_PUBLIC_ still does, everywhere, without exception.
     files: [
-      "src/**/*.ts",
-      "src/components/ui/**/*.tsx",
+      "src/components/ui/**/*.{ts,tsx}",
+      "src/features/**/*.{ts,tsx}",
+      "src/**/*.test.{ts,tsx}",
+      "src/test/**/*.{ts,tsx}",
       "scripts/**/*.ts",
       "e2e/**/*.ts",
     ],
