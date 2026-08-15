@@ -341,22 +341,28 @@ export type RegionNode = {
  * country is the `<optgroup>` heading and an unsorted list would repeat headings.
  */
 export function toRegionOptions(regions: RegionNode[]): RegionOption[] {
-  return regions
-    .filter(
-      (region) =>
-        region.id !== null &&
-        !region.deploymentConstraints?.deprecationInfo?.isDeprecated,
-    )
-    .map((region) => ({
-      id: region.id!,
-      label: region.location,
-      country: region.country,
-    }))
-    .sort(
-      (left, right) =>
-        left.country.localeCompare(right.country) ||
-        left.label.localeCompare(right.label),
-    );
+  return (
+    regions
+      /*
+       * One pass, because the guard and the read have to stay together. `id` is nullable on
+       * the live schema, so this was a `.filter` for null followed four lines later by a
+       * `.map` asserting non-null — two statements holding one invariant between them, and
+       * the compiler checking neither. `flatMap` narrows `id` where it is tested and uses it
+       * in the same expression, which is the same refusal expressed so that it cannot come
+       * apart in a later edit.
+       */
+      .flatMap((region) =>
+        region.id === null ||
+        region.deploymentConstraints?.deprecationInfo?.isDeprecated
+          ? []
+          : [{ id: region.id, label: region.location, country: region.country }],
+      )
+      .sort(
+        (left, right) =>
+          left.country.localeCompare(right.country) ||
+          left.label.localeCompare(right.label),
+      )
+  );
 }
 
 /**

@@ -208,6 +208,32 @@ const refineVariableRows = (
 };
 
 /**
+ * The two parallel lists, zipped back into rows.
+ *
+ * Lives here rather than in `actions.ts` because the guarantee it depends on lives here:
+ * `refineVariableRows` above refuses a parse whose lists differ in length, so every key has
+ * a value at its index. Both spin-up and edit did this inline, which put the assertion two
+ * files away from the refinement that justifies it and meant the pairing rule was written
+ * twice — the second copy free to drift from the first without anything noticing.
+ *
+ * The `!` is the one deliberate index assertion in `src/` outside `features/`, and it is
+ * why `no-non-null-assertion` carries a disable here rather than an exemption for the
+ * directory. Narrowing it would mean a branch for a state the parse has already refused:
+ * unreachable, uncoverable against a 93% branch floor, and a lie about what can happen.
+ * Kept to one place, next to its reason, rather than removed by making the code vaguer.
+ */
+export function pairVariableRows(data: {
+  variableKey: string[];
+  variableValue: string[];
+}): Array<{ name: string; value: string }> {
+  return data.variableKey.map((name, index) => ({
+    name,
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length refined above
+    value: data.variableValue[index]!,
+  }));
+}
+
+/**
  * The port a public domain should route to, and whether to mint one at all.
  *
  * One field carrying both, which is the design rather than an economy. A checkbox beside a

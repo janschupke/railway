@@ -376,6 +376,49 @@ const eslintConfig = defineConfig([
     rules: { "no-console": "error" },
   },
 
+  /*
+   * `noUncheckedIndexedAccess` is on, and workflow.md says outright: "An index read is
+   * `T | undefined` … Narrow it; do not `!` it away." Nothing enforced that. The compiler
+   * option was switched on globally and then switched back off, locally, forty-one times —
+   * silently, because `eslint-config-next` ships only `no-extra-non-null-assertion` and
+   * `no-non-null-asserted-optional-chain`, neither of which is this rule.
+   *
+   * What turning it on found was not a live bug — every assertion outside tests was in
+   * fact safe. What it found was safety held at a distance: a region mapper whose null
+   * filter and whose `id!` sat four lines and one `.map()` apart, a combobox asserting an
+   * index that a clamp fifty lines above made valid, and two `split()[0]!` reads standing
+   * in for a destructuring default. Each was correct and none of them said why within
+   * sight of itself, which is the failure mode `noUncheckedIndexedAccess` exists to catch
+   * and which nothing was enforcing.
+   *
+   * Five remain in `src/lib` under four inline disables, each naming the loop bound or the
+   * refinement that makes it safe. An inline disable is the point: it is greppable, it
+   * carries a reason, and adding one is a visible decision rather than a character.
+   * Everything else in the non-test tree is narrowed, so the rule starts from zero.
+   *
+   * Tests are exempt, which is a smaller concession than the count suggests: all 114 of
+   * the assertions this rule found outside `features/` were in `*.test.*`, indexing a
+   * fixture the test constructed three lines earlier. The rule exists because an assertion
+   * on data from outside makes a wrong assumption *ship*; in a test a wrong one fails the
+   * test, loudly, which is the outcome the rule is trying to buy. Rewriting them would be
+   * a hundred narrowing branches guarding states the fixture makes impossible.
+   *
+   * `src/features/**` is exempt, and the boundary is drawn where it is on purpose. Not
+   * "geometry is fiddly" — twenty-eight assertions would be twenty-eight disables and the
+   * rule would read as bureaucracy. The reason is that the rail yard is decoration: one
+   * consumer in `src/app/page.tsx`, and no import of `lib/railway/**`, `lib/auth/**`,
+   * `fetch` or `EventSource` anywhere under it. Nothing a caller supplied reaches those
+   * arrays — the renderer indexes structures it built two lines earlier from constants in
+   * its own `config.ts` — so an index assumption there cannot be wrong about untrusted
+   * input, which is the class of defect this rule is for. If anything under `features/`
+   * ever reads Railway data, this exemption goes with it.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/features/**", "src/**/*.test.{ts,tsx}", "src/test/**"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "error" },
+  },
+
   globalIgnores([
     ".next/**",
     "out/**",

@@ -39,6 +39,7 @@ import {
   containerBulkActionSchema,
   containerEditSchema,
   environmentCreateSchema,
+  pairVariableRows,
   projectCreateSchema,
   spinUpSchema,
 } from "@/lib/validation";
@@ -245,14 +246,7 @@ async function attempt(
     variableValue,
   } = data;
 
-  /*
-   * The two parallel lists are one row per index. The schema has already refused a
-   * submission where they disagree in length, so this cannot produce a half-row.
-   */
-  const submittedVariables = variableKey.map((variableName, index) => ({
-    name: variableName,
-    value: variableValue[index]!,
-  }));
+  const submittedVariables = pairVariableRows({ variableKey, variableValue });
 
   const managedName = toManagedName(name);
 
@@ -1344,10 +1338,7 @@ async function edit(formData: FormData): Promise<ActionResult> {
   }
 
   const { name, image, variableKey, variableValue } = parsed.data;
-  const submitted = variableKey.map((variableName, index) => ({
-    name: variableName,
-    value: variableValue[index]!,
-  }));
+  const submitted = pairVariableRows({ variableKey, variableValue });
 
   return withManagedContainer("edit", formData, async (context) => {
     const { accessToken, projectId, environmentId, target } = context;

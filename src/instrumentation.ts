@@ -113,7 +113,10 @@ const CLIENT_DISCONNECT = "The destination stream closed early.";
 const ROUTE_GROUPS = new Set(["dashboard", "api"]);
 
 function routeGroup(path: string): string {
-  const [, first] = path.split("?", 1)[0]!.split("/");
+  // Defaulted rather than asserted, for the reason `repositoryOf` gives: `split` cannot
+  // return an empty list, and a destructuring default states that without a claim.
+  const [beforeQuery = path] = path.split("?", 1);
+  const [, first] = beforeQuery.split("/");
   if (!first) return "/";
   return ROUTE_GROUPS.has(first) ? `/${first}` : "other";
 }

@@ -102,14 +102,25 @@ export type Preset = {
  * storage was not checked belongs in neither camp: leave it out of the catalog rather than
  * guess a mount path for it.
  */
+/**
+ * The entry the spin-up form opens on, named rather than read back out of the list.
+ *
+ * `DEFAULT_IMAGE` below used to be `PRESETS[0]!.value`, which made "the default is the
+ * first one" a fact about array order that nothing stated and reordering the catalog
+ * would silently change. It is also why that line needed an assertion at all: the
+ * `readonly Preset[]` annotation widens the literal away from a tuple, so index 0 is
+ * `Preset | undefined` under `noUncheckedIndexedAccess` however obviously it is not.
+ */
+const DEFAULT_PRESET: Preset = {
+  value: "redis:7-alpine",
+  labelKey: "redis",
+  groupKey: "cache",
+  // The RDB snapshot path, and where an appendonly file would go too.
+  volume: { mountPath: "/data" },
+};
+
 export const PRESETS: readonly Preset[] = [
-  {
-    value: "redis:7-alpine",
-    labelKey: "redis",
-    groupKey: "cache",
-    // The RDB snapshot path, and where an appendonly file would go too.
-    volume: { mountPath: "/data" },
-  },
+  DEFAULT_PRESET,
   // No volume, and that is the image: memcached holds everything in memory by design.
   { value: "memcached:1-alpine", labelKey: "memcached", groupKey: "cache" },
 
@@ -203,7 +214,7 @@ export const PRESETS: readonly Preset[] = [
   { value: "nats:2-alpine", labelKey: "nats", groupKey: "queue" },
 ] as const;
 
-export const DEFAULT_IMAGE = PRESETS[0]!.value;
+export const DEFAULT_IMAGE = DEFAULT_PRESET.value;
 
 /**
  * The repository part of a reference: registry and path, with tag and digest removed.
@@ -213,7 +224,11 @@ export const DEFAULT_IMAGE = PRESETS[0]!.value;
  * separator would mangle it.
  */
 export function repositoryOf(image: string): string {
-  const withoutDigest = image.split("@")[0]!.trim();
+  // Destructured with a default rather than asserted: `split` always yields at least one
+  // element, so the fallback is unreachable, but writing it costs nothing and needs no
+  // claim about a built-in that the compiler cannot check.
+  const [beforeDigest = image] = image.split("@");
+  const withoutDigest = beforeDigest.trim();
   const colon = withoutDigest.lastIndexOf(":");
   if (colon === -1) return withoutDigest;
   const afterColon = withoutDigest.slice(colon + 1);

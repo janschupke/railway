@@ -130,11 +130,21 @@ export function Combobox({
     }
 
     if (event.key === "Enter") {
-      // Only intercepted when it would pick something. A closed list means Enter is the
-      // form's, and swallowing it would break submitting from the keyboard.
-      if (!open || active < 0) return;
+      /*
+       * Only intercepted when it would pick something. A closed list means Enter is the
+       * form's, and swallowing it would break submitting from the keyboard.
+       *
+       * The read is the guard, rather than `filtered[active]!` after testing `active >= 0`.
+       * That assertion was sound — `active` is clamped to `filtered.length` where it is
+       * derived above, so the index cannot miss — but it was sound *because of* a line
+       * fifty above it, and nothing tied the two together. Testing the value that was
+       * actually read needs no such link, and costs no branch: the undefined case is the
+       * one where the list is closed, which this already had to handle.
+       */
+      const choice = open && active >= 0 ? filtered[active] : undefined;
+      if (!choice) return;
       event.preventDefault();
-      commit(filtered[active]!);
+      commit(choice);
       return;
     }
 

@@ -64,6 +64,15 @@ export function overlapLength(
   for (let k = Math.min(prior.length, next.length); k > 0; k--) {
     let matched = true;
     for (let i = 0; i < k; i++) {
+      /*
+       * Both indices are bounded by the loops above — `k` starts at the shorter length and
+       * `i` stays under it — so neither read can miss. Asserted rather than narrowed
+       * because this is the inner loop of an O(n²) scan over a log buffer, and a pair of
+       * undefined checks per iteration would be runtime cost for a state the two `for`
+       * headers have already excluded. The rule is on; this is one of the four places in
+       * `src/lib` that says why it is being stepped around.
+       */
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- bounded by k
       if (!sameLine(prior[prior.length - k + i]!, next[i]!)) {
         matched = false;
         break;
@@ -162,6 +171,7 @@ export function expectReplay(
 
     if (cursor === -1) {
       for (let i = emitted.length - 1; i >= 0; i--) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- i indexes emitted
         if (sameLine(emitted[i]!, line)) {
           cursor = i + 1;
           armed = cursor < emitted.length;
@@ -173,6 +183,9 @@ export function expectReplay(
       return false;
     }
 
+    // `armed` is set false the moment cursor reaches emitted.length, and the guard at the
+    // top of this closure returns before here when it is — so cursor is always in range.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- armed bounds cursor
     if (!sameLine(emitted[cursor]!, line)) {
       armed = false;
       return false;
