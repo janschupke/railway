@@ -28,19 +28,18 @@
  * script drift away from the thing it is checking.
  */
 
-import { openSession } from "../src/lib/auth/session.ts";
 import { pickFailureReason } from "../src/lib/railway/failure-reason.ts";
 import { DEPLOYMENT_EVENTS_QUERY } from "../src/lib/railway/operations.ts";
 import { STREAM } from "../src/lib/constants.ts";
-import { RAILWAY_DEFAULTS } from "../src/env.ts";
+import { ENDPOINT, bad, dim, ok, openProbeSession, warn } from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
+const USAGE = "RC_SESSION='<value>' pnpm probe:deployment <deployment-id>";
 
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-
+/*
+ * Posts its own request rather than calling `postGraphQL`, and the difference is the
+ * point: this one names `operationName` and treats a non-JSON body as fatal, because a
+ * probe reading one deployment's events has nothing to report if the body is HTML.
+ */
 type EventNode = {
   step?: string | null;
   payload?: Record<string, unknown> | null;
@@ -56,23 +55,8 @@ type Body = {
 };
 
 async function main() {
-  const cookie = process.env.RC_SESSION;
-  const secret = process.env.SESSION_SECRET;
   const deploymentId = process.argv[2];
 
-  if (!secret) {
-    console.error(bad("SESSION_SECRET is not set."));
-    console.error("  Run through the package script, which loads .env:");
-    console.error("    RC_SESSION=… pnpm probe:deployment <deployment-id>\n");
-    process.exit(1);
-  }
-  if (!cookie) {
-    console.error(bad("RC_SESSION is not set."));
-    console.error("  Sign in, then copy the `rc_session` cookie value:");
-    console.error("    DevTools → Application → Cookies → rc_session\n");
-    console.error("    RC_SESSION='<value>' pnpm probe:deployment <deployment-id>\n");
-    process.exit(1);
-  }
   if (!deploymentId) {
     console.error(bad("No deployment id given."));
     console.error("  Take it from a failed deployment's URL on Railway:");
@@ -80,13 +64,7 @@ async function main() {
     process.exit(1);
   }
 
-  const session = await openSession(cookie, secret);
-  if (!session) {
-    console.error(
-      bad("Could not open that session — wrong SESSION_SECRET, or the cookie expired."),
-    );
-    process.exit(1);
-  }
+  const session = await openProbeSession(USAGE);
 
   console.log(`\nEndpoint: ${ENDPOINT}`);
   console.log(`Deployment: ${deploymentId}\n`);

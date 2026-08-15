@@ -22,39 +22,22 @@
  * would let this script drift away from the thing it is diagnosing.
  */
 
-import { openSession } from "../src/lib/auth/session.ts";
 import { SCOPES } from "../src/lib/auth/oidc.ts";
 import { railwayMetadata } from "../src/lib/auth/oidc-metadata.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
+import {
+  ENDPOINT,
+  bad,
+  dim,
+  ok,
+  openProbeSession,
+  postGraphQL,
+  warn,
+} from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
 const ISSUER = process.env.RAILWAY_ISSUER ?? RAILWAY_DEFAULTS.ISSUER;
 
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-
-type GraphQLBody = {
-  data?: unknown;
-  errors?: Array<{ message: string; extensions?: { code?: string } }>;
-};
-
-async function run(token: string, query: string): Promise<GraphQLBody> {
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query }),
-  });
-  try {
-    return (await response.json()) as GraphQLBody;
-  } catch {
-    return { errors: [{ message: `non-JSON response (HTTP ${response.status})` }] };
-  }
-}
+const USAGE = "RC_SESSION='<value>' pnpm probe:projects";
 
 /**
  * Candidate sources for "projects this credential can see".
@@ -141,30 +124,7 @@ async function introspectType(token: string, name: string) {
 }
 
 async function main() {
-  const cookie = process.env.RC_SESSION;
-  const secret = process.env.SESSION_SECRET;
-
-  if (!secret) {
-    console.error(bad("SESSION_SECRET is not set."));
-    console.error("  Run through the package script, which loads .env:");
-    console.error("    RC_SESSION=… pnpm probe:projects\n");
-    process.exit(1);
-  }
-  if (!cookie) {
-    console.error(bad("RC_SESSION is not set."));
-    console.error("  Sign in, then copy the `rc_session` cookie value:");
-    console.error("    DevTools → Application → Cookies → rc_session\n");
-    console.error("    RC_SESSION='<value>' pnpm probe:projects\n");
-    process.exit(1);
-  }
-
-  const session = await openSession(cookie, secret);
-  if (!session) {
-    console.error(
-      bad("Could not open that session — wrong SESSION_SECRET, or the cookie expired."),
-    );
-    process.exit(1);
-  }
+  const session = await openProbeSession(USAGE);
 
   console.log(`\nEndpoint: ${ENDPOINT}`);
 
@@ -187,7 +147,7 @@ async function main() {
 
   console.log("\nProject sources");
   for (const source of SOURCES) {
-    const body = await run(session.accessToken, source.query);
+    const body = await postGraphQL(session.accessToken, source.query);
     const [error] = body.errors ?? [];
     if (error) {
       // The code matters as much as the message: Railway answers an unauthorized field

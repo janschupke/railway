@@ -16,7 +16,7 @@ import {
   type ContainerVolume,
   type LogPhase,
 } from "@/lib/railway/types";
-import { railwayServiceUrl, UI } from "@/lib/constants";
+import { UI } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
 import { useVolumeSize } from "@/hooks/use-memory-figure";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ import { ContainerMetricsReadout } from "./container-metrics";
 import { ContainerUrl } from "./container-url";
 import { DeploymentHistory } from "./deployment-history";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
+import { RailwayServiceLink } from "./railway-service-link";
 import { StatusBadge } from "./status-badge";
 import { Banner } from "./ui/banner";
 import { Checkbox } from "./ui/checkbox";
@@ -329,14 +330,10 @@ export function ContainerRow({
                 the two read as the same thing. Truncation lives on the inner span so the
                 ellipsis eats the name rather than the icon that explains where it goes.
               */}
-              <a
-                href={railwayServiceUrl({
-                  projectId,
-                  serviceId: container.serviceId,
-                  environmentId,
-                })}
-                target="_blank"
-                rel="noreferrer"
+              <RailwayServiceLink
+                projectId={projectId}
+                serviceId={container.serviceId}
+                environmentId={environmentId}
                 className="focus-ring link inline-flex max-w-full items-center gap-1"
               >
                 <span className="truncate">{container.displayName}</span>
@@ -344,7 +341,7 @@ export function ContainerRow({
                   aria-hidden
                   className="text-text-subtle size-3.5 shrink-0"
                 />
-              </a>
+              </RailwayServiceLink>
             </Text>
             <Text variant="mono" tone="subtle" className="block truncate">
               {container.image ?? container.repo ?? t("noSource")}
@@ -472,18 +469,14 @@ export function ContainerRow({
 
             <Tooltip content={t("notManagedTooltip")}>
               <Button variant="secondary" size="sm" asChild>
-                <a
-                  href={railwayServiceUrl({
-                    projectId,
-                    serviceId: container.serviceId,
-                    environmentId,
-                  })}
-                  target="_blank"
-                  rel="noreferrer"
+                <RailwayServiceLink
+                  projectId={projectId}
+                  serviceId={container.serviceId}
+                  environmentId={environmentId}
                 >
                   <ExternalLink aria-hidden />
                   {t("openInRailway")}
-                </a>
+                </RailwayServiceLink>
               </Button>
             </Tooltip>
           </div>
@@ -560,18 +553,14 @@ export function ContainerRow({
                     message={failureMessage}
                     actions={
                       <Button asChild variant="danger" size="sm">
-                        <a
-                          href={railwayServiceUrl({
-                            projectId,
-                            serviceId: container.serviceId,
-                            environmentId,
-                          })}
-                          target="_blank"
-                          rel="noreferrer"
+                        <RailwayServiceLink
+                          projectId={projectId}
+                          serviceId={container.serviceId}
+                          environmentId={environmentId}
                         >
                           {t("openInRailway")}
                           <ExternalLink aria-hidden />
-                        </a>
+                        </RailwayServiceLink>
                       </Button>
                     }
                   />

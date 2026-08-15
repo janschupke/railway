@@ -68,8 +68,13 @@ import {
 import { STREAM } from "../src/lib/constants.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
 import type { LogLine } from "../src/lib/railway/types.ts";
+/*
+ * Helpers only, not `openProbeSession`. This script answers its schema half before asking
+ * for a credential at all — see the note in `main` — so its refusals say "stopping before
+ * the live half", which is a different thing from "cannot start".
+ */
+import { ENDPOINT, bad, dim, ok, warn } from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
 const WS_ENDPOINT = process.env.RAILWAY_WS_URL ?? RAILWAY_DEFAULTS.WS_URL;
 
 /** How long to hold the subscription open once frames stop arriving. */
@@ -82,11 +87,6 @@ const LISTEN_MS = 8_000;
 const BURST_MS = 500;
 /** A small limit, to be compared against a large one. */
 const SMALL_LIMIT = 5;
-
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
 /**
  * Names that would make a log line addressable.

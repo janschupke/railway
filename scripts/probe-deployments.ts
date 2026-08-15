@@ -31,17 +31,12 @@
  * Read-only. The one operation below is a query.
  */
 
-import { openSession } from "../src/lib/auth/session.ts";
 import { DEPLOYMENTS_QUERY } from "../src/lib/railway/operations.ts";
 import { LIST } from "../src/lib/constants.ts";
-import { RAILWAY_DEFAULTS } from "../src/env.ts";
+import { ENDPOINT, bad, dim, ok, openProbeSession, warn } from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
-
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+const USAGE =
+  "RC_SESSION='…' pnpm probe:deployments <projectId> <environmentId> <serviceId>";
 
 type DeploymentNode = {
   id: string;
@@ -62,41 +57,19 @@ type Body = {
 const usage = (message: string) => {
   console.error(bad(message));
   console.error("  Take the three ids from a service's URL on Railway:");
-  console.error(
-    "    RC_SESSION='…' pnpm probe:deployments <projectId> <environmentId> <serviceId>\n",
-  );
+  console.error(`    ${USAGE}\n`);
   process.exit(1);
 };
 
 async function main() {
-  const cookie = process.env.RC_SESSION;
-  const secret = process.env.SESSION_SECRET;
   const [projectId, environmentId, serviceId] = process.argv.slice(2);
 
-  if (!secret) {
-    console.error(bad("SESSION_SECRET is not set."));
-    console.error("  Run through the package script, which loads .env:");
-    console.error("    RC_SESSION=… pnpm probe:deployments <ids>\n");
-    process.exit(1);
-  }
-  if (!cookie) {
-    console.error(bad("RC_SESSION is not set."));
-    console.error("  Sign in, then copy the `rc_session` cookie value:");
-    console.error("    DevTools → Application → Cookies → rc_session\n");
-    process.exit(1);
-  }
   if (!projectId || !environmentId || !serviceId) {
     usage("Needs a project id, an environment id and a service id.");
     return;
   }
 
-  const session = await openSession(cookie, secret);
-  if (!session) {
-    console.error(
-      bad("Could not open that session — wrong SESSION_SECRET, or the cookie expired."),
-    );
-    process.exit(1);
-  }
+  const session = await openProbeSession(USAGE);
 
   console.log(`\nEndpoint: ${ENDPOINT}`);
   console.log(`Service:  ${serviceId}\n`);

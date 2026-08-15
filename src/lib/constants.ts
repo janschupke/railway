@@ -759,27 +759,12 @@ export const LINKS = {
   REPOSITORY: "https://github.com/janschupke/railway",
 } as const;
 
-/**
- * One service on Railway's own dashboard.
- *
- * Built entirely from ids a container row already holds, so this escape hatch costs no
- * API call — which is the only reason it can sit on every row, as the container name.
- *
- * It is repeated inside a failed row's panel, and stays there now that the row asks
- * `deploymentEvents` for a reason. That read is best effort by design — the feed can be
- * empty, refused, or withdrawn — and the deployment query still returns a status and
- * nothing else, so "Failed" over a legitimately empty pane remains a state the app can
- * reach. Railway's own page is where the rest of it lives in every one of those branches,
- * which is why this link is unconditional rather than a fallback the reason replaces.
- *
- * The ids are Railway's rather than the user's, and encoded anyway — a link builder that
- * trusts its inputs is one refactor away from not being able to.
+/*
+ * `railwayServiceUrl` used to sit here, under `LINKS`, and it was the one thing in this
+ * file that was not a value: a builder with `encodeURIComponent` calls in a module whose
+ * whole subject is "every tuned number the application runs on". It lives in
+ * `lib/railway/links.ts` now, beside the other code that knows Railway's shapes, and reads
+ * `LINKS.RAILWAY_PROJECT` back out of here — which is the direction that keeps this file a
+ * list of values rather than a place logic accumulates because its inputs happen to live
+ * here.
  */
-export const railwayServiceUrl = (params: {
-  projectId: string;
-  serviceId: string;
-  environmentId: string;
-}): string =>
-  `${LINKS.RAILWAY_PROJECT}/${encodeURIComponent(params.projectId)}` +
-  `/service/${encodeURIComponent(params.serviceId)}` +
-  `?environmentId=${encodeURIComponent(params.environmentId)}`;

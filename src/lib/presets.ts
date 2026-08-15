@@ -314,3 +314,26 @@ export function presetVariableDefaults(
       : { name: variable.name, value: variable.value, generated: false },
   );
 }
+
+/**
+ * The catalog as options for the image combobox: value, visible label, and its group.
+ *
+ * Both forms that offer the list built this identically, which meant the grouping was a
+ * property of two components rather than of the catalog. It belongs here for the reason
+ * the header gives — the entries are read on both sides — and the translator arrives as an
+ * argument so this module still pulls in no next-intl and stays usable from the server.
+ *
+ * The parameter names the two key shapes it will ask for rather than taking any
+ * `(key: string) => string`. next-intl's translator only accepts keys it can find in the
+ * catalog, so the loose signature is the one type it cannot be passed to — and writing it
+ * this way means a preset whose `labelKey` has no entry fails here rather than at runtime.
+ */
+export function presetOptions(
+  t: (key: `labels.${PresetLabelKey}` | `groups.${PresetGroupKey}`) => string,
+): { value: string; label: string; group: string }[] {
+  return PRESETS.map((preset) => ({
+    value: preset.value,
+    label: t(`labels.${preset.labelKey}`),
+    group: t(`groups.${preset.groupKey}`),
+  }));
+}

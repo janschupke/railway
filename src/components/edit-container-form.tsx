@@ -4,8 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { editContainer } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
-import { LIMITS } from "@/lib/constants";
-import { PRESETS } from "@/lib/presets";
+import { presetOptions } from "@/lib/presets";
+import { isUnattributable, rowErrorFor } from "@/lib/variable-rows";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
 import { Combobox } from "./ui/combobox";
@@ -13,7 +13,8 @@ import { DialogClose, DialogFooter } from "./ui/dialog";
 import { Field } from "./ui/field";
 import { onSubmitWith } from "./ui/form";
 import { Input } from "./ui/input";
-import { KeyValueEditor, type KeyValueRow } from "./ui/key-value-editor";
+import { type KeyValueRow } from "./ui/key-value-editor";
+import { VariableEditor } from "./variable-editor";
 import { PendingStatus, Spinner } from "./ui/misc";
 import { Text } from "./ui/text";
 
@@ -35,9 +36,6 @@ const seedRows = (names: string[]): KeyValueRow[] =>
     value: "",
     blankMeans: "unchanged" as const,
   }));
-
-const isVariableField = (field: string | undefined) =>
-  field === "variableKey" || field === "variableValue";
 
 /**
  * The edit form itself, mounted only while its dialog is open.
@@ -112,27 +110,9 @@ export function EditContainerForm({
     return () => controller.abort();
   }, [projectId, environmentId, serviceId]);
 
-  const presetOptions = PRESETS.map((preset) => ({
-    value: preset.value,
-    label: tPresets(`labels.${preset.labelKey}`),
-    group: tPresets(`groups.${preset.groupKey}`),
-  }));
+  const imageOptions = presetOptions(tPresets);
 
-  /*
-   * Rows that actually reach FormData, in the order they reach it — a blank row carries no
-   * `name` attribute and is not submitted at all, so an error's index counts over this list
-   * rather than over what is on screen. Same rule as spin-up.
-   */
-  const submittedRows = rows.filter((row) => row.name !== "" || row.value !== "");
-
-  const rowError =
-    result && !result.ok && isVariableField(result.field) && result.index !== undefined
-      ? {
-          rowId: submittedRows[result.index]?.id ?? "",
-          cell: result.field === "variableKey" ? ("name" as const) : ("value" as const),
-          message: result.error,
-        }
-      : undefined;
+  const rowError = rowErrorFor(result, rows);
 
   const fieldError = (field: "name" | "image") =>
     result && !result.ok && result.field === field ? result.error : undefined;
@@ -145,17 +125,8 @@ export function EditContainerForm({
         onDone(outcome.message);
         return;
       }
-      /*
-       * Field-attributed errors render inline beside the input instead — except a variable
-       * error with no row to attach it to (too many rows, too large together), which would
-       * otherwise be swallowed silently. Same split as the spin-up form.
-       */
-      if (
-        !outcome.field ||
-        (isVariableField(outcome.field) && outcome.index === undefined)
-      ) {
-        onError(outcome.error);
-      }
+      // Everything else renders inline beside its own input. See isUnattributable.
+      if (isUnattributable(outcome)) onError(outcome.error);
     });
   };
 
@@ -191,7 +162,7 @@ export function EditContainerForm({
         name="image"
         value={imageRef}
         onValueChange={setImageRef}
-        options={presetOptions}
+        options={imageOptions}
         noMatchesLabel={t("imageNoMatches")}
         toggleLabel={t("imageToggle")}
         listLabel={t("imageListLabel")}
@@ -216,35 +187,11 @@ export function EditContainerForm({
       )}
 
       {variables.status === "ready" && (
-        <KeyValueEditor
-          legend={t("variablesLegend")}
+        <VariableEditor
           description={t("variablesDescription")}
           rows={rows}
           onRowsChange={setRows}
-          nameFieldName="variableKey"
-          valueFieldName="variableValue"
-          nameLabel={t("variableNameLabel")}
-          valueLabel={t("variableValueLabel")}
-          namePlaceholder={t("variableNamePlaceholder")}
-          valuePlaceholder={t("variableValuePlaceholder")}
-          generatedPlaceholder={t("variableGeneratedPlaceholder")}
-          unchangedPlaceholder={t("variableExistingPlaceholder")}
-          addLabel={t("addVariable")}
-          removeLabel={({ name: rowName, position }) =>
-            rowName
-              ? t("removeVariable", { name: rowName })
-              : t("removeVariableUnnamed", { position })
-          }
-          cellLabel={({ label, position }) => `${label} ${position}`}
-          addedAnnouncement={(position) => t("variableAdded", { position })}
-          removedAnnouncement={({ name: rowName, position }) =>
-            rowName
-              ? t("variableRemoved", { name: rowName })
-              : t("variableRemovedUnnamed", { position })
-          }
           error={rowError}
-          max={LIMITS.VARIABLES_MAX}
-          maxReachedLabel={t("variablesFull")}
         />
       )}
 

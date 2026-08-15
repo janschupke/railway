@@ -50,44 +50,17 @@
  * permanent, and re-running against a different plan is a reasonable thing to do.
  */
 
-import { openSession } from "../src/lib/auth/session.ts";
-import { RAILWAY_DEFAULTS } from "../src/env.ts";
+import {
+  ENDPOINT,
+  bad,
+  dim,
+  ok,
+  openProbeSession,
+  postGraphQL,
+  warn,
+} from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
-
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-
-type GraphQLBody = {
-  data?: unknown;
-  errors?: Array<{
-    message: string;
-    path?: Array<string | number>;
-    extensions?: { code?: string };
-  }>;
-};
-
-async function run(
-  token: string,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<GraphQLBody> {
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  try {
-    return (await response.json()) as GraphQLBody;
-  } catch {
-    return { errors: [{ message: `non-JSON response (HTTP ${response.status})` }] };
-  }
-}
+const USAGE = "RC_SESSION='<value>' pnpm probe:metrics <projectId> <environmentId>";
 
 /**
  * The window every metrics source below reads.
@@ -218,7 +191,7 @@ const TYPE_FIELDS = `query TypeFields($name: String!) {
 }`;
 
 async function introspectType(token: string, name: string) {
-  const body = (await run(token, TYPE_FIELDS, { name })) as {
+  const body = (await postGraphQL(token, TYPE_FIELDS, { name })) as {
     data?: {
       __type?: {
         kind: string;
@@ -244,44 +217,19 @@ async function introspectType(token: string, name: string) {
 }
 
 async function main() {
-  const cookie = process.env.RC_SESSION;
-  const secret = process.env.SESSION_SECRET;
   const [projectId, environmentId] = process.argv.slice(2);
 
-  if (!secret) {
-    console.error(bad("SESSION_SECRET is not set."));
-    console.error("  Run through the package script, which loads .env:");
-    console.error("    RC_SESSION=… pnpm probe:metrics <projectId> <environmentId>\n");
-    process.exit(1);
-  }
-  if (!cookie) {
-    console.error(bad("RC_SESSION is not set."));
-    console.error("  Sign in, then copy the `rc_session` cookie value:");
-    console.error("    DevTools → Application → Cookies → rc_session\n");
-    console.error(
-      "    RC_SESSION='<value>' pnpm probe:metrics <projectId> <environmentId>\n",
-    );
-    process.exit(1);
-  }
   if (!projectId || !environmentId) {
     console.error(bad("A project id and an environment id are required."));
     console.error(
       "  Both are in the dashboard URL: /dashboard?project=…&environment=…",
     );
     console.error("  Or run `pnpm probe:projects` first, which prints them.\n");
-    console.error(
-      "    RC_SESSION='<value>' pnpm probe:metrics <projectId> <environmentId>\n",
-    );
+    console.error(`    ${USAGE}\n`);
     process.exit(1);
   }
 
-  const session = await openSession(cookie, secret);
-  if (!session) {
-    console.error(
-      bad("Could not open that session — wrong SESSION_SECRET, or the cookie expired."),
-    );
-    process.exit(1);
-  }
+  const session = await openProbeSession(USAGE);
 
   console.log(`\nEndpoint: ${ENDPOINT}`);
   console.log(`Project:  ${projectId}`);
@@ -293,7 +241,7 @@ async function main() {
 
   console.log("\nSources");
   for (const source of sources(projectId, environmentId)) {
-    const body = await run(session.accessToken, source.query, source.variables);
+    const body = await postGraphQL(session.accessToken, source.query, source.variables);
 
     for (const error of body.errors ?? []) {
       /*

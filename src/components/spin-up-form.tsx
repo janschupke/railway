@@ -16,15 +16,15 @@ import { useImageCheck } from "@/hooks/use-image-check";
 import { useResolved } from "@/hooks/use-resolved";
 import { spinUp } from "@/app/dashboard/actions";
 import type { ActionField, ActionResult } from "@/lib/action-result";
-import { LIMITS } from "@/lib/constants";
 import {
   DEFAULT_IMAGE,
-  PRESETS,
   presetFor,
   httpPortFor,
+  presetOptions,
   presetVariableDefaults,
   presetVolumeFor,
 } from "@/lib/presets";
+import { isUnattributable, rowErrorFor } from "@/lib/variable-rows";
 import { newIdempotencyKey } from "@/lib/random-id";
 import { managedSlug } from "@/lib/railway/slug";
 import type { RegionOption } from "@/lib/railway/types";
@@ -35,7 +35,8 @@ import { Combobox } from "./ui/combobox";
 import { Disclosure } from "./ui/disclosure";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
-import { KeyValueEditor, type KeyValueRow } from "./ui/key-value-editor";
+import { type KeyValueRow } from "./ui/key-value-editor";
+import { VariableEditor } from "./variable-editor";
 import { PendingStatus } from "./ui/misc";
 import { Text } from "./ui/text";
 import { useToast } from "./ui/toast";
@@ -77,9 +78,6 @@ const portFor = (image: string): string => {
   return known === undefined ? "" : String(known);
 };
 
-const isVariableField = (field: string | undefined) =>
-  field === "variableKey" || field === "variableValue";
-
 /**
  * The fields that live behind the Advanced disclosure.
  *
@@ -102,9 +100,6 @@ export const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
 
 /** A stable empty list, so the resolved-name seed is not a new array every render. */
 const NO_NAMES: readonly string[] = [];
-
-/** Whether a failure names a row, as opposed to the list as a whole. */
-const hasIndex = (result: ActionResult) => !result.ok && result.index !== undefined;
 
 /**
  * The rows an image change should leave behind.
@@ -267,11 +262,7 @@ export function SpinUpForm({
    * editor's default rows, and in the Server Action to decide which names it may mint a
    * credential for. See presetVariableDefaults() and resolveVariables().
    */
-  const presetOptions = PRESETS.map((preset) => ({
-    value: preset.value,
-    label: tPresets(`labels.${preset.labelKey}`),
-    group: tPresets(`groups.${preset.groupKey}`),
-  }));
+  const imageOptions = presetOptions(tPresets);
   // Uncontrolled: nothing else reads the name, so clearing it on success is a DOM
   // write rather than a setState inside an effect.
   const nameRef = useRef<HTMLInputElement>(null);
@@ -284,24 +275,7 @@ export function SpinUpForm({
    */
   const failedTitle = t("failedTitle");
 
-  /*
-   * Rows that actually reach FormData, in the order they reach it. A blank row carries no
-   * `name` attribute and so is not submitted at all, which is why an error's index counts
-   * over this list rather than over what is on screen.
-   */
-  const submittedRows = rows.filter((row) => row.name !== "" || row.value !== "");
-
-  const rowError =
-    result &&
-    !result.ok &&
-    (result.field === "variableKey" || result.field === "variableValue") &&
-    result.index !== undefined
-      ? {
-          rowId: submittedRows[result.index]?.id ?? "",
-          cell: result.field === "variableKey" ? ("name" as const) : ("value" as const),
-          message: result.error,
-        }
-      : undefined;
+  const rowError = rowErrorFor(result, rows);
 
   useEffect(() => {
     if (!result) return;
@@ -337,12 +311,8 @@ export function SpinUpForm({
        * nothing else here reads it.
        */
       if (advancedRef.current) advancedRef.current.open = true;
-    } else if (!result.field || (isVariableField(result.field) && !hasIndex(result))) {
-      /*
-       * Field-attributed errors render inline next to the input instead — except a
-       * variable error with no row to attach it to (too many rows, too large together),
-       * which would otherwise be swallowed silently.
-       */
+    } else if (isUnattributable(result)) {
+      // Everything else renders inline next to its own input. See isUnattributable.
       toast({ title: failedTitle, description: result.error, tone: "error" });
     }
   }, [result, router, toast, failedTitle, startRefresh]);
@@ -475,7 +445,7 @@ export function SpinUpForm({
               name="image"
               value={image}
               onValueChange={changeImage}
-              options={presetOptions}
+              options={imageOptions}
               placeholder={t("imagePlaceholder")}
               noMatchesLabel={t("imageNoMatches")}
               toggleLabel={t("imageToggle")}
@@ -578,34 +548,11 @@ export function SpinUpForm({
           spec pins Image → Tab → Name, so an editor rendered between them would break a
           tab order someone deliberately fixed.
         */}
-        <KeyValueEditor
-          legend={t("variablesLegend")}
+        <VariableEditor
           description={t("variablesDescription")}
           rows={rows}
           onRowsChange={changeRows}
-          nameFieldName="variableKey"
-          valueFieldName="variableValue"
-          nameLabel={t("variableNameLabel")}
-          valueLabel={t("variableValueLabel")}
-          namePlaceholder={t("variableNamePlaceholder")}
-          valuePlaceholder={t("variableValuePlaceholder")}
-          generatedPlaceholder={t("variableGeneratedPlaceholder")}
-          addLabel={t("addVariable")}
-          removeLabel={({ name, position }) =>
-            name
-              ? t("removeVariable", { name })
-              : t("removeVariableUnnamed", { position })
-          }
-          cellLabel={({ label, position }) => `${label} ${position}`}
-          addedAnnouncement={(position) => t("variableAdded", { position })}
-          removedAnnouncement={({ name, position }) =>
-            name
-              ? t("variableRemoved", { name })
-              : t("variableRemovedUnnamed", { position })
-          }
           error={rowError}
-          max={LIMITS.VARIABLES_MAX}
-          maxReachedLabel={t("variablesFull")}
           disabled={disabled}
         />
 

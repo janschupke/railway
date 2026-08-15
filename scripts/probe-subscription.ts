@@ -38,14 +38,14 @@ import {
   PROJECT_QUERY,
 } from "../src/lib/railway/operations.ts";
 import { RAILWAY_DEFAULTS } from "../src/env.ts";
+/*
+ * Helpers only, not `openProbeSession`. This is the one probe that accepts
+ * `RAILWAY_TOKEN` as well — see `credential` below, which explains why an account token is
+ * enough to prove a capability exists and never that this app could use it.
+ */
+import { ENDPOINT, bad, dim, ok, warn } from "./probe-support.ts";
 
-const ENDPOINT = process.env.RAILWAY_API_URL ?? RAILWAY_DEFAULTS.API_URL;
 const WS_ENDPOINT = process.env.RAILWAY_WS_URL ?? RAILWAY_DEFAULTS.WS_URL;
-
-const ok = (s: string) => `\x1b[32m✓\x1b[0m ${s}`;
-const bad = (s: string) => `\x1b[31m✗\x1b[0m ${s}`;
-const warn = (s: string) => `\x1b[33m!\x1b[0m ${s}`;
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
 /** How long to wait for the first push before calling it silence. */
 const FIRST_MESSAGE_TIMEOUT_MS = 15_000;

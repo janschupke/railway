@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, Info, Pencil } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { railwayServiceUrl } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
 import type {
   Container,
@@ -14,6 +13,7 @@ import type {
 } from "@/lib/railway/types";
 import { ContainerMetricsReadout } from "./container-metrics";
 import { EditContainerForm } from "./edit-container-form";
+import { RailwayServiceLink } from "./railway-service-link";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
 import {
@@ -121,12 +121,6 @@ export function ContainerDetailDialog({
    * id alone, so it re-attaches on its own once the row re-renders with the new one.
    */
   const [refreshing, startRefresh] = useTransition();
-
-  const railwayUrl = railwayServiceUrl({
-    projectId,
-    serviceId: container.serviceId,
-    environmentId,
-  });
 
   /** Only a managed container has an edit mode to be in. */
   const canEdit = container.managed && !disabled;
@@ -282,10 +276,14 @@ export function ContainerDetailDialog({
             {!editing && (
               <div className="mt-auto flex flex-wrap justify-end gap-2 pt-2">
                 <Button asChild variant="secondary" size="sm">
-                  <a href={railwayUrl} target="_blank" rel="noreferrer">
+                  <RailwayServiceLink
+                    projectId={projectId}
+                    serviceId={container.serviceId}
+                    environmentId={environmentId}
+                  >
                     <ExternalLink aria-hidden />
                     {tContainers("openInRailway")}
-                  </a>
+                  </RailwayServiceLink>
                 </Button>
 
                 {/*
