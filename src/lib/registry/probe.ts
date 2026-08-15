@@ -2,7 +2,8 @@ import "server-only";
 
 import { REGISTRY } from "@/lib/constants";
 import { parseImageReference, type ImageCheckStatus } from "./reference";
-import { registryFor, type RegistryEndpoints, type RegistryId } from "./registries";
+import { registryFor, type RegistryEndpoints } from "./registries";
+import { coolingOff, readCache, startCoolOff, writeCache } from "./answer-cache";
 
 /**
  * Manifest media types this app will accept.
@@ -18,65 +19,6 @@ const ACCEPT = [
   "application/vnd.oci.image.manifest.v1+json",
   "application/vnd.docker.distribution.manifest.v2+json",
 ].join(", ");
-
-type CacheEntry = { status: ImageCheckStatus; expiresAt: number };
-
-/*
- * Two process-global maps, and the usual caveats apply to both.
- *
- * Per replica, like the stream-slot counter in lib/stream-slots.ts and for the same reason
- * (docs/limitations.md). Reset by `next dev`'s module reloading and not in
- * production. And there is exactly one copy of each, because src/proxy.ts does not import
- * this module — the two-instances-across-the-proxy-boundary hazard in architecture.md
- * applies to anything it does.
- *
- * The answer cache is deliberately shared across users rather than keyed per session. Every
- * entry is an anonymous answer about a public repository: there is nothing per-user in it,
- * so partitioning it would multiply this server's egress by the number of people typing the
- * same reference for no privacy gained.
- */
-const answers = new Map<string, CacheEntry>();
-const cooloffs = new Map<RegistryId, number>();
-
-/** Test-only. Both maps outlive a test file otherwise, and one case would seed the next. */
-export function __resetRegistryCache(): void {
-  answers.clear();
-  cooloffs.clear();
-}
-
-function readCache(key: string): ImageCheckStatus | null {
-  const hit = answers.get(key);
-  if (!hit) return null;
-  if (hit.expiresAt <= Date.now()) {
-    answers.delete(key);
-    return null;
-  }
-  return hit.status;
-}
-
-function writeCache(key: string, status: ImageCheckStatus): void {
-  const ttl = status === "unknown" ? REGISTRY.UNKNOWN_TTL_MS : REGISTRY.ANSWER_TTL_MS;
-  // Delete first so a refreshed key moves to the back of the insertion order and the
-  // eviction below stays least-recently-written rather than least-recently-read.
-  answers.delete(key);
-  answers.set(key, { status, expiresAt: Date.now() + ttl });
-
-  while (answers.size > REGISTRY.CACHE_MAX_ENTRIES) {
-    const oldest = answers.keys().next();
-    if (oldest.done) break;
-    answers.delete(oldest.value);
-  }
-}
-
-const coolingOff = (id: RegistryId): boolean => {
-  const until = cooloffs.get(id);
-  if (until === undefined) return false;
-  if (until <= Date.now()) {
-    cooloffs.delete(id);
-    return false;
-  }
-  return true;
-};
 
 /**
  * An anonymous pull token.
@@ -216,7 +158,7 @@ async function probe(
     if (response.status === 404) return "unavailable";
     if (response.status === 401 || response.status === 403) return "unavailable";
     if (response.status === 429) {
-      cooloffs.set(registry.id, Date.now() + REGISTRY.COOLOFF_MS);
+      startCoolOff(registry.id);
       return "unknown";
     }
     return "unknown";

@@ -12,7 +12,8 @@ import {
 } from "vitest";
 import { REGISTRY } from "@/lib/constants";
 import { __resetEnv } from "@/env";
-import { checkImage, __resetRegistryCache } from "./probe";
+import { __resetRegistryCache } from "./answer-cache";
+import { checkImage } from "./probe";
 
 const ORIGINAL = { ...process.env };
 const server = setupServer();
