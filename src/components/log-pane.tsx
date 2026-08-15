@@ -25,7 +25,7 @@ import {
 } from "@/lib/log-view";
 import { cn } from "@/lib/utils";
 import type { StreamStatus } from "@/hooks/use-deployment-stream";
-import type { LogLine } from "@/lib/railway/types";
+import type { BufferedLine } from "@/hooks/use-deployment-stream";
 import { LogPaneToolbar } from "./log-pane-toolbar";
 import { DialogContent, DialogRoot } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
@@ -83,7 +83,7 @@ const LogRow = memo(function LogRow({
   wrap,
   noTimestamp,
 }: {
-  line: LogLine;
+  line: BufferedLine;
   matches: LineMatch[] | undefined;
   current: number;
   wrap: boolean;
@@ -175,7 +175,7 @@ export function LogPane({
   emptyLabel,
   label,
 }: {
-  lines: LogLine[];
+  lines: BufferedLine[];
   status: StreamStatus;
   /** What "connected and quiet" means here; ignored in the other two states. */
   emptyLabel?: string;
@@ -475,7 +475,7 @@ export function LogPane({
         <div className="text-mono font-mono">
           {visible.map((line, i) => (
             <LogRow
-              key={`${line.timestamp}-${i}`}
+              key={line.id}
               line={line}
               matches={index.byLine.get(i)}
               current={index.lineOf[current] === i ? current : -1}

@@ -10,13 +10,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { UI } from "@/lib/constants";
 import { clipboardMock } from "@/test/setup-dom";
-import type { LogLine } from "@/lib/railway/types";
+import type { BufferedLine } from "@/hooks/use-deployment-stream";
 import { LogPane } from "./log-pane";
 import { ToastProvider } from "./ui/toast";
 import { TooltipProvider } from "./ui/tooltip";
 
-const lines = (count: number): LogLine[] =>
+/**
+ * A run of lines, each with an id of its own.
+ *
+ * The pane keys rows on `id` rather than on position — see BufferedLine — so the ids are
+ * what make a rerender with one more line a rerender of the same rows plus one, which is
+ * the property several cases below are about.
+ */
+const lines = (count: number): BufferedLine[] =>
   Array.from({ length: count }, (_, i) => ({
+    id: i,
     timestamp: `2026-08-12T10:00:0${i % 10}Z`,
     message: `line ${i}`,
   }));
@@ -69,6 +77,9 @@ function stubRows(height = 100) {
     Object.defineProperty(row, "offsetHeight", { value: height, configurable: true });
   });
 }
+
+/** Enough rows for the window to actually roll, without rendering a full thousand. */
+const UI_BUFFER = 200;
 
 const viewport = () => screen.getByRole("log");
 const rows = () => [...document.querySelectorAll<HTMLElement>("[data-log-row]")];
@@ -124,7 +135,7 @@ describe("LogPane", () => {
 
   it("renders each line with its clock time", () => {
     renderPane({
-      lines: [{ timestamp: "2026-08-12T10:34:56Z", message: "boot" }],
+      lines: [{ id: 1, timestamp: "2026-08-12T10:34:56Z", message: "boot" }],
       status: "live",
     });
 
@@ -133,8 +144,39 @@ describe("LogPane", () => {
   });
 
   it("falls back to placeholder digits for a line with no timestamp", () => {
-    renderPane({ lines: [{ timestamp: "", message: "orphan" }], status: "live" });
+    renderPane({
+      lines: [{ id: 2, timestamp: "", message: "orphan" }],
+      status: "live",
+    });
     expect(screen.getByText("--:--:--")).toBeInTheDocument();
+  });
+
+  it("keeps its rows when the buffer rolls, rather than rebuilding all of them", () => {
+    /*
+     * The one thing a rolling buffer does not preserve is position, and rows used to be
+     * keyed by it — `${line.timestamp}-${i}`. Past MAX_BUFFERED_LINES every arriving line
+     * shifts every index, so every key changed and React discarded and rebuilt the whole
+     * pane, worst exactly when the buffer was largest and the stream busiest. Measured at
+     * the time: zero of a thousand DOM nodes survived one new line. It is 999 now, the one
+     * casualty being the line that genuinely arrived.
+     *
+     * Asserted on the DOM nodes rather than on render counts, because the node identity is
+     * the thing that costs — a rebuilt row loses its layout, its text selection and its
+     * <mark> elements.
+     */
+    const full = lines(UI_BUFFER);
+    const { rerender } = renderPane({ lines: full, status: "live" });
+    const before = rows();
+    expect(before).toHaveLength(UI_BUFFER);
+
+    // The window slides by one: the oldest line drops off, a new one arrives.
+    rerender({
+      lines: [...full.slice(1), { id: UI_BUFFER, timestamp: "", message: "newest" }],
+      status: "live",
+    });
+
+    const survivors = rows().filter((node) => before.includes(node));
+    expect(survivors).toHaveLength(UI_BUFFER - 1);
   });
 
   it("stays pinned to the tail while the reader is at the bottom", () => {
@@ -356,9 +398,14 @@ describe("LogPane wrap", () => {
 });
 
 describe("LogPane severity filter", () => {
-  const mixed: LogLine[] = [
-    { timestamp: "2026-08-12T10:00:00Z", message: "starting", severity: "info" },
-    { timestamp: "2026-08-12T10:00:01Z", message: "pull failed", severity: "error" },
+  const mixed: BufferedLine[] = [
+    { id: 3, timestamp: "2026-08-12T10:00:00Z", message: "starting", severity: "info" },
+    {
+      id: 4,
+      timestamp: "2026-08-12T10:00:01Z",
+      message: "pull failed",
+      severity: "error",
+    },
   ];
 
   it("renders no filter at all when nothing carries a severity", () => {
@@ -429,8 +476,14 @@ describe("LogPane copy and download", () => {
   it("copies only what the severity filter left on screen", async () => {
     renderPane({
       lines: [
-        { timestamp: "2026-08-12T10:00:00Z", message: "starting", severity: "info" },
         {
+          id: 5,
+          timestamp: "2026-08-12T10:00:00Z",
+          message: "starting",
+          severity: "info",
+        },
+        {
+          id: 101,
           timestamp: "2026-08-12T10:00:01Z",
           message: "pull failed",
           severity: "error",
@@ -531,8 +584,9 @@ describe("LogPane severity colouring", () => {
    * message: a line reading "retrying after error" is not an error line, and a heuristic
    * that tints it is a wrong answer delivered confidently.
    */
-  const withSeverity = (severity: string | null): LogLine[] => [
+  const withSeverity = (severity: string | null): BufferedLine[] => [
     {
+      id: 102,
       timestamp: "2026-08-12T10:00:00Z",
       message: "something happened",
       ...(severity === null ? {} : { severity }),

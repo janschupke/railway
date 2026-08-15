@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { STREAM } from "@/lib/constants";
 import type { ContainerState, LogLine } from "@/lib/railway/types";
 
@@ -12,12 +12,28 @@ import type { ContainerState, LogLine } from "@/lib/railway/types";
  * A deployment that succeeded with no log output therefore sat on "Connecting…" forever,
  * with a clean 200, no console error and no failed request to look at.
  */
+/**
+ * A log line with an identity of its own.
+ *
+ * `LogLine` is the wire shape and carries nothing stable: two lines can share a timestamp
+ * and nothing distinguishes them, so a row could only ever be keyed by its position. That
+ * is the one thing a rolling buffer does not preserve. Past MAX_BUFFERED_LINES every
+ * arriving line shifts every index, so every key changed, and React discarded and rebuilt
+ * a thousand rows — measured at zero of a thousand DOM nodes reused — precisely when the
+ * buffer was largest and the pane was busiest.
+ *
+ * Minted here rather than on the server: nothing on the wire has one, and this is where a
+ * line enters the buffer whose ordering the id has to describe. A counter rather than a
+ * random id because it is per-attachment and never leaves the browser.
+ */
+export type BufferedLine = LogLine & { id: number };
+
 export type StreamStatus = "connecting" | "live" | "closed";
 
 export type StreamState = {
   state: ContainerState | null;
   rawStatus: string | null;
-  logs: LogLine[];
+  logs: BufferedLine[];
   status: StreamStatus;
   done: boolean;
   warning: string | null;
@@ -77,6 +93,16 @@ export function useDeploymentStream(
   }>({ key: null, state: INITIAL });
 
   /*
+   * Monotonic, and deliberately never reset — not on a phase re-dial, not on a discard.
+   *
+   * A build that finishes re-dials this stream against the deploy subscription while the
+   * accumulated lines stay put, so a counter restarting at 0 would hand the next arrival
+   * an id a line already in the buffer is holding. Two rows with one key is a worse defect
+   * than the shifting keys this replaces: React reuses the wrong DOM node.
+   */
+  const nextId = useRef(0);
+
+  /*
    * Discarding this attachment's state is its own effect, keyed on the deployment alone.
    *
    * That is what separates "the row collapsed, throw everything away" from "same
@@ -130,7 +156,9 @@ export function useDeploymentStream(
       if (!line) return;
       update((s) => ({
         ...s,
-        logs: [...s.logs, line].slice(-STREAM.MAX_BUFFERED_LINES),
+        logs: [...s.logs, { ...line, id: nextId.current++ }].slice(
+          -STREAM.MAX_BUFFERED_LINES,
+        ),
       }));
     });
 

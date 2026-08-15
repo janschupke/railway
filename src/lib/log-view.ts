@@ -99,8 +99,12 @@ export function bufferSeverities(lines: LogLine[]): string[] {
  * Returns the input array BY IDENTITY when nothing is selected, which the caller's memo
  * chain depends on: the common case — no severity anywhere, so no selection possible —
  * must not produce a fresh array per render and invalidate the match index behind it.
+ *
+ * Generic in the line, so the pane's `BufferedLine` survives the filter. The severity rule
+ * reads one field and the identity return hands the same objects back, so widening this
+ * costs nothing — but narrowing to `LogLine` would strip the id every row is keyed on.
  */
-export function visibleLines(lines: LogLine[], severities: string[]): LogLine[] {
+export function visibleLines<T extends LogLine>(lines: T[], severities: string[]): T[] {
   if (severities.length === 0) return lines;
   return lines.filter((line) => {
     const value = line.severity?.trim().toLowerCase();
