@@ -85,10 +85,14 @@ This failed silently for every cookie the app removes. Sign out did not sign any
 the session survived, the redirect to `/` found it, and `/` sent the user back to the
 dashboard. Neither dev nor the e2e suite can see it — both run on `http://localhost`,
 where `hostCookieName` returns unprefixed names and a plain delete works — so
-`src/cookie-removal.test.ts` bans the call structurally instead, across every jar. It was
+`local/no-cookie-jar-delete` bans the call structurally instead, across every jar. It was
 one regex over the literal `response.cookies.delete` for a while, and `clearSession()` in
 `src/lib/auth/server.ts` sat outside it for exactly as long, deleting the session cookie
-off the `next/headers` jar.
+off the `next/headers` jar. It is a lint rule rather than a scan because the alias form is
+the one that matters: `const jar = await cookies(); jar.delete(…)` needs the binding
+resolved, and the regex standing in for that recognised only `const|let|var … = await
+cookies(`. What `src/cookie-removal.test.ts` still asserts is what `clearCookie` writes,
+which is a property of a function and is checked by calling it.
 
 ## Upstream failure text never reaches the browser
 

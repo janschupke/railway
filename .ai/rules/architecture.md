@@ -149,9 +149,17 @@ That is five verbs now — destroy, stop, restart, redeploy, edit — and they s
 `withManagedContainer` in `src/app/dashboard/actions.ts` parses the three ids, re-reads the
 container list from Railway, and refuses before the verb's own callback runs. A second copy
 of that check is the thing to refuse in review, because the weaker copy is the one that
-would ship. `src/lib/railway/mutation-callsites.test.ts` asserts the shape structurally:
-each mutation is reachable from that file and nowhere else, `!target.managed` appears in it
-exactly once, and every mutation call sits below it.
+would ship. Two lint rules assert the shape structurally, and neither is sufficient alone:
+`no-restricted-imports` lets only `src/app/dashboard/**` import a mutation from
+`lib/railway/api`, and `local/mutation-inside-ownership-guard` requires each call to sit
+inside `withManagedContainer`'s callback. The first alone would let the write lane act on
+an unchecked id; the second alone would let any module act as long as it opened a guard.
+
+The batch is the one shape that satisfies neither by containment, and it is allowed for a
+stronger reason than position. `destroyMany` reads the container list once and calls
+`resolveManagedTarget` per id, so what refuses a forged id is the type: `ManagedResolution`
+is a discriminated union, and `.target` does not exist on the branch where `managed` is
+false. The rule recognises a function that calls a resolver as having done the check.
 
 **The deployment id is derived, never posted.** A lifecycle action reads it off the
 container it just re-derived ownership from, so a forged deployment id is refused by the
@@ -388,8 +396,9 @@ plus one more client-supplied header to remember to overwrite. Re-derive on both
 
 **A route handler may name neither `request.url` nor `APP_URL`.** Behind Railway's proxy
 the first is the container's own address, and the second is one configured domain rather
-than the one this request arrived at. `src/app/redirect-origin.test.ts` enforces both over
-every `route.ts` and explains what each mistake looked like in production.
+than the one this request arrived at. Both are `no-restricted-syntax` selectors in
+`eslint.config.mjs` scoped to `src/app/**/route.ts`, and each message explains what the
+mistake looked like in production.
 
 **A refusal never logs the host it refused.** It is caller input, so the record carries a
 bounded reason (`absent`, `unparseable`, `insecure`, `not_allowlisted`); the configured

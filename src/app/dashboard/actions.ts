@@ -794,8 +794,9 @@ type ManagedResolution =
 /**
  * The ownership boundary itself, for exactly one service.
  *
- * The only `!target.managed` in this file, which `mutation-callsites.test.ts` asserts by
- * counting. It is a function rather than two lines inside `withManagedContainer` because
+ * The resolver, and one of the two things `local/mutation-inside-ownership-guard`
+ * recognises as having done the check. It is a function rather than two lines inside
+ * `withManagedContainer` because
  * destroy can now be asked about several services at once, and the alternative was a second
  * copy of "find the service, refuse an unmanaged one" written for the batch — the second
  * implementation that rule exists to prevent, and the one that would have been subtly weaker
@@ -824,8 +825,8 @@ function resolveManagedTarget(
  * a second implementation of "re-derive ownership from Railway's own response" is a second
  * chance to get it subtly wrong, and nothing in the types would notice. Everything a
  * lifecycle verb does differently happens inside `run`, after this has already decided the
- * caller may act on this service. `mutation-callsites.test.ts` asserts there is exactly one
- * `!target.managed` in this file and that every infrastructure-changing call sits below it.
+ * caller may act on this service. `local/mutation-inside-ownership-guard` asserts that
+ * every infrastructure-changing call sits inside the callback this hands the target to.
  *
  * The deployment id is deliberately not a form field. It comes off `target`, which is
  * Railway's answer to this request — the client posts a service id and nothing else is
@@ -1236,14 +1237,19 @@ async function destroyMany(formData: FormData): Promise<ActionResult> {
  * different argument. See `redeployContainer`.
  *
  * **The mutation is branched on rather than passed in, and that is not a style choice.**
- * Taking `mutate` as a parameter removed the literal `stopDeployment(` and
- * `restartDeployment(` from this file, and `mutation-callsites.test.ts` reads exactly that:
- * it asserts every infrastructure-changing call appears textually below the one
- * `!target.managed` guard. An indirect call satisfies nothing it can see, so the first
- * version of this helper turned a verified structural property into an unverified one while
- * every behavioural test stayed green. The test caught it. Two lines of branch is the price
- * of the guard staying checkable, and it is worth paying on a path that changes somebody
- * else's infrastructure.
+ * Taking `mutate` as a parameter removes the literal `stopDeployment(` and
+ * `restartDeployment(` from this file, and both the byte-offset test this used to answer to
+ * and `local/mutation-inside-ownership-guard` that replaced it are name-based: a rule looks
+ * for a call whose callee is one of the mutations, and `mutate(deploymentId)` is not one.
+ * The names would survive only as bare identifiers in an argument list, which no call-site
+ * check can see. The first version of this helper turned a verified structural property
+ * into an unverified one while every behavioural test stayed green.
+ *
+ * Worth stating plainly, because moving the check into the linter lifted the *layout*
+ * constraint and not this one: the mutations may now live in any module, but a mutation
+ * reached indirectly is still a mutation nothing is checking. Two lines of branch is the
+ * price of the guard staying checkable, and it is worth paying on a path that changes
+ * somebody else's infrastructure.
  */
 function deploymentAction(
   verb: "stop" | "restart",

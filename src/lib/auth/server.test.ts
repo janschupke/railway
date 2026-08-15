@@ -16,8 +16,8 @@ const jar = {
     store.set(args[0], args[1]),
   ),
   // No `delete`. The jar this stands in for has one, and using it is the defect
-  // src/cookie-removal.test.ts bans; a mock without it turns a re-introduction into a
-  // TypeError here as well as an offender there.
+  // local/no-cookie-jar-delete bans; a mock without it turns a re-introduction into a
+  // TypeError here as well as a lint error there.
 };
 /**
  * The request headers this render was handed, which now decide the cookie's name.

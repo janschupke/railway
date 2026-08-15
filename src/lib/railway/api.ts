@@ -1144,9 +1144,9 @@ export async function destroyContainer(
  * data is a second act the user has to be offered. `spinDown` asks; this performs.
  *
  * Checks nothing itself, exactly as `destroyContainer` checks nothing. The guard is the
- * `MANAGED_PREFIX` re-derivation in the one caller, and `mutation-callsites.test.ts` is what
- * holds that property — a call graph no type defends. See ADR-14 for why a volume's owner is
- * the service it is mounted on.
+ * `MANAGED_PREFIX` re-derivation in its callers, and `local/mutation-inside-ownership-guard`
+ * is what holds that property — a call graph no type defends. See ADR-14 for why a volume's
+ * owner is the service it is mounted on.
  */
 export async function deleteVolume(
   accessToken: string,

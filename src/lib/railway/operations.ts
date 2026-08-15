@@ -631,11 +631,11 @@ export const VOLUME_CREATE_MUTATION: TypedDocument<
 /**
  * Delete a volume, and with it everything written to it.
  *
- * Reached from exactly one place — the destroy action, below the ownership check, and only
- * when the confirmation dialog's checkbox said so. `mutation-callsites.test.ts` asserts that
- * structurally, the same way it does for `serviceDelete`.
+ * Reached from one place — the destroy action, inside the ownership guard, and only when
+ * the confirmation dialog's checkbox said so. `local/mutation-inside-ownership-guard`
+ * asserts that structurally, the same way it does for `serviceDelete`.
  *
- * The ownership argument is ADR-13 and it is worth restating here, because this is the call
+ * The ownership argument is ADR-14 and it is worth restating here, because this is the call
  * that acts on it: a volume's owner is **the service it is mounted on**, not its name. This
  * app creates a volume only as a step of creating a service, the service carries the
  * `MANAGED_PREFIX` marker, and `withManagedContainer` has already re-derived that from

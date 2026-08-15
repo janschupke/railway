@@ -52,6 +52,25 @@ export default defineConfig({
           setupFiles: ["src/test/setup.ts", "src/test/setup-intl.ts"],
         },
       },
+      {
+        /*
+         * ESLint's own RuleTester, over the rules in eslint-rules/.
+         *
+         * Its own project because nothing else about these files matches the three above:
+         * they are `.mjs`, they are outside `src/`, and they must not load the setup files
+         * — log-capture and the next-intl mocks have nothing to say about a linter.
+         *
+         * Outside `src/` is also why they carry no coverage obligation: `coverage.include`
+         * is `src/**`, so a rule's branches do not move the gate. What proves a rule works
+         * is a RuleTester case per branch, which is what these files are, and the
+         * regression check that the invariant it inherited is still caught.
+         */
+        test: {
+          name: "lint-rules",
+          environment: "node",
+          include: ["eslint-rules/**/*.test.mjs"],
+        },
+      },
     ],
 
     coverage: {

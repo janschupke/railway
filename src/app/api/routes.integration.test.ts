@@ -274,7 +274,8 @@ describe("POST /api/auth/logout", () => {
       "https://trains.schupke.io/?signed_out=1",
     );
     // The name the browser actually holds on an https origin, cleared with Secure so the
-    // removal is not discarded — see cookie-removal.test.ts.
+    // removal is not discarded — see cookie-removal.test.ts for what clearCookie writes,
+    // and local/no-cookie-jar-delete for the ban on removing one any other way.
     expect(response.headers.get("set-cookie")).toContain(`__Host-${SESSION_COOKIE}=;`);
   });
 

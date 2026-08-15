@@ -32,8 +32,8 @@ healthcheck with 503, and was reported as a broken deploy.
 public `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto: https` — a route handler still
 emitted `location: https://localhost:8080/…`. Next's standalone `server.js` builds that
 URL from its own bind address, so the headers never reach it. The headers themselves are
-intact. `src/app/redirect-origin.test.ts` bans `request.url` for that reason and still
-does.
+intact. A `no-restricted-syntax` selector in `eslint.config.mjs` bans `request.url` in a
+route handler for that reason and still does.
 
 ## Decision
 
@@ -94,8 +94,9 @@ nothing downstream is exploitable by naming a host you already control:
   asserts it rather than leaving it as prose.
 - **Every domain needs its own `/api/auth/callback` registered** on the Railway OAuth app,
   or the provider refuses the authorization request. This is the one manual step left.
-- **A route handler may name neither `request.url` nor `APP_URL`.** Both are enforced
-  structurally in `src/app/redirect-origin.test.ts`.
+- **A route handler may name neither `request.url` nor `APP_URL`.** Both are
+  `no-restricted-syntax` selectors scoped to `src/app/**/route.ts`, so they report while
+  you type rather than in CI.
 - **`/api/health` reports a narrower condition.** "Misconfigured" now means a missing
   secret or a malformed optional value — no longer "this service has no public domain yet",
   which was the most common false healthcheck failure it produced.

@@ -17,8 +17,11 @@ created. `managed.test.ts` pins that as deliberate rather than leaving it to be
 "fixed" silently.
 
 `destroyContainer` itself checks nothing — the guard lives in its callers, which is a
-property of the call graph that no type defends. `mutation-callsites.test.ts` asserts it:
-one calling module, and the ownership check above the mutation inside it.
+property of the call graph that no type defends. Two lint rules assert it:
+`no-restricted-imports` allows the mutation to be imported only by the write lane, and
+`local/mutation-inside-ownership-guard` requires each call to sit inside the guard's
+callback — or inside a function that resolves ownership for itself, which is how the batch
+does it.
 
 ## Amended by T-486: four verbs, one guard
 

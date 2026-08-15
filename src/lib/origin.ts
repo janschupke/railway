@@ -10,7 +10,8 @@
  *
  * `request.url` is not the answer and never was: Next's standalone `server.js` builds it
  * from its own bind address, so behind Railway's proxy it reads `http://localhost:8080`.
- * That was measured — see src/app/redirect-origin.test.ts, which still bans it. The
+ * That was measured, and a no-restricted-syntax selector still bans it in every
+ * route handler. The
  * headers are intact; only the URL Next assembled from them is not. So this module reads
  * the headers.
  *

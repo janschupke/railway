@@ -145,23 +145,38 @@ describe("the train lifecycle", () => {
     const ceiling = (YARD.BASE_SPEED * quickest * SIM.STEP_MS) / 1000 + 1;
     const last = new Map<string, { x: number; y: number }>();
     const jumps: string[] = [];
+    const unplaced: string[] = [];
 
+    /*
+     * Both failures are collected and asserted once, after the loop.
+     *
+     * `expect` inside a 30,000-step loop was the whole cost of this test: one assertion
+     * per train per step, each building a matcher and a diff nobody reads on the happy
+     * path. It ran in a second on its own and timed out at five under a full parallel
+     * run, which is a test that fails for reasons that have nothing to do with the
+     * simulation. The loop now does arithmetic and the assertions read the result — the
+     * shape `jumps` was already using, extended to the null check beside it.
+     */
     for (let index = 0; index < 30_000; index++) {
       step(world, SIM.STEP_MS, rng);
       for (const train of world.trains) {
         const pose = poseAlong(world.graph, train.path, train.distance);
-        expect(pose).not.toBeNull();
+        if (pose === null) {
+          unplaced.push(`${train.id} ${train.phase} at step ${index}`);
+          continue;
+        }
         const previous = last.get(train.id);
         if (previous) {
-          const moved = Math.hypot(pose!.x - previous.x, pose!.y - previous.y);
+          const moved = Math.hypot(pose.x - previous.x, pose.y - previous.y);
           if (moved > ceiling) {
             jumps.push(`${train.id} ${train.phase} moved ${moved.toFixed(1)}`);
           }
         }
-        last.set(train.id, { x: pose!.x, y: pose!.y });
+        last.set(train.id, { x: pose.x, y: pose.y });
       }
     }
 
+    expect(unplaced).toEqual([]);
     expect(jumps).toEqual([]);
   });
 

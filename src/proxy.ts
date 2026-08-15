@@ -85,7 +85,8 @@ export async function proxy(request: NextRequest) {
    * The origin this request arrived at, which every cookie and CSP decision below reads.
    *
    * Not `request.url`: behind Railway's proxy that is the container's own address, which
-   * is measured and documented in app/redirect-origin.test.ts. The headers carry the real
+   * is measured, and a no-restricted-syntax selector bans it in a route handler. The
+   * headers carry the real
    * one; lib/origin.ts is what decides whether to believe them.
    *
    * The record names a bounded reason and never the host. The host is whatever the caller

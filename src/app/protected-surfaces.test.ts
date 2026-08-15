@@ -10,9 +10,14 @@ import { describe, expect, it } from "vitest";
  * integration tests — but the *next* one is one forgotten line away from being public,
  * and no existing test would notice: they test the surfaces that exist.
  *
- * So this asserts the call graph, in the same shape as mutation-callsites.test.ts. A new
- * route or action either reaches requireSession, or it appears in PUBLIC below with a
- * reason written next to it. Both outcomes are visible in a diff, which is the point.
+ * So this asserts the call graph. A new route or action either reaches requireSession, or
+ * it appears in PUBLIC below with a reason written next to it. Both outcomes are visible
+ * in a diff, which is the point.
+ *
+ * This is a test rather than a lint rule, and the reason is the two hops: reachability
+ * across the import graph is the one thing a per-file rule cannot see. The invariants that
+ * needed only one file — the client boundary, the cookie jars, the ownership guard — are
+ * rules in eslint-rules/ now, and report while you type.
  *
  * Two hops, because the check is not always in the file. The stream routes reach it
  * through lib/stream-route's neighbours and the dashboard through its data loader, and a
@@ -92,8 +97,8 @@ const read = (file: string) => stripComments(readFileSync(file, "utf8"));
  * Local imports, aliased or relative, resolved to files on disk.
  *
  * The `@/…` spelling used to be the only one recognised, which is the same hole
- * client-boundary.test.ts was rewritten to close and it fails in the more dangerous
- * direction here: a route reaching its guard through `./helpers` was reported as
+ * local/no-server-imports-in-client was rewritten to close, and it fails in the more
+ * dangerous direction here: a route reaching its guard through `./helpers` was reported as
  * unprotected, so the fix for a red build was to add it to PUBLIC. A guard walk that
  * cannot see half the import graph teaches people to widen the exemption list.
  */

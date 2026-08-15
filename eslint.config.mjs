@@ -4,6 +4,7 @@ import nextTs from "eslint-config-next/typescript";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import i18next from "eslint-plugin-i18next";
 import prettier from "eslint-config-prettier";
+import local from "./eslint-rules/index.mjs";
 
 /**
  * The four appearance bans, as (pattern, message) pairs.
@@ -109,6 +110,87 @@ const appearanceBans = APPEARANCE_BANS.flatMap(({ pattern, scope, message }) =>
   ),
 );
 
+/**
+ * ADR-13's consequence: a route handler may name neither `request.url` nor `APP_URL`.
+ *
+ * `request.url` first, because it is measured. Behind Railway's proxy it is the
+ * *internal* origin, `http://localhost:<PORT>` — Next's standalone server builds it from
+ * the socket, not from the Host header — so a redirect built on it carries the container's
+ * own address to the browser. `APP_URL` is the fallback for a request with no usable Host,
+ * not the origin this request arrived at, so using it answers one domain's request with
+ * another domain's address. Both go through `requestOrigin(request)`.
+ *
+ * These were src/app/redirect-origin.test.ts, which matched
+ * `/new URL\([^)]*?,\s*request\.(url|nextUrl)\s*\)/`. The selector is strictly stronger:
+ * `[^)]*?` stops at the first `)`, so `new URL(join(a, b), request.url)` — a nested call
+ * in the first argument — matched nothing.
+ */
+const routeOriginBans = [
+  {
+    selector: `NewExpression[callee.name="URL"] > MemberExpression[property.name=/^(url|nextUrl)$/]`,
+    message:
+      "This builds a URL from request.url. Behind a proxy that is the container's own origin, and a route handler's redirect carries it to the browser. Use requestOrigin(request) as the base.",
+  },
+  {
+    selector: `Identifier[name="APP_URL"]`,
+    message:
+      "APP_URL is the fallback for a request with no usable Host, not the origin this request arrived at — using it answers one domain's request with another domain's address. Use requestOrigin(request).",
+  },
+];
+
+/**
+ * Session handling and the logger are server-side, wherever a client component lives.
+ *
+ * Held in a constant because two blocks need it: flat config REPLACES a rule's options
+ * when a later block names the same rule for the same file, so the block that adds the
+ * mutation ban below has to re-supply these or it switches them off for
+ * src/components/**.
+ */
+const serverOnlyImportBans = [
+  {
+    group: ["**/lib/auth/session", "**/lib/auth/refresh", "**/lib/auth/server"],
+    message:
+      "Session handling is server-side. Pass what the component needs as a prop.",
+  },
+  {
+    // Same reasoning one layer over: the logger writes to the server's stdout,
+    // which a browser does not have. A client component importing it would
+    // bundle pino and log into a void.
+    group: ["**/lib/logger", "**/lib/log/*"],
+    message:
+      "The logger writes to the server's stdout, which a browser has no access to. There is no client-to-server error channel in this app — surface the failure to the user instead.",
+  },
+];
+
+/**
+ * The mutations that change infrastructure may be imported only by the write lane.
+ *
+ * This is half of what src/lib/railway/mutation-callsites.test.ts asserted — "reachable
+ * from app/dashboard/actions.ts and its declaring module, and nowhere else" — expressed
+ * as an import ban so a new caller hears about it while typing rather than in CI.
+ *
+ * The other half is `local/mutation-inside-ownership-guard`, which requires each call to
+ * sit inside the ownership guard. Neither is sufficient alone: this one would allow the
+ * write lane to call a mutation on an unchecked id, and that one would allow any module
+ * to do so as long as it opened a guard. Together they say what the rule has always
+ * meant.
+ */
+const mutationImportBan = {
+  group: ["**/lib/railway/api"],
+  importNames: [
+    "createContainer",
+    "updateContainer",
+    "destroyContainer",
+    "deleteVolume",
+    "stopDeployment",
+    "restartDeployment",
+    "deployService",
+    "createServiceDomain",
+  ],
+  message:
+    "This mutation changes infrastructure and belongs to the write lane — src/app/dashboard/** — where every call sits inside withManagedContainer and ownership is re-derived from Railway's own response. A read belongs in data.ts; a new write belongs in a Server Action.",
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -183,6 +265,106 @@ const eslintConfig = defineConfig([
     ],
     rules: {
       "no-restricted-syntax": ["error", ...publicEnvBans],
+    },
+  },
+
+  /*
+   * Route handlers, which are inside the first block's `files` and therefore have to
+   * carry its bans forward as well as their own. Three spreads rather than one is the
+   * shape flat config forces: naming `no-restricted-syntax` again for these files
+   * REPLACES the options above, so anything omitted here is switched off for every
+   * route.ts in the app while lint still passes.
+   */
+  {
+    files: ["src/app/**/route.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...appearanceBans,
+        ...publicEnvBans,
+        ...routeOriginBans,
+      ],
+    },
+  },
+
+  /*
+   * The rules this repo needs and no linter ships. See eslint-rules/index.mjs.
+   *
+   * Scoped to all of src/ rather than to a directory, because two of the three select
+   * their own subjects: a client component is one whose first statement is the directive,
+   * and a Server Action is an export of a file whose first statement is the other
+   * directive. Path is the wrong axis for both, which is the whole reason they are rules
+   * with bodies rather than `files` globs.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.test.{ts,tsx}", "src/test/**"],
+    plugins: { local },
+    rules: {
+      "local/no-server-imports-in-client": [
+        "error",
+        {
+          modules: [
+            "lib/auth/session",
+            "lib/auth/refresh",
+            "lib/auth/server",
+            "lib/logger",
+          ],
+          directories: ["lib/log"],
+          messages: {
+            "lib/auth/session":
+              "Session handling is server-side. Pass what the component needs as a prop.",
+            "lib/auth/refresh":
+              "Session handling is server-side. Pass what the component needs as a prop.",
+            "lib/auth/server":
+              "Session handling is server-side. Pass what the component needs as a prop.",
+            "lib/logger":
+              "The logger writes to the server's stdout, which a browser has no access to. There is no client-to-server error channel in this app — surface the failure to the user instead.",
+          },
+        },
+      ],
+      "local/no-cookie-jar-delete": "error",
+      "local/action-scope-label": "error",
+    },
+  },
+
+  /*
+   * The write lane. `withManagedContainer` re-derives ownership from Railway's own
+   * response, and every mutation has to be inside the callback it hands the target to —
+   * see the rule for what the byte-offset test this replaces could and could not say.
+   */
+  {
+    files: ["src/app/dashboard/**/*.ts"],
+    ignores: ["src/app/dashboard/**/*.test.ts"],
+    plugins: { local },
+    rules: {
+      "local/mutation-inside-ownership-guard": [
+        "error",
+        {
+          mutations: [
+            "destroyContainer",
+            "deleteVolume",
+            "stopDeployment",
+            "restartDeployment",
+            "updateContainer",
+          ],
+          guard: "withManagedContainer",
+          /*
+           * Takes an already-resolved target and issues two mutations, so its body is
+           * legitimately outside the callback — and calls to it are checked as mutations
+           * in their own right. Adding a name here moves the obligation, never removes it.
+           */
+          guardedHelpers: ["destroyManagedContainer"],
+          /*
+           * The second entry point, and the batch's. `destroyMany` reads the container
+           * list once and resolves each id against it in a loop rather than opening a
+           * callback per service. What makes that safe is not lexical position but the
+           * type: `ManagedResolution` is a discriminated union, so `.target` cannot be
+           * read without narrowing on `managed`, and the compiler enforces it.
+           */
+          resolvers: ["resolveManagedTarget"],
+        },
+      ],
     },
   },
 
@@ -383,28 +565,36 @@ const eslintConfig = defineConfig([
     rules: {
       "no-restricted-imports": [
         "error",
-        {
-          patterns: [
-            {
-              group: [
-                "**/lib/auth/session",
-                "**/lib/auth/refresh",
-                "**/lib/auth/server",
-              ],
-              message:
-                "Session handling is server-side. Pass what the component needs as a prop.",
-            },
-            {
-              // Same reasoning one layer over: the logger writes to the server's stdout,
-              // which a browser does not have. A client component importing it would
-              // bundle pino and log into a void.
-              group: ["**/lib/logger", "**/lib/log/*"],
-              message:
-                "The logger writes to the server's stdout, which a browser has no access to. There is no client-to-server error channel in this app — surface the failure to the user instead.",
-            },
-          ],
-        },
+        { patterns: [...serverOnlyImportBans, mutationImportBan] },
       ],
+    },
+  },
+
+  /*
+   * The mutation ban, everywhere else under src/.
+   *
+   * Two blocks rather than one because the block above already names
+   * `no-restricted-imports` for src/components, src/hooks and src/features, and flat
+   * config replaces rather than merges — so this one deliberately does not match those
+   * three, and they get the mutation ban from the composed list above instead.
+   *
+   * `src/app/dashboard/**` is the write lane and is exempt from the import ban by design;
+   * what constrains it is `local/mutation-inside-ownership-guard`. `src/lib/railway/**`
+   * is where the mutations are declared, and a declaration is not an import.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/components/**",
+      "src/hooks/**",
+      "src/features/**",
+      "src/app/dashboard/**",
+      "src/lib/railway/**",
+      "src/**/*.test.{ts,tsx}",
+      "src/test/**",
+    ],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [mutationImportBan] }],
     },
   },
 

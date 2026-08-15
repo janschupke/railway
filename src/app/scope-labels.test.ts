@@ -68,25 +68,20 @@ const isExcluded = (pattern: string) =>
   excluded.some((prefix) => pattern === prefix || pattern.startsWith(`${prefix}/`));
 
 describe("the request scope's label", () => {
-  const actions = path.join(SRC, "app", "dashboard", "actions.ts");
-
-  it("names the Server Action it wraps", () => {
-    const source = code(actions);
-    /*
-     * Each forwarder is `export async function X(…) { return withRequestScope("X", …`, so
-     * the enclosing name is the nearest `export async function` above the call.
-     */
-    const exports = [...source.matchAll(/export async function (\w+)/g)];
-    const calls = [...source.matchAll(CALL)];
-    expect(calls.length).toBeGreaterThan(8);
-
-    for (const call of calls) {
-      const enclosing = exports.filter((each) => each.index < call.index).at(-1);
-      expect(enclosing?.[1], `no exported function above ${call[1]}`).toBeTruthy();
-      expect(call[1], `the scope label under ${enclosing?.[1]}`).toBe(enclosing?.[1]);
-    }
-  });
-
+  /*
+   * The Server Action case is `local/action-scope-label` now.
+   *
+   * It was here, as `export async function (\w+)` and the scope call matched over one
+   * file's text and paired by index — which works only while every action is in that one
+   * file, and said so: `expect(calls.length).toBeGreaterThan(8)` required nine of the ten
+   * forwarders to stay in app/dashboard/actions.ts. That made splitting a 1,574-line
+   * module impossible without deleting the check, which is a test dictating the shape of
+   * the code it checks. Per-export in the linter there is no set to be empty, so the count
+   * goes with it.
+   *
+   * What is left here needs more than one file: a route's label is its own path on disk,
+   * and `trustInboundId` has to agree with a matcher that lives in proxy.ts.
+   */
   it("names the route it wraps", () => {
     const routes = routeFiles(API);
     // A discovery bug would empty this and pass in silence.
