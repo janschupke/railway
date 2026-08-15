@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { UI } from "@/lib/constants";
@@ -6,6 +13,7 @@ import { clipboardMock } from "@/test/setup-dom";
 import type { LogLine } from "@/lib/railway/types";
 import { LogPane } from "./log-pane";
 import { ToastProvider } from "./ui/toast";
+import { TooltipProvider } from "./ui/tooltip";
 
 const lines = (count: number): LogLine[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -17,12 +25,18 @@ type PaneProps = Omit<React.ComponentProps<typeof LogPane>, "label"> & {
   label?: string;
 };
 
-/** ToastProvider because copy reports its outcome through it, as the dashboard does. */
+/**
+ * Both providers, because both are what the dashboard supplies above this pane: copy
+ * reports its outcome through the toast, and every icon button on the toolbar is named by
+ * a tooltip. A bare `Tooltip` is a Radix error rather than a silent no-op.
+ */
 function renderPane(props: PaneProps) {
   const ui = ({ label = "cache", ...rest }: PaneProps) => (
-    <ToastProvider>
-      <LogPane label={label} {...rest} />
-    </ToastProvider>
+    <TooltipProvider>
+      <ToastProvider>
+        <LogPane label={label} {...rest} />
+      </ToastProvider>
+    </TooltipProvider>
   );
   const result = render(ui(props));
   return { ...result, rerender: (next: PaneProps) => result.rerender(ui(next)) };
@@ -474,5 +488,135 @@ describe("LogPane copy and download", () => {
     create.mockRestore();
     revoke.mockRestore();
     click.mockRestore();
+  });
+
+  it("confirms a successful copy on the button, then goes back to resting", async () => {
+    /*
+     * The toast is what a screen-reader user gets and it is where a refusal is reported;
+     * it is not enough on its own for someone whose eyes are on the button they pressed.
+     * Both controls do their whole job without changing anything on screen, so a click
+     * that worked was indistinguishable from one that was ignored.
+     */
+    vi.useFakeTimers();
+    try {
+      renderPane({ lines: lines(1), status: "live" });
+
+      fireEvent.click(button("Copy these lines"));
+      await act(async () => {});
+      expect(button("Copy these lines").querySelector(".lucide-check")).not.toBeNull();
+
+      act(() => vi.advanceTimersByTime(UI.ACTION_FEEDBACK_MS));
+      expect(button("Copy these lines").querySelector(".lucide-check")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the copy button alone when the clipboard refused", async () => {
+    // A tick after a failure would be the worst possible outcome: the toast says it did
+    // not work and the control says it did.
+    clipboardMock.writeText.mockRejectedValueOnce(new Error("denied"));
+    renderPane({ lines: lines(1), status: "live" });
+
+    fireEvent.click(button("Copy these lines"));
+
+    await screen.findByText("The log lines could not be copied");
+    expect(button("Copy these lines").querySelector(".lucide-check")).toBeNull();
+  });
+});
+
+describe("LogPane severity colouring", () => {
+  /*
+   * Driven only by what Railway sends. There is deliberately no pattern-matching on the
+   * message: a line reading "retrying after error" is not an error line, and a heuristic
+   * that tints it is a wrong answer delivered confidently.
+   */
+  const withSeverity = (severity: string | null): LogLine[] => [
+    {
+      timestamp: "2026-08-12T10:00:00Z",
+      message: "something happened",
+      ...(severity === null ? {} : { severity }),
+    },
+  ];
+
+  const row = () => document.querySelector("[data-log-row]") as HTMLElement;
+
+  it.each([
+    ["error", "danger"],
+    ["FATAL", "danger"],
+    ["critical", "danger"],
+    ["warn", "warning"],
+    ["Warning", "warning"],
+    ["debug", "muted"],
+    ["trace", "muted"],
+  ])("draws a %s line in the %s tone", (severity, tone) => {
+    renderPane({ lines: withSeverity(severity), status: "live" });
+    expect(row()).toHaveAttribute("data-severity", tone);
+  });
+
+  it.each([["info"], ["notice"], ["something-railway-added"]])(
+    "leaves a %s line to inherit the pane's own colour",
+    (severity) => {
+      // The attribute is omitted rather than set to a neutral value, so an unrecognised
+      // severity renders exactly as an unlabelled line does.
+      renderPane({ lines: withSeverity(severity), status: "live" });
+      expect(row()).not.toHaveAttribute("data-severity");
+    },
+  );
+
+  it("leaves a line with no severity alone, which is every line Railway sends today", () => {
+    renderPane({ lines: withSeverity(null), status: "live" });
+    expect(row()).not.toHaveAttribute("data-severity");
+  });
+});
+
+describe("LogPane maximise", () => {
+  it("moves the same toolbar and the same lines into a dialog", async () => {
+    /*
+     * The property the feature is for: every filter control is present maximised, because
+     * there is one toolbar rather than two. A second pane built for the dialog would have
+     * its own needle and its own scroll position, and the two would disagree the moment
+     * either was touched.
+     */
+    renderPane({ lines: lines(3), status: "live" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(button("Maximise the log"));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Search these log lines")).toBeVisible();
+    expect(
+      within(dialog).getByRole("button", { name: "Copy these lines" }),
+    ).toBeVisible();
+    expect(within(dialog).getByRole("log")).toBeVisible();
+    expect(within(dialog).getByText("line 0")).toBeVisible();
+
+    // One log region, not two: the pane moved rather than being duplicated.
+    expect(screen.getAllByRole("log")).toHaveLength(1);
+  });
+
+  it("carries the needle across, because the state never left", async () => {
+    renderPane({ lines: lines(3), status: "live" });
+
+    fireEvent.change(screen.getByLabelText("Search these log lines"), {
+      target: { value: "line 1" },
+    });
+    fireEvent.click(button("Maximise the log"));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Search these log lines")).toHaveValue(
+      "line 1",
+    );
+  });
+
+  it("restores in place", async () => {
+    renderPane({ lines: lines(3), status: "live" });
+
+    fireEvent.click(button("Maximise the log"));
+    await screen.findByRole("dialog");
+    fireEvent.click(button("Restore the log"));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("log")).toBeVisible();
   });
 });

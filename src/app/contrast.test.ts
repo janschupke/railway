@@ -23,6 +23,19 @@ const AA_LARGE = 3;
 /** Not WCAG: the floor at which a frozen, textless placeholder still reads as a shape. */
 const AA_PLACEHOLDER = 1.4;
 /**
+ * Not WCAG either — hover feedback is not what identifies or operates a control, so
+ * 1.4.11 does not reach it. This is the floor at which a highlighted row reads as
+ * highlighted, and it exists because the pair it guards was at 1.00 on dark for the whole
+ * life of the app: --rc-raised and --rc-subtle were the same declaration, so hovering an
+ * option in any popup changed nothing. Both halves passed every other threshold alone.
+ *
+ * 1.25 rather than the placeholder floor above, and the ceiling is what sets it: a
+ * highlighted row also carries accent-coloured text when it is the selected one, and that
+ * pair has to clear AA. A lighter fill buys hover feedback with legibility, which is the
+ * wrong trade — the assertion below holds both ends.
+ */
+const AA_HOVER = 1.25;
+/**
  * Not WCAG either: Euclidean RGB distance below which two freight containers stop
  * reading as two colours. See the rail-yard block near the end of this file.
  */
@@ -325,6 +338,58 @@ describe.each(THEMES)("%s theme", (themeName, theme) => {
       ).toBeGreaterThanOrEqual(AA_PLACEHOLDER);
     }
   });
+
+  it("a highlighted popup row is legible and visibly different from the popup", () => {
+    /*
+     * The pair that broke: every popup paints --rc-raised and highlights the row under
+     * the cursor with --rc-highlight. Those were the same declaration on dark until this
+     * token existed, so hovering an option changed nothing — and no assertion here would
+     * have caught it, because both halves passed every threshold on their own.
+     *
+     * AA for the text, because that is a text-on-background pair the criteria reach;
+     * AA_HOVER for the fill, which is not a pair they reach — see that constant.
+     */
+    const highlight = surface("--rc-highlight");
+    expect(
+      Number(contrast(resolve("--rc-text", theme, highlight), highlight).toFixed(2)),
+      `text on highlight in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_NORMAL);
+
+    /*
+     * The pair this file did not have and a browser found instead: a Select row that is
+     * both selected and under the cursor draws --rc-accent on --rc-highlight. Missing it
+     * cost an axe failure in e2e and a second pass at the token, which is the whole
+     * argument for asserting colour pairs here rather than only where they render.
+     */
+    expect(
+      Number(contrast(resolve("--rc-accent", theme, highlight), highlight).toFixed(2)),
+      `accent on highlight in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_NORMAL);
+
+    const raised = surface("--rc-raised");
+    expect(
+      Number(contrast(highlight, raised).toFixed(2)),
+      `highlight on raised in ${themeName}`,
+    ).toBeGreaterThanOrEqual(AA_HOVER);
+  });
+
+  it.each(["warning", "danger"])(
+    "a %s log line is readable on the pane's own fill",
+    (tone) => {
+      /*
+       * The log pane fills with --rc-subtle rather than --rc-surface, and those are two
+       * different colours in the light theme — so the SIGNALS cases above, which check
+       * surface and raised, do not cover the surface a severity-coloured line actually
+       * sits on.
+       */
+      const pane = surface("--rc-subtle");
+      const text = resolve(`--rc-${tone}`, theme, pane);
+      expect(
+        Number(contrast(text, pane).toFixed(2)),
+        `${tone} log line in ${themeName}`,
+      ).toBeGreaterThanOrEqual(AA_NORMAL);
+    },
+  );
 
   it("borders are visible against their surfaces", () => {
     const surfaceRgb = surface("--rc-surface");

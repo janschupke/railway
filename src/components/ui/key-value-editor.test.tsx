@@ -7,6 +7,7 @@ import {
   type KeyValueError,
   type KeyValueRow,
 } from "./key-value-editor";
+import { TooltipProvider } from "./tooltip";
 
 /**
  * A controlled host, because the editor is controlled.
@@ -25,31 +26,40 @@ function Harness({
 }) {
   const [rows, setRows] = useState<KeyValueRow[]>(initial);
   return (
-    <form>
-      <KeyValueEditor
-        legend="Environment variables"
-        rows={rows}
-        onRowsChange={setRows}
-        nameFieldName="variableKey"
-        valueFieldName="variableValue"
-        nameLabel="Variable name"
-        valueLabel="Variable value"
-        generatedPlaceholder="Generated for you"
-        unchangedPlaceholder="Unchanged"
-        addLabel="Add variable"
-        removeLabel={({ name, position }) =>
-          name ? `Remove ${name}` : `Remove variable ${position}`
-        }
-        cellLabel={({ label, position }) => `${label} ${position}`}
-        addedAnnouncement={(position) => `Added variable ${position}.`}
-        removedAnnouncement={({ name, position }) =>
-          name ? `Removed ${name}.` : `Removed variable ${position}.`
-        }
-        error={error}
-        max={max}
-        maxReachedLabel="That is the most you can set here."
-      />
-    </form>
+    /*
+     * The provider is what the row's remove tooltip needs, and a bare `Tooltip` is a Radix
+     * error rather than a silent no-op. In the app it is mounted once in the dashboard
+     * layout, so the delay is grouped across every row instead of being re-paid at each
+     * one — see tooltip.tsx. Mounting it per editor here mirrors "there is one above me",
+     * which is the only thing this harness has to be true about.
+     */
+    <TooltipProvider>
+      <form>
+        <KeyValueEditor
+          legend="Environment variables"
+          rows={rows}
+          onRowsChange={setRows}
+          nameFieldName="variableKey"
+          valueFieldName="variableValue"
+          nameLabel="Variable name"
+          valueLabel="Variable value"
+          generatedPlaceholder="Generated for you"
+          unchangedPlaceholder="Unchanged"
+          addLabel="Add variable"
+          removeLabel={({ name, position }) =>
+            name ? `Remove ${name}` : `Remove variable ${position}`
+          }
+          cellLabel={({ label, position }) => `${label} ${position}`}
+          addedAnnouncement={(position) => `Added variable ${position}.`}
+          removedAnnouncement={({ name, position }) =>
+            name ? `Removed ${name}.` : `Removed variable ${position}.`
+          }
+          error={error}
+          max={max}
+          maxReachedLabel="That is the most you can set here."
+        />
+      </form>
+    </TooltipProvider>
   );
 }
 

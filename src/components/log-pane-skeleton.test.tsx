@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { LogPane } from "./log-pane";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
 import { ToastProvider } from "./ui/toast";
+import { TooltipProvider } from "./ui/tooltip";
 
 const toolbar = () => document.querySelector("[data-log-toolbar]");
 
@@ -25,9 +26,13 @@ describe("LogPaneSkeleton", () => {
     unmount();
 
     render(
-      <ToastProvider>
-        <LogPane lines={[]} status="connecting" label="cache" />
-      </ToastProvider>,
+      // Both providers, as the dashboard layout supplies them: the pane's toolbar names
+      // every icon button with a tooltip, and a bare Tooltip is a Radix error.
+      <TooltipProvider>
+        <ToastProvider>
+          <LogPane lines={[]} status="connecting" label="cache" />
+        </ToastProvider>
+      </TooltipProvider>,
     );
     // LogPane puts the height on ScrollArea's root, one level above the log viewport.
     expect(screen.getByRole("log").parentElement).toHaveClass("h-pane-log");
@@ -44,9 +49,13 @@ describe("LogPaneSkeleton", () => {
     unmount();
 
     render(
-      <ToastProvider>
-        <LogPane lines={[]} status="connecting" label="cache" />
-      </ToastProvider>,
+      // Both providers, as the dashboard layout supplies them: the pane's toolbar names
+      // every icon button with a tooltip, and a bare Tooltip is a Radix error.
+      <TooltipProvider>
+        <ToastProvider>
+          <LogPane lines={[]} status="connecting" label="cache" />
+        </ToastProvider>
+      </TooltipProvider>,
     );
     const real = screen.getByRole("group", { name: "Log controls" });
     expect(real).toHaveClass("mb-2");

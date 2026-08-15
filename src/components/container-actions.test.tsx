@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionResult } from "@/lib/action-result";
-import type { ContainerState } from "@/lib/railway/types";
+import type { Container, ContainerState } from "@/lib/railway/types";
 
 /*
  * The three Server Actions and `spinDown`, stubbed together: this component's job is
@@ -19,20 +19,40 @@ vi.mock("@/app/dashboard/actions", () => ({
 
 const { ContainerActions } = await import("./container-actions");
 const { ToastProvider } = await import("./ui/toast");
+// The detail dialog's trigger and the variable editor's rows are both tooltipped; the
+// dashboard layout supplies this in the app, and a bare Tooltip is a Radix error.
+const { TooltipProvider } = await import("./ui/tooltip");
+
+const container = (deploymentId: string | null): Container => ({
+  serviceId: "svc_1",
+  rawName: "spun-cache",
+  displayName: "cache",
+  image: "redis:7-alpine",
+  repo: null,
+  state: "running",
+  rawStatus: "SUCCESS",
+  deploymentId,
+  createdAt: null,
+  updatedAt: null,
+  deployedAt: null,
+  url: null,
+  managed: true,
+});
 
 function renderActions(state: ContainerState, deploymentId: string | null = "dep_1") {
   return render(
-    <ToastProvider>
-      <ContainerActions
-        serviceId="svc_1"
-        displayName="cache"
-        image="redis:7-alpine"
-        deploymentId={deploymentId}
-        state={state}
-        projectId="p1"
-        environmentId="e1"
-      />
-    </ToastProvider>,
+    <TooltipProvider>
+      <ToastProvider>
+        <ContainerActions
+          container={container(deploymentId)}
+          metrics={undefined}
+          volume={undefined}
+          state={state}
+          projectId="p1"
+          environmentId="e1"
+        />
+      </ToastProvider>
+    </TooltipProvider>,
   );
 }
 
@@ -43,28 +63,28 @@ const controls = () =>
 describe("ContainerActions", () => {
   it("offers stop and restart beside destroy while running", () => {
     renderActions("running");
-    expect(controls()).toEqual(["Edit", "Stop", "Restart", "Destroy"]);
+    expect(controls()).toEqual(["Details", "Stop", "Restart", "Destroy"]);
   });
 
   it("offers only stop while the deployment is still building", () => {
     // Nothing is running yet, so there is nothing to restart.
     renderActions("building");
-    expect(controls()).toEqual(["Edit", "Stop", "Destroy"]);
+    expect(controls()).toEqual(["Details", "Stop", "Destroy"]);
   });
 
   it("offers redeploy once the container has stopped", () => {
     renderActions("removed");
-    expect(controls()).toEqual(["Edit", "Redeploy", "Destroy"]);
+    expect(controls()).toEqual(["Details", "Redeploy", "Destroy"]);
   });
 
   it("offers redeploy to a service whose deploy was refused", () => {
     // The orphan with no deployment at all: before this feature its row held Destroy and
     // nothing else, which made a billable mistake a delete-and-retype.
     renderActions("unknown", null);
-    expect(controls()).toEqual(["Edit", "Redeploy", "Destroy"]);
+    expect(controls()).toEqual(["Details", "Redeploy", "Destroy"]);
   });
 
-  it("offers edit in every state a lifecycle verb is absent from", () => {
+  it("offers the detail view in every state a lifecycle verb is absent from", () => {
     /*
      * Editing is not in `availableActions` and this is why: that list answers "would this
      * mutation do anything to the running deployment", and every state has a description to
@@ -72,21 +92,21 @@ describe("ContainerActions", () => {
      * exactly what a person needs to fix.
      */
     renderActions("unknown", null);
-    expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^details$/i })).toBeEnabled();
   });
 
-  it("disables both remaining controls while the container is being removed", () => {
+  it("keeps the detail view open while the container is being removed", () => {
     /*
-     * Edit is dimmed here rather than absent, which is the one place it departs from the
-     * lifecycle verbs' rule. The reason they are gated is that a control must not promise
-     * something another state would deliver; `removing` is not another state, it is the
-     * description going away, and the same argument that keeps Destroy on screen disabled
-     * keeps this one.
+     * The one control here that stays live in `removing`, and the split is what folding
+     * edit into a detail view bought. Destroy is dimmed because it must not promise
+     * something another state would deliver. The facts about a container on its way out
+     * are still facts — so the dialog opens and only its edit mode is withheld, which
+     * container-detail-dialog.test.tsx asserts from the inside.
      */
     renderActions("removing");
-    expect(controls()).toEqual(["Edit", "Destroy"]);
+    expect(controls()).toEqual(["Details", "Destroy"]);
     expect(screen.getByRole("button", { name: /destroy/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^details$/i })).toBeEnabled();
   });
 
   it("never renders a disabled lifecycle control", () => {

@@ -176,6 +176,8 @@
     "logCopyFailed": "The log lines could not be copied",
     "logCopyFailedDetail": "The browser refused access to the clipboard. Select the lines and copy them, or download them instead.",
     "logDownload": "Download these lines",
+    "logMaximize": "Maximise the log",
+    "logMinimize": "Restore the log",
     "logSeverityLabel": "Severity",
     "metricsLabel": "Resource use for {name}",
     "cpuLabel": "CPU",
@@ -186,6 +188,21 @@
     "memoryValueMb": "{value} MB",
     "volumeLabel": "Volume",
     "volumeValue": "{mountPath} · {used} of {size}"
+  },
+  "containerDetail": {
+    "trigger": "Details",
+    "title": "{name}",
+    "description": "What this app knows about this container.",
+    "notManaged": "This app did not create this service, so it cannot change it. Everything below is read-only; manage it on Railway.",
+    "nameLabel": "Name",
+    "rawNameLabel": "Name in Railway",
+    "sourceLabel": "Source",
+    "stateLabel": "State",
+    "stateValue": "{state} ({raw})",
+    "urlLabel": "Public URL",
+    "serviceIdLabel": "Service ID",
+    "createdLabel": "Created",
+    "updatedLabel": "Last updated"
   },
   "states": {
     "pending": "Queued",

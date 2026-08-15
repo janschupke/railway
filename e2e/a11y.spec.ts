@@ -1,9 +1,11 @@
 import {
+  openCreateFromSelect,
   addVariable,
   alerts,
   button,
   containerRows,
   disclosure,
+  dismissWithEscape,
   expect,
   expectNoA11yViolations,
   field,
@@ -185,7 +187,7 @@ test.describe("accessibility", () => {
       await signIn(page);
       await setTheme(page, theme);
 
-      await onlyVisible(page.getByRole("button", { name: /new project/i })).click();
+      await openCreateFromSelect(page, "Project", /new project/i);
       await expect(onlyVisible(page.getByRole("dialog"))).toBeVisible();
 
       await expectNoA11yViolations(page, `create-dialog/${theme}`);
@@ -279,18 +281,58 @@ test.describe("accessibility", () => {
 
     test(`the open advanced panel has no violations (${theme})`, async ({ page }) => {
       /*
-       * Two things at once, and the panel being open is what makes both scannable: a native
-       * `<select>` styled from the tokens, which is the one control on this form the design
-       * system does not draw itself, and a disabled input — Retries, inert until the policy
-       * it applies to is chosen — whose dimmed text is the contrast pair most likely to fall
-       * under a threshold nobody checked.
+       * This used to be scanned for a native `<select>` "the design system does not draw
+       * itself". There is no longer one on this form — both dropdowns are the shared Radix
+       * Select — so what is left is worth naming rather than inheriting: a disabled input
+       * (Retries, inert until the policy it applies to is chosen), whose dimmed text is the
+       * contrast pair most likely to fall under a threshold nobody checked, and a Select
+       * trigger holding a selection rather than a placeholder.
        */
       await signIn(page);
       await setTheme(page, theme);
 
-      await fillAdvanced(page, { region: "us-west2" });
+      await fillAdvanced(page, { region: "US West (Oregon)" });
 
       await expectNoA11yViolations(page, `advanced-panel/${theme}`);
+    });
+
+    test(`an open dropdown has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Genuinely new coverage: nothing had ever scanned a Select's portalled content. It is
+       * a `bg-raised` surface with `text-caption` group headings and a `bg-highlight` row
+       * under the cursor, none of which the closed trigger shows.
+       *
+       * ## Why this one scan is scoped, when no other is
+       *
+       * While a Radix Select is open it calls `hideOthers`, which writes `aria-hidden="true"`
+       * onto the siblings of its portal — the header, the picker row, the whole form — and
+       * every one of them still contains focusable controls. Axe reports that as
+       * `aria-hidden-focus`, seventy-odd nodes of it, and it is a fair reading of the DOM.
+       *
+       * It is not this app's DOM. The same rule does not fire for the create or destroy
+       * dialogs, which is the observation that pins it on the Select implementation rather
+       * than on anything a call site here controls, and there is no prop that changes it.
+       *
+       * So the scan asserts what this app is actually responsible for — the popup's own
+       * colours, roles and names — and the finding above is recorded here rather than
+       * silenced with a rule exclusion, because a disabled rule is invisible in six months
+       * and this paragraph is not. If Radix moves to `inert`, drop the `within` argument.
+       */
+      await signIn(page);
+      await setTheme(page, theme);
+
+      await fillAdvanced(page, {});
+      await onlyVisible(page.getByRole("combobox", { name: "Region" })).click();
+      const list = onlyVisible(page.getByRole("listbox"));
+      await expect(list).toBeVisible();
+
+      await expectNoA11yViolations(
+        page,
+        `advanced-dropdown/${theme}`,
+        "[role=listbox]",
+      );
+
+      await dismissWithEscape(page, list);
     });
 
     test(`an advanced validation error has no violations (${theme})`, async ({

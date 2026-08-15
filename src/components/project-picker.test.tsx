@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
@@ -41,6 +41,24 @@ const renderPicker = (
       />
     </ToastProvider>,
   );
+
+/**
+ * Opens a create dialog the way the UI now offers it: through the dropdown it belongs to.
+ *
+ * `findBy` rather than `getBy` on the field, and that is not incidental — the dialog opens
+ * one animation frame after the row is clicked, because a Select popup has to finish
+ * tearing its modal layer down before a Dialog may put one up.
+ */
+const openCreate = async (
+  user: UserEvent,
+  control: "Project" | "Environment",
+  row: string,
+  field: string,
+) => {
+  await user.click(screen.getByRole("combobox", { name: control }));
+  await user.click(await screen.findByRole("option", { name: row }));
+  return screen.findByLabelText(field);
+};
 
 beforeEach(() => {
   routerMock.push.mockClear();
@@ -113,7 +131,8 @@ describe("ProjectPicker", () => {
     expect(screen.getByText("Choose a project first.")).toBeInTheDocument();
   });
 
-  it("distinguishes a project with no environments from no project at all", () => {
+  it("distinguishes a project with no environments from no project at all", async () => {
+    const user = userEvent.setup();
     render(
       <ToastProvider>
         <ProjectPicker
@@ -124,10 +143,22 @@ describe("ProjectPicker", () => {
       </ToastProvider>,
     );
 
-    // Same greyed-out control, different cause, and only one of them is the user's to
-    // act on. Previously both rendered an enabled trigger opening an empty popup.
-    expect(screen.getByRole("combobox", { name: "Environment" })).toBeDisabled();
+    /*
+     * Two causes, and they now get two different controls rather than the same dim one.
+     * Nothing to choose from is no longer a dead end here: the popup holds the row that
+     * fixes it, which is the case the always-disabled "New environment" button covered
+     * before it moved inside.
+     */
+    const environment = screen.getByRole("combobox", { name: "Environment" });
+    expect(environment).toBeEnabled();
     expect(screen.getByText("This project has no environments.")).toBeInTheDocument();
+
+    await user.click(environment);
+    const listbox = await screen.findByRole("listbox");
+    expect(within(listbox).getAllByRole("option")).toHaveLength(1);
+    expect(
+      within(listbox).getByRole("option", { name: "New environment" }),
+    ).toBeVisible();
   });
 
   it("lands on a project it just created, with its default environment", async () => {
@@ -139,8 +170,10 @@ describe("ProjectPicker", () => {
     const user = userEvent.setup();
     renderPicker();
 
-    await user.click(screen.getByRole("button", { name: "New project" }));
-    await user.type(await screen.findByLabelText("Project name"), "Client work");
+    await user.type(
+      await openCreate(user, "Project", "New project", "Project name"),
+      "Client work",
+    );
     await user.click(screen.getByRole("button", { name: "Create project" }));
 
     /*
@@ -165,8 +198,10 @@ describe("ProjectPicker", () => {
     const user = userEvent.setup();
     renderPicker();
 
-    await user.click(screen.getByRole("button", { name: "New project" }));
-    await user.type(await screen.findByLabelText("Project name"), "Bare");
+    await user.type(
+      await openCreate(user, "Project", "New project", "Project name"),
+      "Bare",
+    );
     await user.click(screen.getByRole("button", { name: "Create project" }));
 
     await waitFor(() => expect(routerMock.push).toHaveBeenCalled());
@@ -185,8 +220,10 @@ describe("ProjectPicker", () => {
     const user = userEvent.setup();
     renderPicker();
 
-    await user.click(screen.getByRole("button", { name: "New project" }));
-    await user.type(await screen.findByLabelText("Project name"), "Bare");
+    await user.type(
+      await openCreate(user, "Project", "New project", "Project name"),
+      "Bare",
+    );
     await user.click(screen.getByRole("button", { name: "Create project" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -202,8 +239,10 @@ describe("ProjectPicker", () => {
     const user = userEvent.setup();
     renderPicker();
 
-    await user.click(screen.getByRole("button", { name: "New environment" }));
-    await user.type(await screen.findByLabelText("Environment name"), "staging");
+    await user.type(
+      await openCreate(user, "Environment", "New environment", "Environment name"),
+      "staging",
+    );
     await user.click(screen.getByRole("button", { name: "Create environment" }));
 
     await waitFor(() =>
@@ -213,11 +252,37 @@ describe("ProjectPicker", () => {
     );
   });
 
-  it("cannot create an environment before a project is chosen", () => {
-    // Disabled rather than hidden, for the same reason the environment Select is: a
-    // control that appears once you pick something is harder to find than a dimmed one.
+  it("cannot create an environment before a project is chosen", async () => {
+    /*
+     * There is nothing to create an environment in, so the row is not offered — and the
+     * control it would have lived in is the thing that says why. That is a strict
+     * improvement on the dimmed button it replaced, which stated that something was
+     * unavailable and nothing about what.
+     */
+    const user = userEvent.setup();
     renderPicker(null, null);
-    expect(screen.getByRole("button", { name: "New environment" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "New project" })).toBeEnabled();
+
+    expect(screen.getByRole("combobox", { name: "Environment" })).toBeDisabled();
+    expect(screen.getByText("Choose a project first.")).toBeInTheDocument();
+
+    // Creating a project, meanwhile, is always available.
+    await user.click(screen.getByRole("combobox", { name: "Project" }));
+    expect(await screen.findByRole("option", { name: "New project" })).toBeVisible();
+  });
+
+  it("never reports the create row as a selection", async () => {
+    /*
+     * The property the whole action-row mechanism exists for. A create row that came back
+     * through `onValueChange` would hand `selectProject` a value that is not a project id,
+     * and the URL — which is this app's only state — would carry it.
+     */
+    const user = userEvent.setup();
+    renderPicker();
+
+    await user.click(screen.getByRole("combobox", { name: "Project" }));
+    await user.click(await screen.findByRole("option", { name: "New project" }));
+
+    await screen.findByLabelText("Project name");
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 });

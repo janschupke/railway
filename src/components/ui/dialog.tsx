@@ -27,15 +27,34 @@ export function DialogContent({
   className,
   children,
   closeLabel,
+  size = "default",
   ...props
-}: React.ComponentProps<typeof Primitive.Content> & { closeLabel: string }) {
+}: React.ComponentProps<typeof Primitive.Content> & {
+  closeLabel: string;
+  /**
+   * `full` is a near-viewport panel for content that is read rather than answered — the
+   * maximised log pane.
+   *
+   * A variant rather than a `className` at the call site, and that is the point: no
+   * dialog in this app has ever overridden its own geometry, and the moment one does by
+   * hand the "same object at different urgencies" property this file shares with
+   * ./alert-dialog stops holding. Two sizes are a decision; five spellings are a drift.
+   *
+   * It is a column, because its caller has a header and a scrolling body and the body is
+   * what should take the leftover height.
+   */
+  size?: "default" | "full";
+}) {
   return (
     <Primitive.Portal>
       <Primitive.Overlay className="animate-overlay bg-overlay z-overlay fixed inset-0" />
       <Primitive.Content
         className={cn(
-          "border-border bg-raised animate-content z-overlay fixed top-1/2 left-1/2 w-[min(28rem,calc(100vw-2rem))]",
+          "border-border bg-raised animate-content z-overlay fixed top-1/2 left-1/2",
           "-translate-x-1/2 -translate-y-1/2 rounded-xl border p-5 shadow-lg",
+          size === "full"
+            ? "flex h-[calc(100vh-2rem)] w-[min(80rem,calc(100vw-2rem))] flex-col"
+            : "w-[min(28rem,calc(100vw-2rem))]",
           className,
         )}
         {...props}

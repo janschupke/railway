@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "./button";
 import { Input } from "./input";
 import { LiveRegion } from "./live-region";
 import { Text } from "./text";
+import { Tooltip } from "./tooltip";
 
 /** One row. `id` is the identity the caller keys focus and errors on. */
 export type KeyValueRow = {
@@ -305,15 +306,33 @@ export function KeyValueEditor({
               </div>
 
               {!row.locked && (
-                <Button
-                  data-focus-key={removeKey}
-                  variant="ghost"
-                  size="md"
-                  aria-label={removeLabel({ name: row.name, position })}
-                  onClick={() => remove(row, position)}
-                >
-                  <X aria-hidden />
-                </Button>
+                /*
+                 * Trash2 and a danger hover, matching the two other places in the app that
+                 * remove something — destroy-container-dialog and bulk-destroy-dialog. An
+                 * `X` in a neutral ghost read as "dismiss this row", which is a different
+                 * promise from the one it keeps: submitting a form that has lost a row is
+                 * what deletes the variable on Railway.
+                 *
+                 * Ghost rather than the `danger` variant even so. A bordered danger button
+                 * per row would be the loudest thing in an editor whose whole content is
+                 * rows, and this is one of several removals, not the screen's one verb.
+                 *
+                 * A Tooltip because the control is icon-only: `aria-label` names it for a
+                 * screen reader and for nobody looking at the page. Same string for both,
+                 * so the visible text cannot drift from the accessible name.
+                 */
+                <Tooltip content={removeLabel({ name: row.name, position })}>
+                  <Button
+                    data-focus-key={removeKey}
+                    variant="ghost"
+                    size="md"
+                    aria-label={removeLabel({ name: row.name, position })}
+                    onClick={() => remove(row, position)}
+                    className="not-disabled:hover:text-danger"
+                  >
+                    <Trash2 aria-hidden />
+                  </Button>
+                </Tooltip>
               )}
             </div>
 

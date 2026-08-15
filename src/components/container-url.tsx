@@ -40,9 +40,9 @@ function hostOf(url: string): string {
  * the fifth button on rows that already carry Edit, two lifecycle verbs and Destroy — and
  * would separate "add an address" from the space where the address appears.
  *
- * Nothing at all for an unmanaged container with no domain. This app does not act on
- * services it did not create (see `withManagedContainer`), so the offer would be one it
- * cannot honour; the row's Open in Railway is the honest route there.
+ * Nothing at all for a container this app may not act on and that has no domain yet — the
+ * offer would be one it cannot honour, and the row's Open in Railway is the honest route
+ * there. That decision is NOT made here: see `canGenerate` below.
  *
  * No confirmation dialog, unlike every other write on this row. Stop, restart, redeploy and
  * destroy all interrupt or remove something that exists; this only adds, it is the cheapest
@@ -55,7 +55,7 @@ export function ContainerUrl({
   displayName,
   projectId,
   environmentId,
-  managed,
+  canGenerate,
 }: {
   /** The full `https://…`, or null when this container has no public address. */
   url: string | null;
@@ -63,8 +63,22 @@ export function ContainerUrl({
   displayName: string;
   projectId: string;
   environmentId: string;
-  /** Whether this app created the service, and may therefore act on it. */
-  managed: boolean;
+  /**
+   * Whether this row may mint a domain — decided by the row, not re-derived here.
+   *
+   * This used to be `managed`, and this component tested it itself. That made minting a
+   * domain the one write on the row that answered the ownership question in its own file,
+   * rather than in the branch that decides every other one — Edit, Stop, Restart, Redeploy
+   * and Destroy all live under a single `container.managed` check in container-row.tsx.
+   *
+   * The server has always refused an unowned container here: `generateDomain` goes through
+   * `withManagedContainer`, which re-reads the list from Railway before the verb runs. So
+   * this is not a security boundary and never was. It is about there being ONE place a
+   * reader can look to see which affordances a row is offering — a second copy of that
+   * rule is the copy that would get it wrong, and it would get it wrong on the write with
+   * no confirmation dialog in front of it.
+   */
+  canGenerate: boolean;
 }) {
   const t = useTranslations("containers");
   const router = useRouter();
@@ -126,7 +140,7 @@ export function ContainerUrl({
     );
   }
 
-  if (!managed) return null;
+  if (!canGenerate) return null;
 
   return (
     <form action={submit}>

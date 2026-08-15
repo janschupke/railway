@@ -6,7 +6,20 @@ import { Spinner } from "./misc";
 const buttonVariants = cva(
   cn(
     "focus-ring inline-flex items-center justify-center gap-2 font-medium whitespace-nowrap",
-    "rounded-md transition-colors disabled:pointer-events-none disabled:opacity-50",
+    /*
+     * `cursor-not-allowed`, not `pointer-events-none`, and the difference was doing real
+     * damage. `globals.css` has carried `button:disabled { cursor: not-allowed }` in
+     * @layer base since the Tailwind v4 preflight change — but an element with
+     * `pointer-events: none` never becomes the hover target, so the cursor stayed an
+     * arrow and a disabled control was indistinguishable from a dim one. It also swallows
+     * the pointer events a Radix Tooltip trigger listens for, which is why every icon
+     * button that is disabled some of the time could not explain itself.
+     *
+     * Nothing is lost in activation terms: a native disabled <button> dispatches no click.
+     * Hover is suppressed per variant below with `not-disabled:` rather than by removing
+     * the element from hit-testing.
+     */
+    "rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
   ),
   {
@@ -21,13 +34,21 @@ const buttonVariants = cva(
        * Chrome is not tertiary: Sign out reads as text when it is `ghost`, especially
        * next to the bordered theme toggle, so it takes `secondary`.
        */
+      /*
+       * Every hover is `not-disabled:`, which is load-bearing rather than tidy. The base
+       * no longer removes a disabled button from hit-testing (see above), so a plain
+       * `hover:` would now light up a control that refuses to act — the exact lie the
+       * dimming is there to prevent.
+       */
       variant: {
-        primary: "bg-accent text-accent-fg hover:bg-accent-hover",
-        secondary: "border-border bg-surface hover:bg-subtle border",
+        primary: "bg-accent text-accent-fg not-disabled:hover:bg-accent-hover",
+        secondary: "border-border bg-surface not-disabled:hover:bg-subtle border",
         // Surface-backed rather than transparent, so it stays a legible control on a
         // tinted danger block as well as on a plain card.
-        danger: "border-danger-border text-danger bg-surface hover:bg-danger-bg border",
-        ghost: "text-text-muted hover:bg-subtle hover:text-text",
+        danger:
+          "border-danger-border text-danger bg-surface not-disabled:hover:bg-danger-bg border",
+        ghost:
+          "text-text-muted not-disabled:hover:bg-subtle not-disabled:hover:text-text",
       },
       /*
        * Height and inset come from the shared control tokens, so a button, an input and
@@ -114,7 +135,16 @@ export function Button({
     "aria-busy": pending || undefined,
     className: cn(
       buttonVariants({ variant, size }),
-      // The cva `disabled:` variants cannot reach an aria-disabled anchor.
+      /*
+       * The cva `disabled:` variants cannot reach an aria-disabled anchor, and this path
+       * deliberately keeps `pointer-events-none` where the base rule above dropped it.
+       *
+       * The asymmetry is a navigation guard rather than an oversight. A slotted <a> is
+       * still followed on a middle-click or a ctrl-click, neither of which the onClick
+       * preventDefault sees — and the one inert slotted button in the app is
+       * sign-in-button.tsx mid-OIDC, where a second click starts a second round trip.
+       * A cursor on a control that is already spinning is worth less than that.
+       */
       asChild && inert && "pointer-events-none opacity-50",
       className,
     ),

@@ -11,6 +11,7 @@ import {
   injectFaults,
   onlyVisible,
   openDestroyDialog,
+  openDetailDialog,
   openEditDialog,
   railwayLink,
   row,
@@ -1206,12 +1207,14 @@ test.describe("resource controls on a spin-up", () => {
     await expect(page.getByRole("listbox")).toHaveCount(0);
     await field(page, "Name").fill("tuned");
 
+    // Labels going in, values coming out — the assertion below is what proves the row a
+    // person clicked still reaches Railway as the identifier it stands for.
     await fillAdvanced(page, {
-      region: "us-west2",
+      region: "US West (Oregon)",
       replicas: "2",
       cpu: "0.5",
       memory: "1",
-      restartPolicy: "ON_FAILURE",
+      restartPolicy: "On failure",
       restartRetries: "4",
       startCommand: "redis-server --appendonly yes",
     });
@@ -1321,16 +1324,22 @@ test.describe("resource controls on a spin-up", () => {
   test("offers only the regions worth choosing", async ({ page }) => {
     await fillAdvanced(page, {});
 
-    const region = page.getByLabel("Region");
-    await expect(region.getByRole("option")).toHaveCount(3);
-    await expect(
-      region.getByRole("option", { name: "Railway chooses" }),
-    ).toBeAttached();
-    await expect(
-      region.getByRole("option", { name: "US West (Oregon)" }),
-    ).toBeAttached();
-    await expect(region.getByRole("option", { name: /no identifier/i })).toHaveCount(0);
-    await expect(region.getByRole("option", { name: /retiring/i })).toHaveCount(0);
+    /*
+     * Opened rather than queried in place: the options were children of a <select> and are
+     * now portalled to the body, existing only while the popup is up. `toBeVisible` rather
+     * than `toBeAttached` for the same reason, and it is the stronger assertion.
+     */
+    await onlyVisible(page.getByRole("combobox", { name: "Region" })).click();
+    const list = onlyVisible(page.getByRole("listbox"));
+
+    await expect(list.getByRole("option")).toHaveCount(3);
+    await expect(list.getByRole("option", { name: "Railway chooses" })).toBeVisible();
+    await expect(list.getByRole("option", { name: "US West (Oregon)" })).toBeVisible();
+    await expect(list.getByRole("option", { name: /no identifier/i })).toHaveCount(0);
+    await expect(list.getByRole("option", { name: /retiring/i })).toHaveCount(0);
+
+    // The panel behind it is unreachable while this layer holds pointer-events on body.
+    await dismissWithEscape(page, list);
   });
 });
 
@@ -1569,11 +1578,10 @@ test.describe("editing a container", () => {
     });
 
     await injectFaults(page, { variablesFail: true });
-    await onlyVisible(
-      row(page, "cache").getByRole("button", { name: /^Edit$/ }),
-    ).click();
+    // Not `openEditDialog`, which waits for the legend that the refused read never draws.
+    const dialog = await openDetailDialog(page, "cache");
+    await onlyVisible(dialog.getByRole("button", { name: /^Edit$/ })).click();
 
-    const dialog = onlyVisible(page.getByRole("dialog"));
     await expect(
       dialog.getByText(/could not read this container's variables/i),
     ).toBeVisible();
@@ -1588,6 +1596,16 @@ test.describe("editing a container", () => {
     await expect(
       onlyVisible(row(page, "postgres").getByRole("button", { name: /^edit$/i })),
     ).toHaveCount(0);
+
+    /*
+     * And the half that used to be missing entirely: the row can now be looked at, and the
+     * reason it cannot be changed is a sentence in the dialog rather than something a
+     * reader had to infer from a button that was not there.
+     */
+    const dialog = await openDetailDialog(page, "postgres");
+    await expect(dialog.getByRole("button", { name: /^edit$/i })).toHaveCount(0);
+    await expect(dialog.getByText(/did not create this service/i)).toBeVisible();
+    await dismissWithEscape(page, dialog);
     // The slot still offers Railway's own page, which is the row's one action.
     await expect(
       onlyVisible(row(page, "postgres").getByRole("link", { name: "Open in Railway" })),

@@ -40,6 +40,8 @@ export function CreateNameDialog({
   triggerVariant = "secondary",
   disabled,
   onCreated,
+  open: openProp,
+  onOpenChange,
 }: {
   action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   /** The form input's name, and the field the action attributes an error to. */
@@ -60,10 +62,28 @@ export function CreateNameDialog({
   triggerVariant?: "primary" | "secondary";
   disabled?: boolean;
   onCreated: (select: ActionSelection | undefined) => void;
+  /**
+   * Controlled open. Supplied, this renders NO trigger of its own — the caller owns the
+   * affordance, which is what lets the pickers put "New project" inside their dropdown
+   * rather than beside it.
+   *
+   * Left out, everything below behaves exactly as it did: the dialog holds its own state
+   * and draws its own button. That is what keeps the empty-state call site — where
+   * creating a project is the whole point of the screen and the button is a primary
+   * invitation — working unchanged.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const tCommon = useTranslations("common");
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (!controlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [error, setError] = useState<string | undefined>(undefined);
   /*
    * Controlled, unlike the spin-up form's name field, and not a stylistic difference.
@@ -125,12 +145,15 @@ export function CreateNameDialog({
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant={triggerVariant} size="sm" disabled={disabled}>
-          <Plus aria-hidden />
-          {copy.trigger}
-        </Button>
-      </DialogTrigger>
+      {/* Controlled means somebody else is the affordance; two would be one too many. */}
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button variant={triggerVariant} size="sm" disabled={disabled}>
+            <Plus aria-hidden />
+            {copy.trigger}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent closeLabel={tCommon("close")}>
         {/* Mounted only while open, so the trigger is what builds the form each time. */}
         {open && (

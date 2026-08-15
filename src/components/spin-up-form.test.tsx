@@ -13,6 +13,9 @@ vi.mock("@/app/dashboard/actions", () => ({
 
 const { SpinUpForm } = await import("./spin-up-form");
 const { ToastProvider } = await import("./ui/toast");
+// Mounted once in the dashboard layout in the app; the variable editor's row
+// tooltips need one above them, and a bare Tooltip is a Radix error.
+const { TooltipProvider } = await import("./ui/tooltip");
 
 const OREGON = {
   id: "us-west2",
@@ -30,15 +33,17 @@ const renderForm = ({
   regions?: RegionOption[] | Promise<RegionOption[]>;
 } = {}) =>
   render(
-    <ToastProvider>
-      <SpinUpForm
-        projectId="p1"
-        environmentId="e1"
-        names={Array.isArray(names) ? Promise.resolve(names) : names}
-        regions={Array.isArray(regions) ? Promise.resolve(regions) : regions}
-        {...props}
-      />
-    </ToastProvider>,
+    <TooltipProvider>
+      <ToastProvider>
+        <SpinUpForm
+          projectId="p1"
+          environmentId="e1"
+          names={Array.isArray(names) ? Promise.resolve(names) : names}
+          regions={Array.isArray(regions) ? Promise.resolve(regions) : regions}
+          {...props}
+        />
+      </ToastProvider>
+    </TooltipProvider>,
   );
 
 /** Opens the Advanced panel, which every case below has to do before it can type. */
@@ -46,9 +51,22 @@ const openAdvanced = async (user: UserEvent) => {
   await user.click(screen.getByText("Advanced settings"));
 };
 
+/**
+ * Picks one row of a Select, by the label on the control and the text on the row.
+ *
+ * Not `user.selectOptions`, which only drives a real `<select>`. Both advanced dropdowns
+ * are Radix now, so a row is a portalled `role="option"` that exists only while the popup
+ * is open — and it is addressable by its visible label rather than by the value it posts,
+ * which is why every call site below names copy from `messages/en.json`.
+ */
+const choose = async (user: UserEvent, control: string, option: string) => {
+  await user.click(screen.getByRole("combobox", { name: control }));
+  await user.click(await screen.findByRole("option", { name: option }));
+};
+
 /*
- * By its summary rather than by role: `<details>`, `<fieldset>` and `<optgroup>` all report
- * role="group", and the variable editor and the region select each contribute one.
+ * By its summary rather than by role: `<details>` and `<fieldset>` both report
+ * role="group", and the variable editor contributes one.
  */
 const advanced = () =>
   screen.getByText("Advanced settings").closest("details") as HTMLDetailsElement;
@@ -909,11 +927,11 @@ describe("the advanced panel", () => {
     await waitFor(() => expect(screen.getByLabelText("Region")).not.toBeDisabled());
 
     await openAdvanced(user);
-    await user.selectOptions(screen.getByLabelText("Region"), "us-west2");
+    await choose(user, "Region", "US West (Oregon)");
     await user.type(screen.getByLabelText("Replicas"), "3");
     await user.type(screen.getByLabelText("vCPU"), "0.5");
     await user.type(screen.getByLabelText("Memory (GB)"), "2");
-    await user.selectOptions(screen.getByLabelText("Restart policy"), "ON_FAILURE");
+    await choose(user, "Restart policy", "On failure");
     await user.type(screen.getByLabelText("Retries"), "4");
     await user.type(screen.getByLabelText("Start command"), "serve --port 80");
     await user.type(screen.getByLabelText("Name"), "cache");
@@ -1073,11 +1091,11 @@ describe("the advanced panel", () => {
     await openAdvanced(user);
     expect(screen.getByLabelText("Retries")).toBeDisabled();
 
-    await user.selectOptions(screen.getByLabelText("Restart policy"), "ON_FAILURE");
+    await choose(user, "Restart policy", "On failure");
     expect(screen.getByLabelText("Retries")).toBeEnabled();
 
     await user.type(screen.getByLabelText("Retries"), "4");
-    await user.selectOptions(screen.getByLabelText("Restart policy"), "ALWAYS");
+    await choose(user, "Restart policy", "Always");
     expect(screen.getByLabelText("Retries")).toBeDisabled();
 
     await user.type(screen.getByLabelText("Name"), "cache");
@@ -1094,16 +1112,18 @@ describe("the advanced panel", () => {
     });
 
     await openAdvanced(user);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("option", { name: "US West (Oregon)" }),
-      ).toBeInTheDocument(),
-    );
-    expect(
-      within(screen.getByLabelText("Region"))
-        .getAllByRole("group")
-        .map((group) => group.getAttribute("label")),
-    ).toEqual(["United States", "Netherlands"]);
+    await waitFor(() => expect(screen.getByLabelText("Region")).not.toBeDisabled());
+
+    // Portalled and mounted only while open, unlike the <optgroup>s this replaced — so
+    // the popup has to be opened before there is anything to count.
+    await user.click(screen.getByRole("combobox", { name: "Region" }));
+    const listbox = within(await screen.findByRole("listbox"));
+
+    expect(listbox.getByRole("option", { name: "US West (Oregon)" })).toBeVisible();
+    expect(listbox.getByRole("group", { name: "United States" })).toBeVisible();
+    expect(listbox.getByRole("group", { name: "Netherlands" })).toBeVisible();
+    // "Railway chooses" is ungrouped: an unlabelled group announces itself with no name.
+    expect(listbox.getAllByRole("group")).toHaveLength(2);
   });
 
   /*

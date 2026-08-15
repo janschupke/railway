@@ -24,6 +24,16 @@
   --plum-850: #191725;
   --plum-800: #1f1d2e;
   --plum-700: #2a2740;
+  /*
+   * Between 700 and 600, and it exists because both neighbours failed a real constraint.
+   *
+   * --rc-highlight has to do two things at once: stand off --rc-raised enough that a
+   * hovered row reads as hovered, and stay dark enough that --rc-accent on top of it —
+   * which is what the SELECTED row's text is, and the selected row can also be the hovered
+   * one — still clears AA. plum-700 is invisible against raised at 1.15:1; plum-600 pushes
+   * accent down to 4.32:1. This clears both at 1.30:1 and 4.68:1.
+   */
+  --plum-650: #332f4d;
   --plum-600: #383455;
 
   /* ---- Primitives: violet (Railway's accent, #6C3FE7) ---- */
@@ -166,6 +176,26 @@
   --rc-surface: var(--plum-850);
   --rc-raised: var(--plum-800);
   --rc-subtle: var(--plum-800);
+  /*
+   * The row under the cursor inside a popup, and the reason it cannot be --rc-subtle.
+   *
+   * Every popup in the app paints --rc-raised and used to highlight its rows with
+   * --rc-subtle. On dark those two are the same plum-800, so hovering an option in the
+   * sort dropdown, the status multi-select or the image combobox changed nothing at all —
+   * a control that looks broken rather than plain. Light never showed it, because there
+   * --rc-subtle is gray-100 against a white --rc-raised.
+   *
+   * Up the same ramp rather than a new colour, so a highlighted row reads as the material
+   * lifted rather than as something painted on — and onto a step added for this, because
+   * the two either side of it each break one half of the requirement. See --plum-650.
+   *
+   * No WCAG threshold applies to the fill itself; hover feedback is not what identifies
+   * or operates the control. The pairs the criteria DO reach are text on top of it, and
+   * contrast.test.ts holds both --rc-text and --rc-accent there to AA. The accent one is
+   * the one that is easy to forget and the one a browser found first: an option that is
+   * both selected and hovered draws accent-coloured text on this fill.
+   */
+  --rc-highlight: var(--plum-650);
   --rc-border: var(--plum-700);
   --rc-border-strong: var(--plum-600);
   /* Scrim behind modals. Theme-aware: a 60% black wall is far too heavy on light. */
@@ -303,6 +333,9 @@
     --rc-surface: #ffffff;
     --rc-raised: #ffffff;
     --rc-subtle: var(--gray-100);
+    /* The --rc-border-strong step, mirroring what dark does with plum-600: the row under
+       the cursor has to be plainly different from the popup it sits in. */
+    --rc-highlight: var(--gray-300);
     --rc-border: var(--gray-200);
     --rc-border-strong: var(--gray-300);
     --rc-overlay: rgb(24 24 27 / 0.35);
@@ -393,6 +426,7 @@
   --rc-surface: #ffffff;
   --rc-raised: #ffffff;
   --rc-subtle: var(--gray-100);
+  --rc-highlight: var(--gray-300);
   --rc-border: var(--gray-200);
   --rc-border-strong: var(--gray-300);
   --rc-overlay: rgb(24 24 27 / 0.35);
@@ -476,6 +510,7 @@
   --rc-surface: var(--plum-850);
   --rc-raised: var(--plum-800);
   --rc-subtle: var(--plum-800);
+  --rc-highlight: var(--plum-650);
   --rc-border: var(--plum-700);
   --rc-border-strong: var(--plum-600);
   /* Scrim behind modals. Theme-aware: a 60% black wall is far too heavy on light. */

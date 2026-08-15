@@ -7,7 +7,7 @@ import type { ActionField } from "@/lib/action-result";
 import type { RegionOption } from "@/lib/railway/types";
 import { Field } from "./ui/field";
 import { Input } from "./ui/input";
-import { NativeSelect } from "./ui/select";
+import { Select } from "./ui/select";
 
 /** Every advanced field blank, which is what "leave it all to Railway" is spelled as. */
 const BLANK = {
@@ -63,18 +63,24 @@ export function AdvancedSettings({
    * is the fix the rules explicitly refuse.
    */
   const change =
-    (field: keyof typeof BLANK) =>
-    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    (field: keyof typeof BLANK) => (event: React.ChangeEvent<HTMLInputElement>) =>
       setValues((current) => ({ ...current, [field]: event.target.value }));
 
+  /** The same binding for the two Selects, which report a value rather than an event. */
+  const pick = (field: keyof typeof BLANK) => (next: string) =>
+    setValues((current) => ({ ...current, [field]: next }));
+
   const onChange = {
-    region: change("region"),
     replicas: change("replicas"),
     cpu: change("cpu"),
     memory: change("memory"),
-    restartPolicy: change("restartPolicy"),
     restartRetries: change("restartRetries"),
     startCommand: change("startCommand"),
+  };
+
+  const onValueChange = {
+    region: pick("region"),
+    restartPolicy: pick("restartPolicy"),
   };
 
   /*
@@ -89,10 +95,11 @@ export function AdvancedSettings({
   /*
    * Blank first, and it is a real option rather than a placeholder.
    *
-   * A native select has no empty state of its own — it shows its first option — so "let
-   * Railway choose" has to be a row someone can select their way back to after picking
-   * Frankfurt. Its value is the empty string, which is exactly what the schema reads as
-   * absence.
+   * "Let Railway choose" is a choice someone has to be able to make *again* — after
+   * picking Frankfurt, there has to be a row that takes them back — and a placeholder is
+   * only ever the absence of one. Its value is the empty string, which is what the schema
+   * reads as absence; `Select` maps it onto its own sentinel and back, because Radix will
+   * not hold an empty-valued item.
    */
   const regionOptions = [
     { value: "", label: t("regionDefault") },
@@ -111,154 +118,155 @@ export function AdvancedSettings({
   ];
 
   return (
-    <>
-      {/* The same flex-wrap idiom the image/name/port row uses, for the reason stated
-          there: it is how the whole app adapts, and there is no other `md:` in src/. */}
-      <div className="flex flex-wrap gap-4">
-        <div className="min-w-0 grow basis-56">
-          <NativeSelect
-            name="region"
-            label={t("regionLabel")}
-            hint={t("regionHint")}
-            options={regionOptions}
-            /*
-             * One option is no choice: when the read answered with nothing, the control says
-             * so instead of offering a list whose only row is "let Railway choose".
-             */
-            {...(regionsUnavailable
-              ? { disabled: true, disabledReason: t("regionUnavailable") }
-              : {})}
-            disabled={disabled || regionsUnavailable}
-            value={values.region}
-            onChange={onChange.region}
-          />
-        </div>
-
-        <div className="min-w-0 grow basis-32">
-          <Field
-            label={t("replicasLabel")}
-            hint={t("replicasHint")}
-            error={fieldError("replicas")}
-          >
-            {(field) => (
-              <Input
-                {...field}
-                name="replicas"
-                value={values.replicas}
-                onChange={onChange.replicas}
-                /*
-                 * `inputMode` rather than `type="number"`, on the argument the port field
-                 * already makes: a spinner nobody wants, silently dropped non-numeric input
-                 * the server's own rule should be refusing, and `valueAsNumber: NaN` for text
-                 * this form needs to send through so the catalog sentence is what is read.
-                 */
-                inputMode="numeric"
-                placeholder={t("replicasPlaceholder", { max: LIMITS.REPLICAS_MAX })}
-                autoComplete="off"
-                disabled={disabled}
-              />
-            )}
-          </Field>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-4">
-        <div className="min-w-0 grow basis-32">
-          <Field label={t("cpuLabel")} hint={t("cpuHint")} error={fieldError("cpu")}>
-            {(field) => (
-              <Input
-                {...field}
-                name="cpu"
-                value={values.cpu}
-                onChange={onChange.cpu}
-                // `decimal`, not `numeric`: a quarter of a vCPU is a real request, and the
-                // keypad this asks for is the one with a point on it.
-                inputMode="decimal"
-                placeholder={t("cpuPlaceholder")}
-                autoComplete="off"
-                disabled={disabled}
-              />
-            )}
-          </Field>
-        </div>
-
-        <div className="min-w-0 grow basis-32">
-          <Field
-            label={t("memoryLabel")}
-            hint={t("memoryHint")}
-            error={fieldError("memory")}
-          >
-            {(field) => (
-              <Input
-                {...field}
-                name="memory"
-                value={values.memory}
-                onChange={onChange.memory}
-                inputMode="decimal"
-                placeholder={t("memoryPlaceholder")}
-                autoComplete="off"
-                disabled={disabled}
-              />
-            )}
-          </Field>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-4">
-        <div className="min-w-0 grow basis-48">
-          <NativeSelect
-            name="restartPolicy"
-            label={t("restartPolicyLabel")}
-            hint={t("restartPolicyHint")}
-            options={restartOptions}
-            value={values.restartPolicy}
-            onChange={onChange.restartPolicy}
-            disabled={disabled}
-          />
-        </div>
-
-        <div className="min-w-0 grow basis-32">
-          <Field
-            label={t("restartRetriesLabel")}
-            hint={t("restartRetriesHint")}
-            error={fieldError("restartRetries")}
-          >
-            {(field) => (
-              <Input
-                {...field}
-                name="restartRetries"
-                value={values.restartRetries}
-                onChange={onChange.restartRetries}
-                inputMode="numeric"
-                placeholder={t("restartRetriesPlaceholder")}
-                autoComplete="off"
-                // See `retriesApply` above. The action drops a stray retry count too, for a
-                // request that did not come from this form.
-                disabled={disabled || !retriesApply}
-              />
-            )}
-          </Field>
-        </div>
-      </div>
+    /*
+     * One grid over all seven fields, not three flex rows.
+     *
+     * The rows used to be independent `flex flex-wrap` containers with bases of 56, 32 and
+     * 48 mixed between them, so no two of them shared a column edge — Region ran wider than
+     * Restart policy, CPU started where neither did, and the panel read as three unrelated
+     * strips rather than one form. Tracks are the fix, because a grid is the one layout
+     * where the columns are a property of the container instead of a coincidence between
+     * siblings.
+     *
+     * `auto-fit` and a minimum rather than a breakpoint, per the policy the image/name/port
+     * row states: there is no `md:` anywhere in src/, and the panel should reflow on the
+     * space it actually has. At two tracks the field order preserves the pairs that were
+     * already there — region+replicas, cpu+memory, policy+retries — so nothing moves for a
+     * reader who knew the old layout.
+     *
+     * `items-start` keeps every control on the top edge of its row when one field's hint
+     * wraps to a second line and its neighbour's does not.
+     */
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] items-start gap-4">
+      <Select
+        name="region"
+        label={t("regionLabel")}
+        hint={t("regionHint")}
+        options={regionOptions}
+        /*
+         * One option is no choice: when the read answered with nothing, the control says
+         * so instead of offering a list whose only row is "let Railway choose".
+         */
+        {...(regionsUnavailable ? { disabledReason: t("regionUnavailable") } : {})}
+        disabled={disabled || regionsUnavailable}
+        value={values.region}
+        onValueChange={onValueChange.region}
+      />
 
       <Field
-        label={t("startCommandLabel")}
-        hint={t("startCommandHint")}
-        error={fieldError("startCommand")}
+        label={t("replicasLabel")}
+        hint={t("replicasHint")}
+        error={fieldError("replicas")}
       >
         {(field) => (
           <Input
             {...field}
-            name="startCommand"
-            value={values.startCommand}
-            onChange={onChange.startCommand}
-            placeholder={t("startCommandPlaceholder")}
+            name="replicas"
+            value={values.replicas}
+            onChange={onChange.replicas}
+            /*
+             * `inputMode` rather than `type="number"`, on the argument the port field
+             * already makes: a spinner nobody wants, silently dropped non-numeric input
+             * the server's own rule should be refusing, and `valueAsNumber: NaN` for text
+             * this form needs to send through so the catalog sentence is what is read.
+             */
+            inputMode="numeric"
+            placeholder={t("replicasPlaceholder", { max: LIMITS.REPLICAS_MAX })}
             autoComplete="off"
-            className="font-mono"
             disabled={disabled}
           />
         )}
       </Field>
-    </>
+
+      <Field label={t("cpuLabel")} hint={t("cpuHint")} error={fieldError("cpu")}>
+        {(field) => (
+          <Input
+            {...field}
+            name="cpu"
+            value={values.cpu}
+            onChange={onChange.cpu}
+            // `decimal`, not `numeric`: a quarter of a vCPU is a real request, and the
+            // keypad this asks for is the one with a point on it.
+            inputMode="decimal"
+            placeholder={t("cpuPlaceholder")}
+            autoComplete="off"
+            disabled={disabled}
+          />
+        )}
+      </Field>
+
+      <Field
+        label={t("memoryLabel")}
+        hint={t("memoryHint")}
+        error={fieldError("memory")}
+      >
+        {(field) => (
+          <Input
+            {...field}
+            name="memory"
+            value={values.memory}
+            onChange={onChange.memory}
+            inputMode="decimal"
+            placeholder={t("memoryPlaceholder")}
+            autoComplete="off"
+            disabled={disabled}
+          />
+        )}
+      </Field>
+
+      <Select
+        name="restartPolicy"
+        label={t("restartPolicyLabel")}
+        hint={t("restartPolicyHint")}
+        options={restartOptions}
+        value={values.restartPolicy}
+        onValueChange={onValueChange.restartPolicy}
+        disabled={disabled}
+      />
+
+      <Field
+        label={t("restartRetriesLabel")}
+        hint={t("restartRetriesHint")}
+        error={fieldError("restartRetries")}
+      >
+        {(field) => (
+          <Input
+            {...field}
+            name="restartRetries"
+            value={values.restartRetries}
+            onChange={onChange.restartRetries}
+            inputMode="numeric"
+            placeholder={t("restartRetriesPlaceholder")}
+            autoComplete="off"
+            // See `retriesApply` above. The action drops a stray retry count too, for a
+            // request that did not come from this form.
+            disabled={disabled || !retriesApply}
+          />
+        )}
+      </Field>
+
+      {/* The one field with no natural partner: a command is a sentence, and half a row
+          of monospace is not enough of it to read. */}
+      <div className="col-span-full">
+        <Field
+          label={t("startCommandLabel")}
+          hint={t("startCommandHint")}
+          error={fieldError("startCommand")}
+        >
+          {(field) => (
+            <Input
+              {...field}
+              name="startCommand"
+              value={values.startCommand}
+              onChange={onChange.startCommand}
+              placeholder={t("startCommandPlaceholder")}
+              autoComplete="off"
+              className="font-mono"
+              disabled={disabled}
+            />
+          )}
+        </Field>
+      </div>
+    </div>
   );
 }

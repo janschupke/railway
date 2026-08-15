@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { CreateProjectButton } from "@/components/create-project-button";
+import { CreateProjectDialog } from "@/components/create-dialogs";
 import { ContainerSectionSkeleton } from "@/components/dashboard-skeletons";
 import { ProjectPicker } from "@/components/project-picker";
 import { ProjectWatcher } from "@/components/project-watcher";
@@ -204,7 +204,7 @@ export default async function DashboardPage({
                           again, which is the right answer only for the narrow case of a
                           project created elsewhere seconds ago — it stays, demoted.
                         */}
-                        <CreateProjectButton
+                        <CreateProjectDialog
                           variant="primary"
                           triggerLabel={tCreate("triggerFirst")}
                         />

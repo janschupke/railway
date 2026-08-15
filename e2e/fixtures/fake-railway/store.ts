@@ -543,9 +543,19 @@ export class Store {
       const line: LogLine = {
         timestamp: new Date().toISOString(),
         message: `[fake-railway] ${deployment.status.toLowerCase()} ${deployment.id}`,
-        // Two values, so the filter has something to choose between rather than a single
-        // chip that narrows to everything.
-        severity: deployment.status === "FAILED" ? "error" : "info",
+        /*
+         * Three values, so the filter has something to choose between rather than a single
+         * chip that narrows to everything — and so the pane's severity COLOURING has more
+         * than one tone on screen at once. `error` and `warn` map to different tokens;
+         * `info` deliberately maps to none, which is the case that must keep reading as
+         * ordinary output.
+         */
+        severity:
+          deployment.status === "FAILED"
+            ? "error"
+            : deployment.status === "DEPLOYING"
+              ? "warn"
+              : "info",
       };
       if (deployment.logPhase === "both" || deployment.logPhase === "build") {
         deployment.logs.build.push(line);

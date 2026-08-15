@@ -1,4 +1,12 @@
-import { button, expect, injectFaults, onlyVisible, test, toast } from "./support";
+import {
+  button,
+  expect,
+  injectFaults,
+  onlyVisible,
+  openCreateFromSelect,
+  test,
+  toast,
+} from "./support";
 
 /**
  * Where the dashboard gets its project list, and what it says when it gets nothing.
@@ -160,7 +168,7 @@ test.describe("creating an environment", () => {
   test("adds one to the selected project and switches to it", async ({ page }) => {
     await signInBare(page);
 
-    await button(page, /new environment/i).click();
+    await openCreateFromSelect(page, "Environment", /new environment/i);
     const dialog = onlyVisible(page.getByRole("dialog"));
     await dialog.getByLabel("Environment name").fill("qa");
     await dialog.getByRole("button", { name: "Create environment" }).click();

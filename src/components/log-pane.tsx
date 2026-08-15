@@ -19,6 +19,7 @@ import {
   indexMatches,
   logFileName,
   serializeLines,
+  severityTone,
   visibleLines,
   type LineMatch,
 } from "@/lib/log-view";
@@ -26,6 +27,7 @@ import { cn } from "@/lib/utils";
 import type { StreamStatus } from "@/hooks/use-deployment-stream";
 import type { LogLine } from "@/lib/railway/types";
 import { LogPaneToolbar } from "./log-pane-toolbar";
+import { DialogContent, DialogRoot } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import { Text } from "./ui/text";
@@ -87,9 +89,17 @@ const LogRow = memo(function LogRow({
   wrap: boolean;
   noTimestamp: string;
 }) {
+  const tone = severityTone(line);
+
   return (
     <div
       data-log-row
+      /*
+       * The row's colour is a token lookup in globals.css keyed on this attribute, the
+       * same mechanism StatusBadge uses — omitted entirely when there is no tone, so the
+       * row inherits the pane's text colour rather than being painted with it.
+       */
+      {...(tone ? { "data-severity": tone } : {})}
       className={cn(
         "text-text",
         // break-all is not optional. Radix wraps the viewport's children in a
@@ -99,7 +109,17 @@ const LogRow = memo(function LogRow({
         wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
       )}
     >
-      <span className="text-text-subtle mr-2 select-none">
+      {/*
+        Selectable, and it used to not be.
+
+        `select-none` here meant a hand selection yielded messages without their times,
+        on the argument that a pasted excerpt reads better as the log than as a column of
+        clock times. That is a real preference and it was the wrong one to enforce: the
+        commonest reason to drag-select two log lines is to say when something happened,
+        and there was no way to get the times out short of copying the whole buffer.
+        Anyone who wants the messages alone can still select from the first glyph of one.
+      */}
+      <span className="text-text-subtle mr-2">
         {/* `||`, not `??`: an empty timestamp slices to "" and must
             still fall back to the placeholder. */}
         {line.timestamp?.slice(11, 19) || noTimestamp}
@@ -144,10 +164,10 @@ const LogRow = memo(function LogRow({
  * are usually the reason. Severity is the only thing that narrows, and copy and download
  * follow whatever is on screen.
  *
- * Note that the timestamp span is `select-none`, so a hand selection inside the pane
- * yields messages without their timestamps. That is deliberate — a pasted excerpt reads
- * as the log rather than as a column of clock times — and the copy button is the way to
- * get the full ISO stamps.
+ * A hand selection inside the pane yields the timestamps along with the messages. The
+ * span used to be `select-none` on the argument that an excerpt reads better without
+ * them; see LogRow for why that lost. The copy and download buttons still emit the full
+ * ISO stamps rather than the HH:MM:SS slice on screen.
  */
 export function LogPane({
   lines,
@@ -163,6 +183,7 @@ export function LogPane({
   label: string;
 }) {
   const t = useTranslations("containers");
+  const tCommon = useTranslations("common");
   const { toast } = useToast();
   const counterId = useId();
   /*
@@ -206,6 +227,15 @@ export function LogPane({
   const [seek, setSeek] = useState(0);
   const [wrap, setWrap] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [maximized, setMaximized] = useState(false);
+  const [copying, setCopying] = useState(false);
+  /*
+   * Which export last succeeded, cleared on a timer. One value rather than two booleans:
+   * the two ticks are mutually exclusive in practice and a single state cannot get stuck
+   * showing both.
+   */
+  const [confirmed, setConfirmed] = useState<"copy" | "download" | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /*
    * Both a ref and a state, deliberately.
@@ -321,8 +351,35 @@ export function LogPane({
           ? t("logNoMatches")
           : t("logMatchCount", { index: current + 1, total: index.total });
 
+  /*
+   * Shows the tick, and clears it on a timer that cannot outlive the component.
+   *
+   * The timeout is held in a ref and cleared on unmount because this pane is mounted
+   * behind a row's `mounted` gate — collapsing the row mid-window would otherwise leave a
+   * setState scheduled against a component that is gone.
+   */
+  const confirm = (which: "copy" | "download") => {
+    setConfirmed(which);
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    confirmTimer.current = setTimeout(() => setConfirmed(null), UI.ACTION_FEEDBACK_MS);
+  };
+
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    },
+    [],
+  );
+
   const onCopy = async () => {
-    if (await writeClipboard(serializeLines(visible))) {
+    // `navigator.clipboard` can block on a permission prompt, so this is a real wait and
+    // not a formality — the button says so rather than looking like it ignored the click.
+    setCopying(true);
+    const written = await writeClipboard(serializeLines(visible));
+    setCopying(false);
+
+    if (written) {
+      confirm("copy");
       toast({ title: t("logCopied", { count: visible.length }), tone: "success" });
     } else {
       toast({
@@ -333,98 +390,154 @@ export function LogPane({
     }
   };
 
+  const onDownload = () => {
+    downloadText(logFileName(label, new Date()), serializeLines(visible));
+    confirm("download");
+  };
+
+  const toolbar = (
+    <LogPaneToolbar
+      needle={needle}
+      onNeedleChange={changeNeedle}
+      onNext={() => step(1)}
+      onPrevious={() => step(-1)}
+      counter={counter}
+      counterId={counterId}
+      matchCount={index.total}
+      wrap={wrap}
+      onWrapChange={setWrap}
+      onCopy={onCopy}
+      onDownload={onDownload}
+      copied={confirmed === "copy"}
+      downloaded={confirmed === "download"}
+      copying={copying}
+      canExport={visible.length > 0}
+      maximized={maximized}
+      onMaximizedChange={setMaximized}
+      severities={present}
+      selected={active}
+      onSelectedChange={changeSelected}
+    />
+  );
+
+  const viewport = (
+    <ScrollArea
+      /*
+       * `h-pane-log` in place, the leftover height of the dialog when maximised. The
+       * token is the contract log-pane-skeleton.tsx matches, and it only has to hold for
+       * the in-place case — nothing stands in for a dialog nobody has opened yet.
+       */
+      className={cn("bg-subtle rounded-md", maximized ? "min-h-0 grow" : "h-pane-log")}
+      viewportClassName="p-3"
+      viewportRef={setViewport}
+      viewportProps={{
+        /*
+         * `role="log"` carries an implicit aria-live of polite, which is exactly what
+         * a build emitting hundreds of lines needs — assertive would be unusable. The
+         * explicit attribute was redundant rather than additive, and on a dashboard
+         * already holding several regions the cheapest one to remove is the one that
+         * says nothing the role does not.
+         */
+        role: "log",
+        "aria-label": t("logsLabel"),
+        /*
+         * Muted while searching. Changing the needle replaces text nodes with elements
+         * across every matching row, and the region's default aria-relevant counts all
+         * of that as additions — a burst a screen reader would read out wholesale, on
+         * top of the match counter saying the same thing more usefully. Someone who is
+         * searching is not tailing, and clearing the field resumes the announcements.
+         */
+        "aria-busy": needle ? true : undefined,
+      }}
+    >
+      {visible.length === 0 ? (
+        <Text asChild variant="mono" tone="muted">
+          {/*
+            Three states, not two. A stream that closed having emitted nothing has
+            finished its job — saying "Connecting…" there is a lie that never resolves,
+            which is exactly what a successful deployment with no log output produced.
+
+            Still three with filtering in play: `active` only ever holds severities the
+            buffer actually contains, so a filter can never narrow to nothing.
+          */}
+          <p>
+            {status === "connecting"
+              ? t("connecting")
+              : status === "closed"
+                ? t("noLogOutput")
+                : (emptyLabel ?? t("waitingForOutput"))}
+          </p>
+        </Text>
+      ) : (
+        // The mono variant carries its own leading, so these rows, the empty state above
+        // and log-pane-skeleton.tsx can no longer disagree about it — which they did,
+        // the two placeholders standing in at a tighter line height than the real thing.
+        <div className="text-mono font-mono">
+          {visible.map((line, i) => (
+            <LogRow
+              key={`${line.timestamp}-${i}`}
+              line={line}
+              matches={index.byLine.get(i)}
+              current={index.lineOf[current] === i ? current : -1}
+              wrap={wrap}
+              noTimestamp={t("noTimestamp")}
+            />
+          ))}
+        </div>
+      )}
+    </ScrollArea>
+  );
+
+  const jumpToLatest = !pinned && (
+    <Button
+      size="sm"
+      onClick={() => setPinned(true)}
+      className="absolute right-3 bottom-3 rounded-full shadow-sm"
+    >
+      {t("jumpToLatest")}
+    </Button>
+  );
+
+  /*
+   * Maximised renders the SAME toolbar and the SAME viewport inside a dialog, rather than
+   * a second pane built for the occasion.
+   *
+   * That is the whole design: every filter control — the needle, match stepping, wrap,
+   * the severity strip, copy, download — is present in both states by construction, and
+   * so is every piece of state behind them, because there is only one of each. A second
+   * LogPane mounted in a dialog would have its own needle and its own scroll position,
+   * and the two would disagree the moment either was touched.
+   *
+   * Moving the viewport between parents remounts it, so the scroll position resets and
+   * the pane re-pins to the tail. That is the behaviour `pinned` already defines for a
+   * pane that has just appeared, and it is the right one here: somebody who maximises a
+   * log wants to see the end of it.
+   */
+  if (maximized) {
+    return (
+      <DialogRoot open onOpenChange={(next) => setMaximized(next)}>
+        <DialogContent
+          size="full"
+          closeLabel={tCommon("close")}
+          aria-label={t("logsLabel")}
+        >
+          {/* `relative` for the same reason the in-place wrapper has it: Jump to latest
+              is positioned against the pane, not against the dialog. */}
+          <div className="relative flex min-h-0 grow flex-col">
+            {toolbar}
+            {viewport}
+            {jumpToLatest}
+          </div>
+        </DialogContent>
+      </DialogRoot>
+    );
+  }
+
   return (
     <div className="relative">
-      <LogPaneToolbar
-        needle={needle}
-        onNeedleChange={changeNeedle}
-        onNext={() => step(1)}
-        onPrevious={() => step(-1)}
-        counter={counter}
-        counterId={counterId}
-        matchCount={index.total}
-        wrap={wrap}
-        onWrapChange={setWrap}
-        onCopy={onCopy}
-        onDownload={() =>
-          downloadText(logFileName(label, new Date()), serializeLines(visible))
-        }
-        canExport={visible.length > 0}
-        severities={present}
-        selected={active}
-        onSelectedChange={changeSelected}
-      />
-
-      <ScrollArea
-        className="bg-subtle h-pane-log rounded-md"
-        viewportClassName="p-3"
-        viewportRef={setViewport}
-        viewportProps={{
-          /*
-           * `role="log"` carries an implicit aria-live of polite, which is exactly what
-           * a build emitting hundreds of lines needs — assertive would be unusable. The
-           * explicit attribute was redundant rather than additive, and on a dashboard
-           * already holding several regions the cheapest one to remove is the one that
-           * says nothing the role does not.
-           */
-          role: "log",
-          "aria-label": t("logsLabel"),
-          /*
-           * Muted while searching. Changing the needle replaces text nodes with elements
-           * across every matching row, and the region's default aria-relevant counts all
-           * of that as additions — a burst a screen reader would read out wholesale, on
-           * top of the match counter saying the same thing more usefully. Someone who is
-           * searching is not tailing, and clearing the field resumes the announcements.
-           */
-          "aria-busy": needle ? true : undefined,
-        }}
-      >
-        {visible.length === 0 ? (
-          <Text asChild variant="mono" tone="muted">
-            {/*
-              Three states, not two. A stream that closed having emitted nothing has
-              finished its job — saying "Connecting…" there is a lie that never resolves,
-              which is exactly what a successful deployment with no log output produced.
-
-              Still three with filtering in play: `active` only ever holds severities the
-              buffer actually contains, so a filter can never narrow to nothing.
-            */}
-            <p>
-              {status === "connecting"
-                ? t("connecting")
-                : status === "closed"
-                  ? t("noLogOutput")
-                  : (emptyLabel ?? t("waitingForOutput"))}
-            </p>
-          </Text>
-        ) : (
-          // The mono variant carries its own leading, so these rows, the empty state above
-          // and log-pane-skeleton.tsx can no longer disagree about it — which they did,
-          // the two placeholders standing in at a tighter line height than the real thing.
-          <div className="text-mono font-mono">
-            {visible.map((line, i) => (
-              <LogRow
-                key={`${line.timestamp}-${i}`}
-                line={line}
-                matches={index.byLine.get(i)}
-                current={index.lineOf[current] === i ? current : -1}
-                wrap={wrap}
-                noTimestamp={t("noTimestamp")}
-              />
-            ))}
-          </div>
-        )}
-      </ScrollArea>
-
-      {!pinned && (
-        <Button
-          size="sm"
-          onClick={() => setPinned(true)}
-          className="absolute right-3 bottom-3 rounded-full shadow-sm"
-        >
-          {t("jumpToLatest")}
-        </Button>
-      )}
+      {toolbar}
+      {viewport}
+      {jumpToLatest}
     </div>
   );
 }

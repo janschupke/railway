@@ -279,7 +279,7 @@ export function Combobox({
                           className={cn(
                             "text-text text-body flex w-full cursor-pointer items-center justify-between gap-2",
                             "rounded px-2 py-1.5 text-left select-none",
-                            index === active && "bg-subtle",
+                            index === active && "bg-highlight",
                             option.value === value && "text-accent",
                           )}
                         >

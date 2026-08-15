@@ -21,6 +21,7 @@ import { relativeTime } from "@/lib/format";
 import { useVolumeSize } from "@/hooks/use-volume-size";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
+import { ContainerDetailDialog } from "./container-detail-dialog";
 import { ContainerMetricsReadout } from "./container-metrics";
 import { ContainerUrl } from "./container-url";
 import { LogPaneSkeleton } from "./log-pane-skeleton";
@@ -356,7 +357,13 @@ export function ContainerRow({
               displayName={container.displayName}
               projectId={projectId}
               environmentId={environmentId}
-              managed={container.managed}
+              /*
+               * The same `container.managed` the action cluster below is branched on, read
+               * once here rather than re-derived inside the component. Minting a domain is
+               * a write like the other five, and it was the only one whose availability was
+               * decided in its own file.
+               */
+              canGenerate={container.managed}
             />
           </span>
         </div>
@@ -399,10 +406,9 @@ export function ContainerRow({
            * rather than the Redeploy its stale status would have earned.
            */
           <ContainerActions
-            serviceId={container.serviceId}
-            displayName={container.displayName}
-            image={container.image}
-            deploymentId={container.deploymentId}
+            container={container}
+            metrics={metrics}
+            volume={volume}
             state={state}
             projectId={projectId}
             environmentId={environmentId}
@@ -435,22 +441,42 @@ export function ContainerRow({
            * description rather than a label, so the accessible name stays the visible
            * text (WCAG 2.5.3 Label in Name).
            */
-          <Tooltip content={t("notManagedTooltip")}>
-            <Button variant="secondary" size="sm" asChild>
-              <a
-                href={railwayServiceUrl({
-                  projectId,
-                  serviceId: container.serviceId,
-                  environmentId,
-                })}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <ExternalLink aria-hidden />
-                {t("openInRailway")}
-              </a>
-            </Button>
-          </Tooltip>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/*
+              Two controls now, where there was one.
+
+              Details is offered on every row, managed or not, and this is the row it was
+              missing most: an external container had nowhere at all to show what the app
+              knew about it, and the reason it cannot be changed here was carried entirely
+              by the tooltip on the link beside it. A tooltip is supplementary detail by
+              definition — the dialog is where that sentence belongs, in visible text.
+            */}
+            <ContainerDetailDialog
+              container={container}
+              metrics={metrics}
+              volume={volume}
+              state={state}
+              projectId={projectId}
+              environmentId={environmentId}
+            />
+
+            <Tooltip content={t("notManagedTooltip")}>
+              <Button variant="secondary" size="sm" asChild>
+                <a
+                  href={railwayServiceUrl({
+                    projectId,
+                    serviceId: container.serviceId,
+                    environmentId,
+                  })}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink aria-hidden />
+                  {t("openInRailway")}
+                </a>
+              </Button>
+            </Tooltip>
+          </div>
         )}
       </div>
 

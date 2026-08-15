@@ -1,5 +1,6 @@
 import type { Locator } from "@playwright/test";
 import {
+  openCreateFromSelect,
   addVariable,
   button,
   containerRows,
@@ -101,12 +102,8 @@ test.describe("keyboard operation", () => {
      */
     await signIn(page);
 
-    const trigger = onlyVisible(page.getByRole("button", { name: /new project/i }));
-    await trigger.focus();
-    await page.keyboard.press("Enter");
-
-    const dialog = onlyVisible(page.getByRole("dialog"));
-    await expect(dialog).toBeVisible();
+    const trigger = onlyVisible(page.getByRole("combobox", { name: "Project" }));
+    const dialog = await openCreateFromSelect(page, "Project", /new project/i);
     await expect(dialog.getByLabel("Project name")).toBeVisible();
 
     for (let i = 0; i < 10; i++) {
@@ -129,19 +126,25 @@ test.describe("keyboard operation", () => {
      * `/api/service-variables` answers, so the trap has to hold across a subtree that
      * appears after open. Radix computes the tabbable set at mount, and a spec that tabbed
      * before the fetch landed would prove the trap for a form that is not the one on screen.
+     *
+     * Edit is a mode of the detail dialog now rather than a dialog of its own, which makes
+     * the subtree it grows larger rather than smaller: the whole facts list is replaced by
+     * the form. Same test, one keystroke further in.
      */
     await signIn(page);
     await spinUp(page, "db", "PostgreSQL");
     await expect(row(page, "db").getByText("Running")).toBeVisible({ timeout: 20_000 });
 
     const trigger = onlyVisible(
-      row(page, "db").getByRole("button", { name: /^edit$/i }),
+      row(page, "db").getByRole("button", { name: /^details$/i }),
     );
     await trigger.focus();
     await page.keyboard.press("Enter");
 
     const dialog = onlyVisible(page.getByRole("dialog"));
     await expect(dialog).toBeVisible();
+
+    await onlyVisible(dialog.getByRole("button", { name: /^edit$/i })).click();
     // The editor is what arrives late; tabbing before it lands proves nothing.
     await expect(dialog.getByText("Environment variables")).toBeVisible();
 
@@ -157,9 +160,40 @@ test.describe("keyboard operation", () => {
   });
 
   test("creates a project entirely from the keyboard", async ({ page }) => {
+    /*
+     * Also the guard on the sequencing inside Select's action row, which nothing else
+     * would catch. The row closes a modal layer and opens another one a frame later; if
+     * those overlap, the dialog's focus scope loses the race to the select's focus
+     * restore and the field below is never focused. The Escape at the end is the other
+     * half: focus comes back to the trigger only because the select's own restore was
+     * allowed to run before the dialog mounted.
+     */
     await signIn(page);
 
-    await onlyVisible(page.getByRole("button", { name: /new project/i })).focus();
+    const trigger = onlyVisible(page.getByRole("combobox", { name: "Project" }));
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+
+    /*
+     * Gated on the layer, not merely on the element, for the reason dismissWithEscape
+     * documents: Radix portals this popup and hands it its layer a render after it
+     * appears, so keystrokes sent before that land on the page behind it.
+     */
+    const listbox = onlyVisible(page.getByRole("listbox"));
+    await expect(listbox).toBeVisible();
+    await expect(listbox.getByRole("option", { name: /new project/i })).toBeVisible();
+
+    // End rather than a run of ArrowDown: the create row is always the last one.
+    await page.keyboard.press("End");
+    /*
+     * Gated on the highlight, and this one is not belt-and-braces. Radix moves focus for
+     * Home/End inside a `setTimeout`, so an Enter sent in the same tick lands on whichever
+     * row was focused before — a project, which selects it and closes the popup with no
+     * dialog to show for it. `data-highlighted` is written on focus, so it is the signal
+     * that the deferred move has actually happened.
+     */
+    const createRow = listbox.getByRole("option", { name: /new project/i });
+    await expect(createRow).toHaveAttribute("data-highlighted", "");
     await page.keyboard.press("Enter");
 
     const dialog = onlyVisible(page.getByRole("dialog"));
@@ -168,9 +202,12 @@ test.describe("keyboard operation", () => {
     await page.keyboard.press("Enter");
 
     await expect(toast(page, "Created Keyboard project")).toBeVisible();
-    await expect(
-      onlyVisible(page.getByRole("combobox", { name: "Project" })),
-    ).toContainText("Keyboard project");
+    await expect(trigger).toContainText("Keyboard project");
+
+    const reopened = await openCreateFromSelect(page, "Project", /new project/i);
+    await dismissWithEscape(page, reopened);
+    await expect(reopened).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 
   test("completes a destroy entirely from the keyboard", async ({ page }) => {

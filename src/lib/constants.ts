@@ -566,6 +566,19 @@ export const UI = {
    * toolbar would become the page. Above this the control declines to render at all.
    */
   LOG_SEVERITY_MAX: 6,
+  /**
+   * How long an icon button shows a tick after the thing it did succeeded.
+   *
+   * Copy and download are the two controls in this app that answer instantly and leave
+   * nothing on screen to show for it — the toast says so, but a toast is what a
+   * screen-reader user gets, and a sighted user clicking Copy had no way to tell a
+   * successful write from a dead button.
+   *
+   * Long enough to be seen after the eye returns from wherever the click sent it, short
+   * enough that the control is back to its resting state before anyone would press it
+   * again. Below roughly a second this reads as a flicker.
+   */
+  ACTION_FEEDBACK_MS: 1_500,
 } as const;
 
 /**

@@ -52,6 +52,11 @@ export function ProjectPickerSkeleton() {
      * `items-end` and `w-64` per column, matching ProjectPicker exactly. This used to be
      * `items-center` with a bare `w-48` control and no label placeholder at all — three
      * ways of standing in for a row it did not actually resemble.
+     *
+     * Two columns is now the whole row. It stood in for two selects and a pair of create
+     * buttons it never drew, so it was narrower than what replaced it; the buttons have
+     * since moved inside the selects as action rows, and the match is exact. Do not
+     * "restore" a button placeholder here.
      */
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex w-64 flex-col gap-1.5">

@@ -9,22 +9,29 @@ import { PendingStatus } from "./ui/misc";
 /**
  * "New project", wherever it appears.
  *
- * Two call sites with two weights: primary in the empty state, where creating one is the
- * whole point of the screen, and secondary beside the picker, where it sits next to the
- * thing it adds to. The behaviour is identical, which is why it is one component with a
- * variant rather than two.
+ * Two call sites with two shapes now. In the empty state it draws its own primary button,
+ * because creating a project is the whole point of that screen. In the picker it is
+ * controlled and draws nothing — the affordance is a row inside the project dropdown, next
+ * to the projects it would be added to.
+ *
+ * Not `…Button` any more, for that reason: at one of its call sites it is not one.
  *
  * Owns the navigation because the value of creating a project here — rather than on
  * railway.com — is landing on it. `useDashboardSelection` is what actually writes the URL;
  * this only decides that a create should select what it made.
  */
-export function CreateProjectButton({
+export function CreateProjectDialog({
   variant = "secondary",
   triggerLabel,
+  open,
+  onOpenChange,
 }: {
   variant?: "primary" | "secondary";
   /** Overridden in the empty state, where the button is a first-run invitation. */
   triggerLabel?: string;
+  /** Supplied, the trigger is the caller's. See CreateNameDialog. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const t = useTranslations("createProject");
   const { select, pending } = useDashboardSelection();
@@ -35,6 +42,8 @@ export function CreateProjectButton({
         action={createProject}
         field="projectName"
         triggerVariant={variant}
+        {...(open === undefined ? {} : { open })}
+        {...(onOpenChange ? { onOpenChange } : {})}
         copy={{
           trigger: triggerLabel ?? t("trigger"),
           title: t("title"),
@@ -56,14 +65,23 @@ export function CreateProjectButton({
 }
 
 /**
- * "New environment", beside the environment picker.
+ * "New environment", as a row inside the environment picker.
  *
- * Disabled without a project rather than hidden — the control is part of the row's shape,
- * and a button that appears once you pick something is harder to find than one that was
- * always there. The reason is said out loud for the same reason the environment Select
- * carries a `disabledReason`.
+ * The "disabled rather than hidden" rule that used to live here now lives in the control
+ * itself, which is where it belongs: without a project the environment Select is disabled
+ * and says `selectProjectFirst` under it, so the row is unreachable and the reason is on
+ * screen. With a project and no environments the Select stays *enabled* holding one row —
+ * the thing that fixes the emptiness is not a dead end.
  */
-export function CreateEnvironmentButton({ projectId }: { projectId: string | null }) {
+export function CreateEnvironmentDialog({
+  projectId,
+  open,
+  onOpenChange,
+}: {
+  projectId: string | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const t = useTranslations("createEnvironment");
   const { select, pending } = useDashboardSelection();
 
@@ -74,6 +92,8 @@ export function CreateEnvironmentButton({ projectId }: { projectId: string | nul
         field="environmentName"
         disabled={!projectId}
         {...(projectId ? { hidden: { projectId } } : {})}
+        {...(open === undefined ? {} : { open })}
+        {...(onOpenChange ? { onOpenChange } : {})}
         copy={{
           trigger: t("trigger"),
           title: t("title"),

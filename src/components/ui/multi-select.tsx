@@ -125,7 +125,7 @@ export function MultiSelect<T extends string>({
                 label={option.label}
                 checked={chosen.has(option.value)}
                 onChange={(event) => toggle(option.value, event.target.checked)}
-                className="hover:bg-subtle rounded px-2 py-1.5"
+                className="hover:bg-highlight rounded px-2 py-1.5"
               />
             ))}
           </div>

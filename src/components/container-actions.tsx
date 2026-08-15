@@ -7,9 +7,14 @@ import {
   stopContainer,
 } from "@/app/dashboard/actions";
 import { availableActions, type ContainerAction } from "@/lib/container-actions";
-import type { ContainerState } from "@/lib/railway/types";
+import type {
+  Container,
+  ContainerMetrics,
+  ContainerState,
+  ContainerVolume,
+} from "@/lib/railway/types";
+import { ContainerDetailDialog } from "./container-detail-dialog";
 import { DestroyContainerDialog } from "./destroy-container-dialog";
-import { EditContainerDialog } from "./edit-container-dialog";
 import { LifecycleActionDialog } from "./lifecycle-action-dialog";
 
 /**
@@ -29,7 +34,7 @@ const ACTIONS: Record<
 };
 
 /**
- * Everything a managed row can do to its container.
+ * Everything a managed row can do to its container, plus the view of it that every row has.
  *
  * Gated on state rather than rendered-and-disabled: a disabled control is a promise that
  * something would happen if only the row were in another state, and "Restart" on a
@@ -41,20 +46,24 @@ const ACTIONS: Record<
  * the controls change with the badge rather than a refresh behind it.
  */
 export function ContainerActions({
-  serviceId,
-  displayName,
-  image,
-  deploymentId,
+  container,
+  metrics,
+  volume,
   state,
   projectId,
   environmentId,
   volumeSize,
 }: {
-  serviceId: string;
-  displayName: string;
-  /** Seeds the edit form. Null for a service Railway describes with a repo — see ADR-6. */
-  image: string | null;
-  deploymentId: string | null;
+  /**
+   * The whole container rather than five fields off it.
+   *
+   * The detail dialog renders most of `Container`, so threading it field by field would be
+   * a prop list that grows every time a fact is added to that view — and `container` is
+   * what the row already holds.
+   */
+  container: Container;
+  metrics: ContainerMetrics | undefined;
+  volume: ContainerVolume | undefined;
   state: ContainerState;
   projectId: string;
   environmentId: string;
@@ -67,21 +76,30 @@ export function ContainerActions({
    */
   volumeSize?: string;
 }) {
-  const actions = availableActions({ state, deploymentId });
+  const actions = availableActions({
+    state,
+    deploymentId: container.deploymentId,
+  });
 
   return (
     // Wraps as one unit rather than letting the row break between two of these controls.
     <div className="flex flex-wrap items-center justify-end gap-2">
       {/*
+        Details rather than Edit, and it is not a rename: the control now opens a view of
+        the container that a managed row can switch into an edit form. See
+        container-detail-dialog.tsx for why the two are one thing.
+
         Not in `availableActions`, and not for want of a fourth entry. That list answers
         "would this mutation do anything in this state", which is a question about a running
         deployment — editing is a change to the container's *description*, and every state
-        has one. The single exception is the state where the description is on its way out.
+        has one. The single exception is the state where the description is on its way out,
+        which is what `disabled` says here: the details stay readable, the edit mode goes.
       */}
-      <EditContainerDialog
-        serviceId={serviceId}
-        displayName={displayName}
-        image={image}
+      <ContainerDetailDialog
+        container={container}
+        metrics={metrics}
+        volume={volume}
+        state={state}
         projectId={projectId}
         environmentId={environmentId}
         disabled={state === "removing"}
@@ -93,16 +111,16 @@ export function ContainerActions({
           action={action}
           run={ACTIONS[action].run}
           icon={ACTIONS[action].icon}
-          serviceId={serviceId}
-          displayName={displayName}
+          serviceId={container.serviceId}
+          displayName={container.displayName}
           projectId={projectId}
           environmentId={environmentId}
         />
       ))}
 
       <DestroyContainerDialog
-        serviceId={serviceId}
-        displayName={displayName}
+        serviceId={container.serviceId}
+        displayName={container.displayName}
         projectId={projectId}
         environmentId={environmentId}
         volumeSize={volumeSize}

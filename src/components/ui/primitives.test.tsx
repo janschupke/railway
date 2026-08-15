@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Banner } from "./banner";
 import { Button } from "./button";
@@ -8,7 +9,7 @@ import { ErrorBlock } from "./error-block";
 import { EmptyState, PendingStatus } from "./misc";
 import { Skeleton } from "./skeleton";
 import { ScrollArea } from "./scroll-area";
-import { NativeSelect, Select } from "./select";
+import { Select } from "./select";
 import { Tooltip, TooltipProvider } from "./tooltip";
 
 describe("Button", () => {
@@ -51,6 +52,25 @@ describe("Button", () => {
 
     await user.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("stays hit-testable when disabled, so it can say why it is disabled", () => {
+    /*
+     * The class this asserts the absence of is `pointer-events-none`, which the base
+     * variant carried until a disabled control turned out to have two things wrong with
+     * it: `globals.css` sets `button:disabled { cursor: not-allowed }` and an element
+     * outside hit-testing never becomes the hover target, so the rule never fired — and a
+     * Radix Tooltip around it never saw a pointer event either, which is every icon
+     * button in the log toolbar that is disabled some of the time.
+     *
+     * `disabled` on the element is what blocks activation, and the test above proves it.
+     */
+    render(<Button disabled>Nope</Button>);
+    const classes = [...screen.getByRole("button").classList];
+    // The icon rule `[&_svg]:pointer-events-none` is a different class and stays.
+    expect(classes).not.toContain("disabled:pointer-events-none");
+    expect(classes).not.toContain("pointer-events-none");
+    expect(classes).toContain("disabled:cursor-not-allowed");
   });
 
   it("marks itself busy and swaps the label while pending", () => {
@@ -391,96 +411,184 @@ describe("Select", () => {
   });
 });
 
-describe("NativeSelect", () => {
+describe("Select, as a form field", () => {
+  /*
+   * The block that used to be `describe("NativeSelect")`. Its five assertions are the
+   * three objections the old two-control split rested on — it submits, it can be blank,
+   * it can be wrong — plus grouping and the empty-list rule. They are kept verbatim in
+   * intent and rewritten against Radix, because the split was resolved by answering them
+   * rather than by deciding they no longer mattered.
+   */
   const options = [
     { value: "", label: "Railway chooses" },
     { value: "us-west2", label: "US West (Oregon)", group: "United States" },
     { value: "eu-west4", label: "Amsterdam", group: "Netherlands" },
   ];
 
-  /*
-   * The reason this exists beside the Radix one: it submits. The Radix select's value goes
-   * into the URL, and every control that uses this one is a form field the action reads.
-   */
-  it("reaches FormData under its name", async () => {
-    const user = userEvent.setup();
-    render(
+  /** `Select` is controlled, so a form test needs something to hold the value. */
+  function RegionForm({ initial = "" }: { initial?: string }) {
+    const [value, setValue] = useState(initial);
+    return (
       <form aria-label="settings">
-        <NativeSelect name="region" label="Region" options={options} defaultValue="" />
-      </form>,
+        <Select
+          name="region"
+          label="Region"
+          options={options}
+          value={value}
+          onValueChange={setValue}
+        />
+      </form>
     );
+  }
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Region" }),
-      "us-west2",
-    );
+  const choose = async (user: UserEvent, name: string) => {
+    await user.click(screen.getByRole("combobox", { name: "Region" }));
+    await user.click(await screen.findByRole("option", { name }));
+  };
+
+  it("reaches FormData under its name", async () => {
+    // The Radix select's own value goes into the URL; every control that uses `name` is a
+    // form field a Server Action reads, so this is the property the swap had to preserve.
+    const user = userEvent.setup();
+    render(<RegionForm />);
+
+    await choose(user, "US West (Oregon)");
 
     const form = screen.getByRole("form") as HTMLFormElement;
     expect(new FormData(form).get("region")).toBe("us-west2");
   });
 
-  /*
-   * The empty option is the other reason. `<Select.Item value="">` throws at runtime in
-   * Radix, and blank is the default state of both controls that use this — it is how a
-   * person says "let Railway decide", and it has to be a row they can select their way back
-   * to after picking somewhere.
-   */
-  it("carries an empty-valued option, which the Radix one cannot", async () => {
+  it("carries an empty-valued option, and never submits its sentinel", async () => {
+    /*
+     * Blank is the resting state of both controls that use this, and it has to be a row
+     * someone can select their way back to after picking somewhere. Radix throws on
+     * `<Select.Item value="">`, so the component substitutes a sentinel.
+     *
+     * The sweep over every entry is the assertion that matters, and it is deliberately
+     * over the SUBMISSION rather than over the markup. Radix mirrors its own state into an
+     * aria-hidden <select> whenever the trigger sits inside a form, so the sentinel really
+     * is in the DOM — it is simply unnamed there, and an unnamed control contributes
+     * nothing to FormData. Handing `name` to Radix's own prop instead of to the hidden
+     * input would name that mirror, and this is the assertion that would catch it.
+     */
     const user = userEvent.setup();
+    render(<RegionForm />);
+
+    await choose(user, "US West (Oregon)");
+    await choose(user, "Railway chooses");
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    const submitted = [...new FormData(form).entries()];
+    expect(submitted).toEqual([["region", ""]]);
+    for (const [, value] of submitted) {
+      expect(String(value)).not.toContain("\u0000");
+    }
+  });
+
+  it("is omitted from the submission when disabled, as a native control would be", () => {
+    // Load-bearing rather than tidy: it is what keeps a region out of the request when
+    // Railway offered no region list to choose from.
     render(
       <form aria-label="settings">
-        <NativeSelect name="region" label="Region" options={options} defaultValue="" />
+        <Select
+          name="region"
+          label="Region"
+          options={options}
+          value=""
+          onValueChange={vi.fn()}
+          disabled
+        />
       </form>,
     );
 
-    const select = screen.getByRole("combobox", { name: "Region" });
-    await user.selectOptions(select, "us-west2");
-    await user.selectOptions(select, "");
-
     const form = screen.getByRole("form") as HTMLFormElement;
-    expect(new FormData(form).get("region")).toBe("");
+    expect(new FormData(form).has("region")).toBe(false);
   });
 
-  it("groups options by their group, so a country heading appears once", () => {
-    render(<NativeSelect label="Region" options={options} defaultValue="" />);
-    const groups = screen.getAllByRole("group");
-    expect(groups.map((group) => group.getAttribute("label"))).toEqual([
-      "United States",
-      "Netherlands",
-    ]);
+  it("distinguishes nothing chosen from the empty option being chosen", () => {
+    // Two states a native select cannot tell apart, and the reason `value` is
+    // `string | undefined` rather than `string`.
+    const { rerender } = render(
+      <Select
+        label="Region"
+        options={options}
+        value={undefined}
+        onValueChange={vi.fn()}
+        placeholder="Pick one…"
+      />,
+    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Pick one…");
+
+    rerender(
+      <Select
+        label="Region"
+        options={options}
+        value=""
+        onValueChange={vi.fn()}
+        placeholder="Pick one…"
+      />,
+    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Railway chooses");
+  });
+
+  it("groups options by their group, so a country heading appears once", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select label="Region" options={options} value="" onValueChange={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    const groups = within(listbox).getAllByRole("group");
+
+    /*
+     * By accessible name, which Radix builds with `aria-labelledby` pointing at the
+     * Group's own Label rather than with `aria-label` — the heading a screen reader
+     * announces is the same either way, and that is what is worth asserting.
+     */
+    expect(within(listbox).getByRole("group", { name: "United States" })).toBeVisible();
+    expect(within(listbox).getByRole("group", { name: "Netherlands" })).toBeVisible();
     // The ungrouped option is not wrapped: an unlabelled group announces itself with no name.
     expect(groups).toHaveLength(2);
   });
 
   it("renders an error inline and marks the control invalid", () => {
     render(
-      <NativeSelect label="Region" options={options} error="That is not a region." />,
+      <Select
+        label="Region"
+        options={options}
+        value=""
+        onValueChange={vi.fn()}
+        error="That is not a region."
+      />,
     );
 
-    const select = screen.getByRole("combobox", { name: "Region" });
-    expect(select).toHaveAttribute("aria-invalid", "true");
+    const combobox = screen.getByRole("combobox", { name: "Region" });
+    expect(combobox).toHaveAttribute("aria-invalid", "true");
     const message = screen.getByRole("alert");
     expect(message).toHaveTextContent("That is not a region.");
-    expect(select).toHaveAttribute("aria-describedby", message.id);
+    expect(combobox).toHaveAttribute("aria-describedby", message.id);
   });
 
-  it("disables itself and says why when there is nothing to choose", () => {
-    // The Radix Select's rule, and its reason: an enabled control with one row is not a
-    // choice, it is a dead end.
+  it("prefers the disabled reason over the static hint", () => {
+    // `Field` shows one message, so the two have to be ranked somewhere. A dead control
+    // explains why it is dead before it explains what it would have done.
     render(
-      <NativeSelect
+      <Select
         label="Region"
         options={[]}
+        value=""
+        onValueChange={vi.fn()}
+        hint="Where this container runs."
         disabledReason="Railway did not offer a region list."
       />,
     );
 
-    const select = screen.getByRole("combobox", { name: "Region" });
-    expect(select).toBeDisabled();
-    expect(select).toHaveAttribute(
-      "aria-describedby",
-      screen.getByText("Railway did not offer a region list.").id,
-    );
+    expect(screen.getByRole("combobox", { name: "Region" })).toBeDisabled();
+    expect(
+      screen.getByText("Railway did not offer a region list."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Where this container runs.")).toBeNull();
   });
 });
 

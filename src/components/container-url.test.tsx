@@ -26,7 +26,7 @@ beforeEach(() => {
   routerMock.refresh.mockClear();
 });
 
-const renderUrl = (over: { url?: string | null; managed?: boolean } = {}) =>
+const renderUrl = (over: { url?: string | null; canGenerate?: boolean } = {}) =>
   render(
     <ToastProvider>
       <ContainerUrl
@@ -35,7 +35,7 @@ const renderUrl = (over: { url?: string | null; managed?: boolean } = {}) =>
         displayName="web"
         projectId="p1"
         environmentId="e1"
-        managed={over.managed ?? true}
+        canGenerate={over.canGenerate ?? true}
       />
     </ToastProvider>,
   );
@@ -82,14 +82,14 @@ describe("ContainerUrl", () => {
    * This app does not act on services it did not create, so an offer here would be one it
    * cannot honour — the row's Open in Railway is the honest route for those.
    */
-  it("offers nothing for an unmanaged container with no address", () => {
-    renderUrl({ managed: false });
+  it("offers nothing when the row says this container may not mint one", () => {
+    renderUrl({ canGenerate: false });
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("still shows the address of an unmanaged container that has one", () => {
-    renderUrl({ managed: false, url: "https://someone-elses.up.railway.app" });
+  it("still shows the address of a container it may not act on", () => {
+    renderUrl({ canGenerate: false, url: "https://someone-elses.up.railway.app" });
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
       "https://someone-elses.up.railway.app",

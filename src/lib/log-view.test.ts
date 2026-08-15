@@ -5,6 +5,7 @@ import {
   indexMatches,
   logFileName,
   serializeLines,
+  severityTone,
   visibleLines,
 } from "./log-view";
 import { UI } from "./constants";
@@ -52,6 +53,58 @@ describe("bufferSeverities", () => {
       line(`line ${i}`, `level-${i}`),
     );
     expect(bufferSeverities(many)).toEqual([]);
+  });
+});
+
+describe("severityTone", () => {
+  it.each([
+    ["error", "danger"],
+    ["critical", "danger"],
+    ["fatal", "danger"],
+    ["warn", "warning"],
+    ["warning", "warning"],
+    ["debug", "muted"],
+    ["trace", "muted"],
+  ])("buckets %s as %s", (severity, tone) => {
+    expect(severityTone(line("x", severity))).toBe(tone);
+  });
+
+  it("is case- and whitespace-insensitive, matching how the filter reads the same field", () => {
+    // Railway's casing is unobserved, so both halves of the app have to be indifferent to
+    // it or a value would colour and fail to filter, or the reverse.
+    expect(severityTone(line("x", "  ERROR "))).toBe("danger");
+    expect(severityTone(line("x", "Warning"))).toBe("warning");
+  });
+
+  it.each([["info"], ["notice"]])(
+    "gives %s no tone, because ordinary output is what the pane already draws",
+    (severity) => {
+      expect(severityTone(line("x", severity))).toBeNull();
+    },
+  );
+
+  it("gives an unrecognised severity no tone rather than guessing at one", () => {
+    // The posture toContainerState takes with an enum member this app does not map: a
+    // value Railway adds tomorrow reads as ordinary output, not as an alarm.
+    expect(severityTone(line("x", "notice-ish"))).toBeNull();
+  });
+
+  it.each([[null], [undefined], [""], ["   "]])(
+    "gives %s no tone, which is every line Railway sends today",
+    (severity) => {
+      expect(severityTone(line("x", severity))).toBeNull();
+    },
+  );
+
+  it("never reads the message, so a line about an error is not an error line", () => {
+    /*
+     * The decision this function exists to hold. Tinting on message text would call
+     * "retrying after error" an error and "0 errors" a failure — a wrong answer delivered
+     * with the same confidence as a right one. The cost is that this renders no colour at
+     * all against Railway today, which is stated rather than worked around.
+     */
+    expect(severityTone(line("ERROR: everything is on fire"))).toBeNull();
+    expect(severityTone(line("[warn] disk almost full"))).toBeNull();
   });
 });
 

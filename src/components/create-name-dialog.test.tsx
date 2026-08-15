@@ -201,4 +201,63 @@ describe("CreateNameDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(action).not.toHaveBeenCalled();
   });
+
+  describe("controlled", () => {
+    /*
+     * The shape the pickers use, where the affordance is a row inside a dropdown rather
+     * than a button of this component's own. The uncontrolled path above is untouched by
+     * it, which is what keeps the empty state's primary "Create a project" working.
+     */
+    const renderControlled = (open: boolean, onOpenChange = vi.fn()) => {
+      const result = render(
+        <ToastProvider>
+          <CreateNameDialog
+            action={action}
+            field="projectName"
+            copy={copy}
+            onCreated={onCreated}
+            open={open}
+            onOpenChange={onOpenChange}
+          />
+        </ToastProvider>,
+      );
+      return { ...result, onOpenChange };
+    };
+
+    it("renders no trigger of its own", () => {
+      renderControlled(false);
+      expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("opens from the prop alone", () => {
+      renderControlled(true);
+      expect(screen.getByRole("dialog")).toBeVisible();
+      expect(screen.getByLabelText("Project name")).toBeVisible();
+    });
+
+    it("reports a dismissal instead of closing itself", async () => {
+      // The caller owns the state, so this must ask rather than act — a component that
+      // closed itself here would leave the two out of step on the next render.
+      const user = userEvent.setup();
+      const { onOpenChange } = renderControlled(true);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(action).not.toHaveBeenCalled();
+    });
+
+    it("reports the close that follows a successful create", async () => {
+      action.mockResolvedValue({ ok: true, message: "Created Client work" });
+      const user = userEvent.setup();
+      const { onOpenChange } = renderControlled(true);
+
+      await user.type(screen.getByLabelText("Project name"), "Client work");
+      await user.click(screen.getByRole("button", { name: "Create project" }));
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(onCreated).toHaveBeenCalled();
+    });
+  });
 });

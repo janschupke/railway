@@ -36,6 +36,34 @@ const SEVERITY_ORDER = [
 ] as const;
 
 /**
+ * Which of four tones a line is drawn in, or null for the ones that take the pane's own.
+ *
+ * The ladder above is the vocabulary; this is the only thing that reads a severity for
+ * anything other than filtering. Four buckets rather than nine colours, because the
+ * question a reader is asking of a log is "is this a problem", and nine answers to it is a
+ * legend rather than a signal.
+ *
+ * Returns a tone name and never a colour: globals.css owns the mapping, keyed on a
+ * `data-severity` attribute, exactly as `data-state-color` does for the status badge. That
+ * is what keeps this file React-free and the palette in one place.
+ *
+ * **Driven only by what Railway sends.** No pattern-matching on the message: a line reading
+ * `retrying after error` is not an error line, and a heuristic that tints it is a wrong
+ * answer delivered confidently. Railway requests `severity` on all four log documents and
+ * has never been observed populating it, so this renders no colour against the live API
+ * today — the same property the severity filter strip already has, and for the same reason.
+ */
+export function severityTone(line: LogLine): "muted" | "warning" | "danger" | null {
+  const value = line.severity?.trim().toLowerCase();
+  if (!value) return null;
+  if (value === "trace" || value === "debug") return "muted";
+  if (value === "warn" || value === "warning") return "warning";
+  if (value === "error" || value === "critical" || value === "fatal") return "danger";
+  // info, notice, and anything off the ladder: the pane's own text colour, unchanged.
+  return null;
+}
+
+/**
  * The severities actually present in the buffer, in reading order.
  *
  * Adaptive because the payload is unknown territory. The control is built from what

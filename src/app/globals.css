@@ -11,6 +11,7 @@
   --color-surface: var(--rc-surface);
   --color-raised: var(--rc-raised);
   --color-subtle: var(--rc-subtle);
+  --color-highlight: var(--rc-highlight);
   --color-border: var(--rc-border);
   --color-border-strong: var(--rc-border-strong);
   --color-overlay: var(--rc-overlay);
@@ -178,6 +179,19 @@ body {
   textarea:disabled {
     cursor: not-allowed;
   }
+
+  /*
+   * The clear button inside a search field.
+   *
+   * Both search inputs — the container filter bar and the log toolbar — deliberately draw
+   * no X of their own and rely on the one the browser puts there, which is the only reason
+   * neither reserves space on the right. That control is a UA pseudo-element, so the
+   * `button` rule above never reaches it and it was the one affordance on either row that
+   * did not answer the pointer.
+   */
+  input[type="search"]::-webkit-search-cancel-button {
+    cursor: pointer;
+  }
 }
 
 @layer utilities {
@@ -251,6 +265,27 @@ body {
 [data-state-color="unknown"] {
   --state-fg: var(--rc-state-unknown);
   --state-bg: var(--rc-state-unknown-bg);
+}
+
+/*
+ * Log severity, on the same mechanism as [data-state-color] above and for the same reason:
+ * a row's colour is a token lookup keyed on an attribute, not a table of Tailwind classes
+ * inside the component that renders it.
+ *
+ * Four tones, not nine. `severityTone` in src/lib/log-view.ts owns the bucketing and
+ * returns null for everything that should read as ordinary output — so an unrecognised
+ * severity, and the far commoner case of none at all, writes no attribute and inherits.
+ * These reuse the signal tokens rather than introducing a severity ramp; contrast.test.ts
+ * holds both against --rc-subtle, which is the pane's own fill.
+ */
+[data-severity="muted"] {
+  color: var(--rc-text-subtle);
+}
+[data-severity="warning"] {
+  color: var(--rc-warning);
+}
+[data-severity="danger"] {
+  color: var(--rc-danger);
 }
 
 /* The dot inherits the state foreground rather than repeating the mapping. */

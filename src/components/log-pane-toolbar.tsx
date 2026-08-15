@@ -1,6 +1,16 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Copy, Download, Search, WrapText } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Download,
+  Maximize2,
+  Minimize2,
+  Search,
+  WrapText,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ToggleGroup } from "radix-ui";
 import { UI } from "@/lib/constants";
@@ -9,9 +19,38 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { LiveRegion } from "./ui/live-region";
 import { Text } from "./ui/text";
+import { Tooltip } from "./ui/tooltip";
 
 /**
- * The log pane's controls: find, wrap, copy, download, and filter by severity.
+ * One of the toolbar's icon buttons.
+ *
+ * Every control on this row is icon-only, so every one of them needs the same three
+ * things and used to have one. `aria-label` names it for a screen reader and for nobody
+ * looking at the page; the Tooltip is what a sighted user gets, and it carries the same
+ * string so the two cannot drift.
+ *
+ * The tooltip works on the disabled ones — Previous, Next, Copy, Download are all inert
+ * some of the time — only because Button stopped setting `pointer-events-none` when
+ * disabled. An element outside hit-testing fires no pointer events, so a Radix tooltip
+ * trigger wrapped around one is silent, which is exactly when the label is most wanted:
+ * a control that will not act should be able to say why.
+ */
+function IconButton({
+  label,
+  icon,
+  ...props
+}: React.ComponentProps<typeof Button> & { label: string; icon: React.ReactNode }) {
+  return (
+    <Tooltip content={label}>
+      <Button variant="ghost" size="sm" aria-label={label} {...props}>
+        {icon}
+      </Button>
+    </Tooltip>
+  );
+}
+
+/**
+ * The log pane's controls: find, wrap, copy, download, maximise, and filter by severity.
  *
  * Presentational and fully controlled — every piece of state lives in log-pane.tsx,
  * because the pane's autoscroll effects have to read the same values and a control strip
@@ -22,7 +61,7 @@ import { Text } from "./ui/text";
  * hundreds of lines is once a tick.
  *
  * Imported only from log-pane.tsx, which is loaded through next/dynamic. That is what
- * keeps this file and its six icons out of /dashboard's first load, and it is why the
+ * keeps this file and its icons out of /dashboard's first load, and it is why the
  * skeleton reserves the row by hand instead of rendering this.
  */
 export function LogPaneToolbar({
@@ -37,7 +76,12 @@ export function LogPaneToolbar({
   onWrapChange,
   onCopy,
   onDownload,
+  copied,
+  downloaded,
+  copying,
   canExport,
+  maximized,
+  onMaximizedChange,
   severities,
   selected,
   onSelectedChange,
@@ -54,7 +98,14 @@ export function LogPaneToolbar({
   onWrapChange: (wrap: boolean) => void;
   onCopy: () => void;
   onDownload: () => void;
+  /** The clipboard write succeeded recently enough to still be worth showing. */
+  copied: boolean;
+  downloaded: boolean;
+  /** The clipboard write is in flight. It can block on a permission prompt. */
+  copying: boolean;
   canExport: boolean;
+  maximized: boolean;
+  onMaximizedChange: (maximized: boolean) => void;
   /** The severities present in the buffer. Empty means no filter is rendered at all. */
   severities: string[];
   selected: string[];
@@ -123,58 +174,68 @@ export function LogPaneToolbar({
           container-filter-bar's Clear button documents. A control that appears is a
           control that reflows the row at the moment the user is aiming at something else.
         */}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("logPreviousMatch")}
+        <IconButton
+          label={t("logPreviousMatch")}
+          icon={<ChevronUp aria-hidden />}
           disabled={matchCount === 0}
           onClick={onPrevious}
-        >
-          <ChevronUp aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("logNextMatch")}
+        />
+        <IconButton
+          label={t("logNextMatch")}
+          icon={<ChevronDown aria-hidden />}
           disabled={matchCount === 0}
           onClick={onNext}
-        >
-          <ChevronDown aria-hidden />
-        </Button>
+        />
 
         {/*
           aria-pressed on a button rather than a Radix Toggle. This is one two-state
           control, not a group, and the platform already has the semantics — Toggle would
           be machinery for something a button attribute says exactly.
         */}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("logWrapLines")}
+        <IconButton
+          label={t("logWrapLines")}
+          icon={<WrapText aria-hidden />}
           aria-pressed={wrap}
           onClick={() => onWrapChange(!wrap)}
-        >
-          <WrapText aria-hidden />
-        </Button>
+        />
 
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("logCopy")}
+        {/*
+          Copy and download swap to a tick on success, for UI.ACTION_FEEDBACK_MS.
+
+          These are the only two controls in the app that do their whole job without
+          changing anything on screen. Both toast, and a toast is the right answer for a
+          screen-reader user — it is announced, and it is where a failed clipboard write
+          says so. It is the wrong answer on its own for someone whose eyes are on the
+          button they just pressed, which is where the confirmation has to appear.
+
+          The pending state on copy is not decoration either: `navigator.clipboard` can
+          block on a permission prompt, and a button that looked idle through it read as
+          one that had ignored the click.
+        */}
+        <IconButton
+          label={t("logCopy")}
+          icon={copied ? <Check aria-hidden /> : <Copy aria-hidden />}
           disabled={!canExport}
+          pending={copying}
           onClick={onCopy}
-        >
-          <Copy aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("logDownload")}
+        />
+        <IconButton
+          label={t("logDownload")}
+          icon={downloaded ? <Check aria-hidden /> : <Download aria-hidden />}
           disabled={!canExport}
           onClick={onDownload}
-        >
-          <Download aria-hidden />
-        </Button>
+        />
+
+        {/*
+          Last on the row, because it is the only control here that does not act on the
+          log — it acts on the space the log is read in.
+        */}
+        <IconButton
+          label={maximized ? t("logMinimize") : t("logMaximize")}
+          icon={maximized ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
+          aria-pressed={maximized}
+          onClick={() => onMaximizedChange(!maximized)}
+        />
       </div>
 
       {/*

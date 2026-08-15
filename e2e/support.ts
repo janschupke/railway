@@ -360,24 +360,38 @@ export async function addVariable(
 }
 
 /**
- * Opens a row's edit dialog and waits for its variables to land.
- *
- * Two waits, not one. The dialog shell paints immediately; the environment editor appears
- * only once `/api/service-variables` answers, so a spec that acted on the shell would race
- * a fetch and fill a form that is about to re-render. Waiting for the legend is the signal
- * that both halves are mounted.
+ * Opens a row's detail dialog and waits until it is actually usable.
  *
  * `pointer-events: auto` is the layer gate the destroy and lifecycle helpers use for the
  * same reason — Radix hands a dialog its layer one render after it appears, and a click or
  * an Escape that lands before that is swallowed.
  */
-export async function openEditDialog(page: Page, name: string) {
-  await onlyVisible(row(page, name).getByRole("button", { name: /^Edit$/ })).click();
+export async function openDetailDialog(page: Page, name: string) {
+  await onlyVisible(row(page, name).getByRole("button", { name: /^Details$/ })).click();
 
   const dialog = onlyVisible(page.getByRole("dialog"));
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Environment variables")).toBeVisible();
   await expect(dialog).toHaveCSS("pointer-events", "auto");
+  return dialog;
+}
+
+/**
+ * Opens a row's detail dialog, switches it into edit mode, and waits for the variables.
+ *
+ * Two waits, not one. The form's shell paints immediately; the environment editor appears
+ * only once `/api/service-variables` answers, so a spec that acted on the shell would race
+ * a fetch and fill a form that is about to re-render. Waiting for the legend is the signal
+ * that both halves are mounted.
+ *
+ * Edit is a mode of the detail view now rather than a dialog of its own — see
+ * container-detail-dialog.tsx — so this is two clicks where it used to be one. The extra
+ * hop is not a wait: the switch is local state, and the fetch it starts is what the legend
+ * below is already gating on.
+ */
+export async function openEditDialog(page: Page, name: string) {
+  const dialog = await openDetailDialog(page, name);
+  await onlyVisible(dialog.getByRole("button", { name: /^Edit$/ })).click();
+  await expect(dialog.getByText("Environment variables")).toBeVisible();
   return dialog;
 }
 
@@ -466,11 +480,54 @@ export async function fixtureServices(page: Page): Promise<FixtureService[]> {
 }
 
 /**
+ * Opens a create dialog the way the picker offers it: from inside the dropdown it adds to.
+ *
+ * The `pointer-events` gate is the same one `dismissWithEscape` documents, and here it
+ * carries a second meaning. A Select popup and a Dialog are both modal layers; the dialog
+ * only becomes actionable once the select's layer has finished releasing the body. Waiting
+ * on it is therefore the proof that the two did not overlap, not merely a settle.
+ */
+export async function openCreateFromSelect(
+  page: Page,
+  label: string,
+  row: RegExp,
+): Promise<Locator> {
+  await onlyVisible(page.getByRole("combobox", { name: label })).click();
+  await onlyVisible(page.getByRole("option", { name: row })).click();
+
+  const dialog = onlyVisible(page.getByRole("dialog"));
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  return dialog;
+}
+
+/**
+ * Picks one row of a Select, by the label on the control and the text on the row.
+ *
+ * Not `selectOption`, which only drives a real `<select>`: every dropdown in the app is
+ * Radix now, so a row is a portalled `role="option"` that exists only while the popup is
+ * open — and it is addressable by its visible label rather than by the value it posts.
+ *
+ * The listbox count is the gate on the way out, and it is not optional. A Select popup is
+ * a modal layer: while it is up, `body` carries `pointer-events: none`, so the next
+ * `.fill()` on the panel behind it would sit unactionable until it timed out.
+ */
+async function chooseOption(page: Page, label: string, option: string | RegExp) {
+  await onlyVisible(page.getByRole("combobox", { name: label })).click();
+  await onlyVisible(page.getByRole("option", { name: option })).click();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+}
+
+/**
  * Opens the spin-up form's Advanced panel and fills whichever controls were named.
  *
- * `<select>` and `<input>` in the same helper because the panel mixes them and a caller
+ * Dropdowns and text fields in the same helper because the panel mixes them and a caller
  * should not have to know which is which. Leaves the panel OPEN: closing it is a behaviour
  * one spec asserts deliberately rather than something every caller should pay for.
+ *
+ * `region` and `restartPolicy` name the row's VISIBLE LABEL, not the value it submits —
+ * "US West (Oregon)" rather than "us-west2". That is what a Radix option can be addressed
+ * by; the value is still what the assertion on the fixture record checks.
  */
 export async function fillAdvanced(
   page: Page,
@@ -488,10 +545,10 @@ export async function fillAdvanced(
   if ((await page.locator("details[open]").count()) === 0) await summary.click();
 
   if (values.region !== undefined) {
-    await page.getByLabel("Region").selectOption(values.region);
+    await chooseOption(page, "Region", values.region);
   }
   if (values.restartPolicy !== undefined) {
-    await page.getByLabel("Restart policy").selectOption(values.restartPolicy);
+    await chooseOption(page, "Restart policy", values.restartPolicy);
   }
   const typed: Array<[string, string | undefined]> = [
     ["Replicas", values.replicas],
@@ -511,7 +568,19 @@ export async function fillAdvanced(
  * Axe cannot see focus traps, tab order, or whether a live region is announced at a
  * sensible politeness — e2e/keyboard.spec.ts covers those separately.
  */
-export async function expectNoA11yViolations(page: Page, context?: string) {
+export async function expectNoA11yViolations(
+  page: Page,
+  context?: string,
+  /**
+   * Restricts the scan to one subtree.
+   *
+   * For a state where something OUTSIDE the thing under test is what a rule fires on — see
+   * the open-dropdown scan in a11y.spec.ts, which is scoped for a reason worth reading
+   * there. Whole-page by default, and it should stay the default: a scan that names its
+   * own boundary is a scan that can be narrowed until it asserts nothing.
+   */
+  within?: string,
+) {
   /*
    * Axe reads computed colours, so a scan taken mid-transition measures a blend of the
    * old and new values and reports contrast failures that never appear on screen.
@@ -535,12 +604,26 @@ export async function expectNoA11yViolations(page: Page, context?: string) {
    */
   // Sequential, not Promise.all: axe-core injects one instance per frame and refuses a
   // second concurrent run outright ("Axe is already running").
-  const wcag = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  const structure = await new AxeBuilder({ page })
-    .withRules(["page-has-heading-one", "heading-order", "landmark-one-main", "bypass"])
-    .analyze();
+  const scoped = <T extends AxeBuilder>(builder: T) =>
+    within ? builder.include(within) : builder;
+
+  const wcag = await scoped(
+    new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]),
+  ).analyze();
+  /*
+   * Document structure is a property of the page, so it is never scoped: asking whether a
+   * portalled listbox has an h1 is a question with no useful answer either way.
+   */
+  const structure = within
+    ? { violations: [] }
+    : await new AxeBuilder({ page })
+        .withRules([
+          "page-has-heading-one",
+          "heading-order",
+          "landmark-one-main",
+          "bypass",
+        ])
+        .analyze();
 
   const results = { violations: [...wcag.violations, ...structure.violations] };
 
