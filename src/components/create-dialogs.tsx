@@ -3,8 +3,36 @@
 import { useTranslations } from "next-intl";
 import { createEnvironment, createProject } from "@/app/dashboard/actions";
 import { useDashboardSelection } from "@/hooks/use-dashboard-selection";
-import { CreateNameDialog } from "./create-name-dialog";
+import { CreateNameDialog, type CreateNameCopy } from "./create-name-dialog";
 import { PendingStatus } from "./ui/misc";
+
+/**
+ * The nine strings the dialog needs, read out of whichever namespace the caller holds.
+ *
+ * `createProject` and `createEnvironment` are separate namespaces carrying the same key
+ * names, so both call sites resolved the same nine keys and differed only in the `t` they
+ * passed. Adding a tenth string to the dialog used to mean editing two identical blocks,
+ * and the one that got missed would have been a `undefined` rendered as copy.
+ */
+function copyFor(
+  t: (key: keyof CreateNameCopy) => string,
+  overrides: Partial<CreateNameCopy> = {},
+): CreateNameCopy {
+  const keys: Array<keyof CreateNameCopy> = [
+    "trigger",
+    "title",
+    "description",
+    "label",
+    "placeholder",
+    "submit",
+    "submitPending",
+    "announce",
+    "failedTitle",
+  ];
+  return Object.fromEntries(
+    keys.map((key) => [key, overrides[key] ?? t(key)]),
+  ) as CreateNameCopy;
+}
 
 /**
  * "New project", wherever it appears.
@@ -44,17 +72,7 @@ export function CreateProjectDialog({
         triggerVariant={variant}
         {...(open === undefined ? {} : { open })}
         {...(onOpenChange ? { onOpenChange } : {})}
-        copy={{
-          trigger: triggerLabel ?? t("trigger"),
-          title: t("title"),
-          description: t("description"),
-          label: t("label"),
-          placeholder: t("placeholder"),
-          submit: t("submit"),
-          submitPending: t("submitPending"),
-          announce: t("announce"),
-          failedTitle: t("failedTitle"),
-        }}
+        copy={copyFor(t, { trigger: triggerLabel })}
         onCreated={(selection) => {
           if (selection) select(selection.projectId, selection.environmentId);
         }}
@@ -94,17 +112,7 @@ export function CreateEnvironmentDialog({
         {...(projectId ? { hidden: { projectId } } : {})}
         {...(open === undefined ? {} : { open })}
         {...(onOpenChange ? { onOpenChange } : {})}
-        copy={{
-          trigger: t("trigger"),
-          title: t("title"),
-          description: t("description"),
-          label: t("label"),
-          placeholder: t("placeholder"),
-          submit: t("submit"),
-          submitPending: t("submitPending"),
-          announce: t("announce"),
-          failedTitle: t("failedTitle"),
-        }}
+        copy={copyFor(t)}
         onCreated={(selection) => {
           if (selection) select(selection.projectId, selection.environmentId);
         }}

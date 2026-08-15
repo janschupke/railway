@@ -20,6 +20,25 @@ import { PendingStatus } from "./ui/misc";
 import { useToast } from "./ui/toast";
 
 /**
+ * Every string this dialog renders.
+ *
+ * Named rather than inline so `copyFor` in create-dialogs.tsx can build one from a
+ * namespace: both callers resolve the same nine keys and differed only in which namespace
+ * they read them from, which was nine lines written twice.
+ */
+export type CreateNameCopy = {
+  trigger: string;
+  title: string;
+  description: string;
+  label: string;
+  placeholder: string;
+  submit: string;
+  submitPending: string;
+  announce: string;
+  failedTitle: string;
+};
+
+/**
  * One dialog, both create paths.
  *
  * Projects and environments differ in exactly two ways — the copy, and whether a hidden
@@ -48,17 +67,7 @@ export function CreateNameDialog({
   field: "projectName" | "environmentName";
   /** Extra values the action needs that the user does not type. */
   hidden?: Record<string, string>;
-  copy: {
-    trigger: string;
-    title: string;
-    description: string;
-    label: string;
-    placeholder: string;
-    submit: string;
-    submitPending: string;
-    announce: string;
-    failedTitle: string;
-  };
+  copy: CreateNameCopy;
   triggerVariant?: "primary" | "secondary";
   disabled?: boolean;
   onCreated: (select: ActionSelection | undefined) => void;
