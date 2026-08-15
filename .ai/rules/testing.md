@@ -26,8 +26,9 @@ Server Component be rendered by awaiting it. The two are additive: `setup-dom` m
 ## Coverage is a ratchet, not a floor, and the exclude list is not a lever
 
 `include: ["src/**"]`. Thresholds sit **just under the measured figures**, not at a round
-number below them, and there are per-directory floors for `src/lib/**` and `src/hooks/**` as
-well as the global four. A miss fails `pnpm test:coverage`, which fails `pnpm check` and CI.
+number below them, and there are per-directory floors for `src/lib/**`, `src/hooks/**`,
+`src/features/**` and `src/components/**` as well as the global four. A miss fails
+`pnpm test:coverage`, which fails `pnpm check` and CI.
 
 Both halves of that matter, and both were once wrong. The thresholds were 80 against an
 actual of ~94, so a change could delete a third of the branch coverage and still pass —
@@ -36,6 +37,13 @@ one file at zero: five modules had no test at all while the headline read 94, in
 `lib/railway/subscribe.ts`, the upstream WebSocket. `perFile: true` is the obvious answer
 and the wrong one — it fails on legitimately thin modules like `i18n/config.ts`, and its
 only remedy is widening the exclude list, which is precisely what this section forbids.
+
+**The set of floors has to be complete, or the aggregate is back.** `src/components/**` was
+missing from it and measured 95.65 / 89.94 / 95.74 / 96.70 — under the _global_ gate on all
+four axes, passing only because `src/features` and `src/hooks` sit near 99 and carry the
+mean. That is the paragraph above happening again, one directory over, and nothing
+distinguished a directory left out on purpose from one left out by accident. A new
+top-level directory under `src/` needs a floor in the same commit that creates it.
 
 When the real number rises, raise these. Lowering one is the same class of edit as raising
 a bundle budget: permitted, and argued for in the commit that does it.

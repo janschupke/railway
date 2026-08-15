@@ -138,6 +138,26 @@ export default defineConfig({
          * having visited both sides of every size check.
          */
         "src/features/**": { lines: 98, branches: 85, functions: 98, statements: 95 },
+        /*
+         * The directory the ratchet above was missing, and the one it could least afford to.
+         *
+         * Measured 95.65 / 89.94 / 95.74 / 96.70 — under the global gate on all four axes,
+         * not merely under the other floors. It passed anyway, because src/features (99.40
+         * statements) and src/hooks (99.07) carry the aggregate: exactly the arithmetic the
+         * per-directory floors were introduced to defeat, reproduced one directory over
+         * from where it was first found.
+         *
+         * That is worth stating plainly, because the omission did not look like one. Three
+         * floors were written, the largest directory of hand-written UI was not among them,
+         * and nothing in the config or the rules distinguished "deliberately aggregated"
+         * from "forgotten". A floor per directory is only a ratchet if the set is complete.
+         *
+         * Set a point under each measurement, the same margin the others carry. Branches
+         * sits lowest for the reason it does everywhere in this app: the untaken sides are
+         * mostly optional-prop and empty-collection guards on primitives, which need a
+         * caller per branch to reach and assert nothing anyone relies on.
+         */
+        "src/components/**": { lines: 96, branches: 89, functions: 95, statements: 95 },
       },
     },
   },
