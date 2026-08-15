@@ -372,7 +372,7 @@ export const REGIONS_QUERY: TypedDocument<RegionsQuery, RegionsQueryVariables> =
   `;
 
 /**
- * A new project on the signed-in user's personal account.
+ * A new project, on the signed-in user's personal account or in a workspace they chose.
  *
  * Selects `...ProjectFields` rather than a bare `id`, and that is what the create flow is
  * built on: `projectCreate` returns `Project!` — the same type the list query reads — so
@@ -380,13 +380,15 @@ export const REGIONS_QUERY: TypedDocument<RegionsQuery, RegionsQueryVariables> =
  * Without it the client would have a project id and no environment id, and would have to
  * re-read the whole project list before it could select what it had just created.
  *
- * `ProjectCreateInput` also carries `workspaceId`, `defaultEnvironmentName`, `description`,
- * `isPublic`, `prDeploys`, `repo`, `runtime` and `isMonorepo`. The app sends `name` and
- * nothing else: an omitted `workspaceId` is what makes the project personal, and every
- * other member is a decision the user has not been asked to make. Sending one is all it
- * takes for its removal to fail verification now: the member is in
- * `ProjectCreateMutationVariables`, so `pnpm typecheck` rejects the object the day
- * `pnpm schema:pull` stops finding it, and there is no list to remember to update.
+ * `ProjectCreateInput` also carries `defaultEnvironmentName`, `description`, `isPublic`,
+ * `prDeploys`, `repo`, `runtime` and `isMonorepo`. The app sends `name` and `workspaceId`
+ * and nothing else: those two are the only members the user is asked about, and every other
+ * one is a decision they have not been offered. `workspaceId` is omitted rather than nulled
+ * when the project is personal — Railway's own rule is that an absent workspace means the
+ * personal account, so there is nothing to say. Sending a member is all it takes for its
+ * removal to fail verification: it is in `ProjectCreateMutationVariables`, so `pnpm
+ * typecheck` rejects the object the day `pnpm schema:pull` stops finding it, and there is
+ * no list to remember to update.
  */
 export const PROJECT_CREATE_MUTATION: TypedDocument<
   ProjectCreateMutation,

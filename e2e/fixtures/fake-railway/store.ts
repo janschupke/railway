@@ -363,7 +363,29 @@ export type Project = {
   id: string;
   name: string;
   environments: Array<{ id: string; name: string }>;
+  /**
+   * The workspace it was created in, absent for a personal project.
+   *
+   * Nothing seeded carries one, which is what keeps every spec written before workspaces
+   * existed reading exactly as it did: the source filters below only ever move a project
+   * that was explicitly put somewhere.
+   */
+  workspaceId?: string;
 };
+
+export type Workspace = { id: string; name: string };
+
+/**
+ * The workspaces the seeded account can reach.
+ *
+ * A factory beside `seedProjects` and for its reason — `reset()` has to hand back a list
+ * nothing earlier in the run could have mutated.
+ *
+ * One workspace, not two. It is enough to prove a project was created somewhere other than
+ * the personal account, and a second would change what the project picker groups without
+ * any spec asking it to.
+ */
+const seedWorkspaces = (): Workspace[] => [{ id: "ws_e2e", name: "Acme" }];
 
 /**
  * The seeded account, rebuilt per reset.
@@ -391,6 +413,7 @@ const seedProjects = (): Project[] => [
 
 export class Store {
   projects: Project[] = seedProjects();
+  workspaces: Workspace[] = seedWorkspaces();
 
   services = new Map<string, Service>();
   deployments = new Map<string, Deployment>();
@@ -641,13 +664,16 @@ export class Store {
     if (this.#timer) clearInterval(this.#timer);
   }
 
-  addProject(name: string): Project {
+  addProject(name: string, workspaceId?: string): Project {
     const project: Project = {
       id: this.id("proj"),
       name,
       // Railway makes one alongside the project, and the whole create flow depends on it
       // arriving in the same response — see PROJECT_CREATE_MUTATION.
       environments: [{ id: this.id("env"), name: "production" }],
+      // Recorded rather than validated. A workspace this account cannot reach is a case
+      // for the real Railway to refuse; the fixture's job is to prove the id was sent.
+      ...(workspaceId ? { workspaceId } : {}),
     };
     this.projects.push(project);
     return project;
@@ -666,6 +692,7 @@ export class Store {
     this.deployments.clear();
     this.volumes.clear();
     this.projects = seedProjects();
+    this.workspaces = seedWorkspaces();
     this.faults = { ...DEFAULT_FAULTS };
     this.sharedVariables = { SHARED_TOKEN: "shared-value" };
     this.addService({

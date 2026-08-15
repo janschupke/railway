@@ -1,5 +1,6 @@
 import {
   button,
+  chooseOption,
   expect,
   injectFaults,
   onlyVisible,
@@ -131,6 +132,11 @@ test.describe("an account with no projects yet", () => {
     await button(page, /create a project/i).click();
     const dialog = onlyVisible(page.getByRole("dialog"));
     await expect(dialog).toBeVisible();
+    // The destination is on screen before anything is typed, and it rests on the account
+    // this app created into before the choice existed.
+    await expect(dialog.getByRole("combobox", { name: "Where it goes" })).toHaveText(
+      "Personal account",
+    );
     await dialog.getByLabel("Project name").fill("Client work");
     await dialog.getByRole("button", { name: "Create project" }).click();
 
@@ -161,6 +167,54 @@ test.describe("an account with no projects yet", () => {
     // Still open, still holding what was typed: the fix is an edit, not a retype.
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Project name")).toHaveValue("x".repeat(65));
+  });
+
+  test("creates the project in the workspace that was chosen", async ({ page }) => {
+    await injectFaults(page, { projectsEmpty: true });
+    await signInBare(page);
+
+    await button(page, /create a project/i).click();
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await dialog.getByLabel("Project name").fill("Client work");
+    await chooseOption(page, "Where it goes", "Acme");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+
+    await expect(toast(page, "Created Client work")).toBeVisible();
+
+    /*
+     * The assertion that the id was actually sent, rather than that a control existed.
+     *
+     * The fixture files a project with a `workspaceId` under that workspace and keeps it
+     * out of the personal list, so this project can only have reached the dashboard
+     * through `me.workspaces` — which is the one path that labels a project with the
+     * workspace it came from, and therefore the one that groups it here.
+     */
+    await projectSelect(page).click();
+    const listbox = onlyVisible(page.getByRole("listbox"));
+    await expect(listbox.getByText("Acme", { exact: true })).toBeVisible();
+    await expect(listbox.getByRole("option", { name: "Client work" })).toBeVisible();
+  });
+
+  test("keeps the chosen workspace when the name is refused", async ({ page }) => {
+    /*
+     * React resets a form once its action settles, and Radix answers that reset by putting
+     * the select back to what it mounted with — so a refused name used to leave the typed
+     * name on screen and quietly move the project back to the personal account. The name
+     * surviving is asserted above; this is the half that was silent.
+     */
+    await injectFaults(page, { projectsEmpty: true });
+    await signInBare(page);
+
+    await button(page, /create a project/i).click();
+    const dialog = onlyVisible(page.getByRole("dialog"));
+    await dialog.getByLabel("Project name").fill("x".repeat(65));
+    await chooseOption(page, "Where it goes", "Acme");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Where it goes" })).toHaveText(
+      "Acme",
+    );
   });
 });
 

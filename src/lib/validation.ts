@@ -558,6 +558,28 @@ export const projectCreateSchema = z.object({
     .trim()
     .min(1, KEYS.projectNameRequired)
     .max(LIMITS.PROJECT_NAME_MAX, KEYS.projectNameTooLong),
+  /*
+   * Blank means the personal account, which is Railway's own rule rather than this app's
+   * default — so it transforms to absent and the mutation omits the member entirely.
+   *
+   * `restartPolicy`'s shape rather than `railwayId`'s, and the difference is the blank.
+   * `railwayId` is `.min(1)` over a `{1,64}` pattern, and `formField` reads an unsent field
+   * as `""` — so either would refuse every personal create, which is the default path.
+   *
+   * Shape only, deliberately. This app rendered the options, so a value that is not one
+   * means a stale page or a hand-crafted request; the list a membership check would need is
+   * a second Railway round trip in the create path, and Railway refuses a workspace this
+   * token cannot use anyway. `referenceInvalid` is that answer — "reload the page".
+   */
+  workspaceId: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === "" || RAILWAY_ID_PATTERN.test(value),
+      KEYS.referenceInvalid,
+    )
+    .transform((value) => (value === "" ? undefined : value))
+    .optional(),
 });
 
 export const environmentCreateSchema = z.object({

@@ -513,9 +513,11 @@ export async function openCreateFromSelect(
  *
  * The listbox count is the gate on the way out, and it is not optional. A Select popup is
  * a modal layer: while it is up, `body` carries `pointer-events: none`, so the next
- * `.fill()` on the panel behind it would sit unactionable until it timed out.
+ * `.fill()` on the panel behind it would sit unactionable until it timed out. That matters
+ * most for the select inside the create dialog, where the layer being torn down sits on
+ * top of another one.
  */
-async function chooseOption(page: Page, label: string, option: string | RegExp) {
+export async function chooseOption(page: Page, label: string, option: string | RegExp) {
   await onlyVisible(page.getByRole("combobox", { name: label })).click();
   await onlyVisible(page.getByRole("option", { name: option })).click();
   await expect(page.getByRole("listbox")).toHaveCount(0);

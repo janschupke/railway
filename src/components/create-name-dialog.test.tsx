@@ -6,6 +6,7 @@ import type { ActionResult } from "@/lib/action-result";
 const action = vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
 
 const { CreateNameDialog } = await import("./create-name-dialog");
+type CreateNameChoice = import("./create-name-dialog").CreateNameChoice;
 const { ToastProvider } = await import("./ui/toast");
 
 const copy = {
@@ -22,8 +23,22 @@ const copy = {
 
 const onCreated = vi.fn();
 
+/** The workspace select, as create-dialogs.tsx builds it for an account with one. */
+const choice: CreateNameChoice = {
+  name: "workspaceId",
+  label: "Where it goes",
+  options: [
+    { value: "", label: "Personal account" },
+    { value: "ws_1", label: "Acme" },
+  ],
+};
+
 function renderDialog(
-  over: { hidden?: Record<string, string>; disabled?: boolean } = {},
+  over: {
+    hidden?: Record<string, string>;
+    choice?: CreateNameChoice;
+    disabled?: boolean;
+  } = {},
 ) {
   return render(
     <ToastProvider>
@@ -180,6 +195,114 @@ describe("CreateNameDialog", () => {
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Project name")).toHaveValue("");
+  });
+
+  it("draws no second control when the caller passes no choice", async () => {
+    // The environment dialog, and a personal-only account: nothing to choose, nothing
+    // drawn, and nothing extra in the submission.
+    const user = userEvent.setup();
+    renderDialog();
+    await open(user);
+
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Project name"), "Client work");
+    await user.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action.mock.calls[0]?.[1].has("workspaceId")).toBe(false);
+  });
+
+  it("submits the chosen option under the name the caller gave it", async () => {
+    const user = userEvent.setup();
+    renderDialog({ choice });
+    await open(user);
+
+    await user.type(screen.getByLabelText("Project name"), "Client work");
+    await user.click(screen.getByRole("combobox", { name: "Where it goes" }));
+    await user.click(await screen.findByRole("option", { name: "Acme" }));
+    await user.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    const formData = action.mock.calls[0]?.[1];
+    expect(formData?.get("projectName")).toBe("Client work");
+    expect(formData?.get("workspaceId")).toBe("ws_1");
+  });
+
+  it("submits the resting option as blank rather than as a sentinel", async () => {
+    /*
+     * The Select stands an unsubmittable placeholder in for the empty string, because Radix
+     * refuses a blank item value. Nothing outside that component may ever see it — this is
+     * the assertion that says so from the far side of the form.
+     */
+    const user = userEvent.setup();
+    renderDialog({ choice });
+    await open(user);
+
+    await user.type(screen.getByLabelText("Project name"), "Client work");
+    await user.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action.mock.calls[0]?.[1].get("workspaceId")).toBe("");
+  });
+
+  it("forgets the chosen option when reopened", async () => {
+    // Same rule as the name above it, and a sharper consequence: a create that silently
+    // reused the last attempt's destination would put a project somewhere nobody chose.
+    action.mockResolvedValue({
+      ok: false,
+      field: "projectName",
+      error: "Give the project a name",
+    });
+    const user = userEvent.setup();
+    renderDialog({ choice });
+    await open(user);
+
+    await user.click(screen.getByRole("combobox", { name: "Where it goes" }));
+    await user.click(await screen.findByRole("option", { name: "Acme" }));
+    expect(screen.getByRole("combobox", { name: "Where it goes" })).toHaveTextContent(
+      "Acme",
+    );
+    await user.type(screen.getByLabelText("Project name"), "x");
+    await user.click(screen.getByRole("button", { name: "Create project" }));
+    await screen.findByRole("alert");
+    // The choice survives a failed submit, which is what the value living in state buys.
+    expect(screen.getByRole("combobox", { name: "Where it goes" })).toHaveTextContent(
+      "Acme",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await open(user);
+
+    expect(screen.getByRole("combobox", { name: "Where it goes" })).toHaveTextContent(
+      "Personal account",
+    );
+  });
+
+  it("explains an empty choice instead of drawing a dropdown that opens on nothing", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      choice: {
+        ...choice,
+        options: [],
+        disabledReason: "Railway withheld workspace:viewer at consent.",
+      },
+    });
+    await open(user);
+
+    expect(screen.getByRole("combobox", { name: "Where it goes" })).toBeDisabled();
+    expect(
+      screen.getByText("Railway withheld workspace:viewer at consent."),
+    ).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Project name"), "Client work");
+    await user.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    // A disabled control is skipped by the form-data algorithm, so the action is told
+    // nothing rather than told the empty string — either way it means personal.
+    expect(action.mock.calls[0]?.[1].has("workspaceId")).toBe(false);
   });
 
   it("cannot be opened when disabled", async () => {

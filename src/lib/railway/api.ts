@@ -49,6 +49,7 @@ import {
   toProjects,
   toRegionOptions,
   toWorkspaceSpend,
+  toWorkspaces,
   type ViewerNode,
 } from "./mappers";
 import type {
@@ -57,6 +58,7 @@ import type {
   ContainerVolume,
   RailwayEnvironment,
   RailwayProject,
+  RailwayWorkspace,
   RegionOption,
   WorkspaceSpend,
 } from "./types";
@@ -93,6 +95,14 @@ export async function listProjects(
 ): Promise<{
   viewer: Viewer;
   projects: RailwayProject[];
+  /**
+   * Where a new project could go, from the same read.
+   *
+   * Returned rather than folded into the projects, because a workspace holding no projects
+   * yet is still somewhere to create one — and `toProjects` can only ever mention a
+   * workspace that already had something in it.
+   */
+  workspaces: RailwayWorkspace[];
   failures: RailwayApiError[];
 }> {
   /*
@@ -202,6 +212,7 @@ export async function listProjects(
   return {
     viewer: { id: merged.id, name: merged.name, email: merged.email },
     projects: toProjects(merged),
+    workspaces: toWorkspaces(merged),
     failures,
   };
 }
@@ -352,12 +363,16 @@ export async function listRegions(
 }
 
 /**
- * A new personal project, with whatever environment Railway created alongside it.
+ * A new project, with whatever environment Railway created alongside it.
  *
  * Returns the mapped `RailwayProject` rather than the raw node so the caller can select it
  * immediately: the environments come back in this same response — see
  * PROJECT_CREATE_MUTATION — which is the difference between landing the user on their new
  * project and landing them on the empty state they just acted on.
+ *
+ * An absent `workspaceId` is a personal project, which is Railway's own rule rather than a
+ * default this app applies — so the member is omitted rather than sent as null, and there
+ * is no branch here for the personal case.
  *
  * Nothing here is prefixed. `MANAGED_PREFIX` gates destroy, this app offers no way to
  * delete a project, and a marker that guards nothing would only put `spun-` on a name the
@@ -366,11 +381,12 @@ export async function listRegions(
 export async function createProject(
   accessToken: string,
   name: string,
+  workspaceId?: string,
   signal?: AbortSignal,
 ): Promise<RailwayProject> {
   const data = await gql(
     PROJECT_CREATE_MUTATION,
-    { input: { name } },
+    { input: { name, ...(workspaceId ? { workspaceId } : {}) } },
     { accessToken, signal },
   );
   return toProject(data.projectCreate);

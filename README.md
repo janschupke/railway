@@ -304,11 +304,6 @@ billingPeriod { start end } }` as part of the document. All three render a link 
   applied to them either — it gates destroy, and there is no destroy to gate. Removing a
   project is done in Railway's own dashboard, where the consequences are stated by the
   people who own the billing relationship.
-- **A new project lands on the personal account.** `ProjectCreateInput` carries a
-  `workspaceId` and this app does not send it, so a user who works out of a workspace
-  creates the project here and moves it in Railway. A workspace picker is a real feature —
-  it needs the workspace list, a default, and an answer for a token holding `project:admin`
-  without `workspace:viewer` — not a member added to an input.
 - **A new environment is empty.** `environmentCreate` is sent with `skipInitialDeploys` and
   without `sourceEnvironmentId`, so nothing is copied in and nothing is deployed. Railway's
   own dashboard duplicates an existing environment instead; that is the more useful default

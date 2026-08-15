@@ -139,6 +139,43 @@ describe("listProjects", () => {
     ]);
   });
 
+  it("returns the workspaces themselves, including ones holding no projects", async () => {
+    /*
+     * The create dialog's list, and why it cannot be derived from the projects: an empty
+     * workspace is still somewhere a project can be created, and `toProjects` can only
+     * ever name a workspace that already had something in it.
+     */
+    server.use(
+      ...sources({
+        workspaces: [
+          { id: "ws1", name: "Acme", projects: [node("p1", "Demo")] },
+          { id: "ws2", name: "Beta", projects: [] },
+        ],
+      }),
+    );
+
+    expect((await listProjects(TOKEN)).workspaces).toEqual([
+      { id: "ws1", name: "Acme" },
+      { id: "ws2", name: "Beta" },
+    ]);
+  });
+
+  it("has no workspaces to offer when that source was refused", async () => {
+    // A token with `project:admin` and no `workspace:viewer`. The personal list is intact
+    // and the workspace one is empty, which is the state the dialog explains rather than
+    // silently drawing a control with nothing in it.
+    server.use(
+      ...sources({ personal: [node("p1", "Demo")] }).slice(0, 1),
+      api.query("ProjectsWorkspace", () =>
+        HttpResponse.json(notAuthorized(["me", "workspaces"])),
+      ),
+    );
+
+    const { projects, workspaces } = await listProjects(TOKEN);
+    expect(projects).toHaveLength(1);
+    expect(workspaces).toEqual([]);
+  });
+
   it("shows a project reachable through both connections exactly once", async () => {
     server.use(
       ...sources({

@@ -26,6 +26,8 @@ const projects = [
   { id: "p2", name: "Other", environments: [{ id: "e3", name: "production" }] },
 ];
 
+const workspaces = [{ id: "ws1", name: "Acme" }];
+
 const renderPicker = (
   projectId: string | null = "p1",
   environmentId: string | null = "e1",
@@ -38,6 +40,8 @@ const renderPicker = (
         projects={projects}
         projectId={projectId}
         environmentId={environmentId}
+        workspaces={workspaces}
+        deniedWorkspaces={false}
       />
     </ToastProvider>,
   );
@@ -139,6 +143,8 @@ describe("ProjectPicker", () => {
           projects={[{ id: "p3", name: "Bare", environments: [] }]}
           projectId="p3"
           environmentId={null}
+          workspaces={workspaces}
+          deniedWorkspaces={false}
         />
       </ToastProvider>,
     );
@@ -159,6 +165,23 @@ describe("ProjectPicker", () => {
     expect(
       within(listbox).getByRole("option", { name: "New environment" }),
     ).toBeVisible();
+  });
+
+  it("offers the account's workspaces in the create dialog, personal first", async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    await openCreate(user, "Project", "New project", "Project name");
+
+    await user.click(screen.getByRole("combobox", { name: "Where it goes" }));
+    const listbox = await screen.findByRole("listbox");
+    // Order matters: the first row is the resting state, and it has to be the one that
+    // keeps the behaviour this app had before the choice existed.
+    expect(
+      within(listbox)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Personal account", "Acme"]);
   });
 
   it("lands on a project it just created, with its default environment", async () => {

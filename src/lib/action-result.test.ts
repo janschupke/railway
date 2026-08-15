@@ -130,6 +130,9 @@ describe("isField", () => {
      */
     expect(isField("region")).toBe(false);
     expect(isField("restartPolicy")).toBe(false);
+    // The third of them, and the same argument: the workspace select is drawn from a list
+    // Railway handed this app, so an id that is not on it means a stale page.
+    expect(isField("workspaceId")).toBe(false);
     expect(isField("variables")).toBe(false);
     expect(isField(0)).toBe(false);
     expect(isField(3)).toBe(false);

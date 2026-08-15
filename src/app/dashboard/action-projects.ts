@@ -32,17 +32,23 @@ export async function addProject(formData: FormData): Promise<ActionResult> {
 
   const parsed = projectCreateSchema.safeParse({
     name: formField(formData, "projectName"),
+    workspaceId: formField(formData, "workspaceId"),
   });
   if (!parsed.success) {
-    // The schema has one field, `name`, and the form renders it as `projectName`.
+    /*
+     * Only `name` is renamed, because only `name` is on screen as a field the user typed
+     * into. `workspaceId` is a select this app drew from a list Railway gave it, so it is
+     * not an ActionField and its message falls through to a toast — the same treatment
+     * `projectId` gets one function down, and for the same reason.
+     */
     return issueToResult(t, parsed.error, { rename: { name: "projectName" } });
   }
 
-  const { name } = parsed.data;
+  const { name, workspaceId } = parsed.data;
 
   try {
     const accessToken = await requireAccessToken();
-    const project = await createProjectOnRailway(accessToken, name);
+    const project = await createProjectOnRailway(accessToken, name, workspaceId);
 
     /*
      * The audit trail, for the same reason `container.created` has one: this creates
@@ -52,11 +58,17 @@ export async function addProject(formData: FormData): Promise<ActionResult> {
      *
      * There is no `project.destroyed` counterpart and there never will be — this app does
      * not delete projects, which is why they carry no MANAGED_PREFIX either.
+     *
+     * `workspace_id` is null for the personal account rather than absent, and flat like
+     * every field beside it. A conditionally spread member would make "this went to the
+     * personal account" and "somebody forgot to log where it went" the same line, and this
+     * is the only record of where a project ended up — the app cannot move it afterwards.
      */
     log.info("project.created", {
       project_id: project.id,
       project_name: name,
       environment_count: project.environments.length,
+      workspace_id: workspaceId ?? null,
     });
 
     revalidatePath("/dashboard");

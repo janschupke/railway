@@ -121,6 +121,18 @@ export type RailwayProject = {
   workspaceName?: string;
 };
 
+/**
+ * A workspace the viewer can reach, as somewhere a new project could be created.
+ *
+ * Carries the id, which `RailwayProject.workspaceName` above deliberately does not: that
+ * field labels a project the app has been handed, and this one names a destination the app
+ * has to send back. They come out of the same `me.workspaces` read.
+ */
+export type RailwayWorkspace = {
+  id: string;
+  name: string;
+};
+
 export type Container = {
   serviceId: string;
   /** Name as shown in Railway, including the ownership prefix. */

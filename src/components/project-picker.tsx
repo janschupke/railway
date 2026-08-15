@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useDashboardSelection } from "@/hooks/use-dashboard-selection";
-import type { RailwayProject } from "@/lib/railway/types";
+import type { RailwayProject, RailwayWorkspace } from "@/lib/railway/types";
 import { CreateEnvironmentDialog, CreateProjectDialog } from "./create-dialogs";
 import { PendingStatus } from "./ui/misc";
 import { Select } from "./ui/select";
@@ -24,10 +24,15 @@ export function ProjectPicker({
   projects,
   projectId,
   environmentId,
+  workspaces,
+  deniedWorkspaces,
 }: {
   projects: RailwayProject[];
   projectId: string | null;
   environmentId: string | null;
+  /** Passed straight through to the create dialog; this control does not read them. */
+  workspaces: RailwayWorkspace[];
+  deniedWorkspaces: boolean;
 }) {
   const t = useTranslations("dashboard");
   const tProject = useTranslations("createProject");
@@ -159,7 +164,12 @@ export function ProjectPicker({
         Outside the row's flex children: these render no trigger of their own, so a
         wrapper here would be an empty box taking a gap.
       */}
-      <CreateProjectDialog open={creating === PROJECT} onOpenChange={trackProject} />
+      <CreateProjectDialog
+        workspaces={workspaces}
+        deniedWorkspaces={deniedWorkspaces}
+        open={creating === PROJECT}
+        onOpenChange={trackProject}
+      />
       <CreateEnvironmentDialog
         projectId={projectId}
         open={creating === ENVIRONMENT}

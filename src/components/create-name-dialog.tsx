@@ -15,8 +15,10 @@ import {
   DialogTrigger,
 } from "./ui/dialog";
 import { Field } from "./ui/field";
+import type { GroupedOption } from "./ui/group-options";
 import { Input } from "./ui/input";
 import { PendingStatus } from "./ui/misc";
+import { Select } from "./ui/select";
 import { useToast } from "./ui/toast";
 
 /**
@@ -39,6 +41,33 @@ export type CreateNameCopy = {
 };
 
 /**
+ * A second control the dialog submits, for a value chosen rather than typed.
+ *
+ * One caller — the workspace a project is created in — and named for the shape rather than
+ * for that, because the dialog itself has no business knowing what a workspace is.
+ *
+ * Deliberately NOT `hidden`, which reads like a fit until its last five words: those are
+ * "extra values the action needs that the user does not type", and this is one the user
+ * does choose. And deliberately not an `error` member either — see the routing rule in
+ * `submit` below and the note on `ACTION_FIELDS` in lib/action-result.ts.
+ */
+export type CreateNameChoice = {
+  /**
+   * Submits under this name, and a literal for the reason `field` is one: a free `string`
+   * here would let a rename separate the control from the value the action reads.
+   */
+  name: "workspaceId";
+  label: string;
+  /**
+   * Empty makes the control inert, which is what draws `disabledReason` under it — see
+   * `Select`. That is the whole handling of "there is nothing to choose from and the
+   * reader is owed a sentence about why".
+   */
+  options: GroupedOption[];
+  disabledReason?: string;
+};
+
+/**
  * One dialog, both create paths.
  *
  * Projects and environments differ in exactly two ways — the copy, and whether a hidden
@@ -55,6 +84,7 @@ export function CreateNameDialog({
   action,
   field,
   hidden,
+  choice,
   copy,
   triggerVariant = "secondary",
   disabled,
@@ -67,6 +97,8 @@ export function CreateNameDialog({
   field: "projectName" | "environmentName";
   /** Extra values the action needs that the user does not type. */
   hidden?: Record<string, string>;
+  /** A second control, for a value the user chooses rather than types. */
+  choice?: CreateNameChoice;
   copy: CreateNameCopy;
   triggerVariant?: "primary" | "secondary";
   disabled?: boolean;
@@ -102,6 +134,17 @@ export function CreateNameDialog({
    * in state rather than in the DOM.
    */
   const [value, setValue] = useState("");
+  /*
+   * Held here rather than by the caller, for the reason above and one more. The reset below
+   * is the only code that knows the dialog closed: at the empty-state call site the dialog
+   * is uncontrolled, so the caller is never told. A `children` slot would hand the caller
+   * state it has no way to clear, and a create that quietly reused the last attempt's
+   * choice is exactly the silence this whole feature exists to remove.
+   *
+   * Blank is the resting state, and what it means belongs to the caller — here it is only
+   * "the option the control opens on".
+   */
+  const [chosen, setChosen] = useState("");
   const [pending, startTransition] = useTransition();
 
   /*
@@ -147,10 +190,12 @@ export function CreateNameDialog({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        // A dismissed dialog must not reopen holding the last attempt's error or its name.
+        // A dismissed dialog must not reopen holding the last attempt's error, its name or
+        // the destination that was picked for it.
         if (!next) {
           setError(undefined);
           setValue("");
+          setChosen("");
         }
       }}
     >
@@ -170,7 +215,28 @@ export function CreateNameDialog({
             <DialogTitle>{copy.title}</DialogTitle>
             <DialogDescription>{copy.description}</DialogDescription>
 
-            <form action={submit} className="mt-4">
+            {/*
+              `onSubmit` rather than `action`, and the difference is load-bearing.
+
+              React resets a `<form action={fn}>` once the action settles. The name input
+              below already had to live in state to survive that — see `value` above — and
+              the choice cannot survive it at all: Radix registers a `reset` listener on the
+              enclosing form and pushes the value the control mounted with back out through
+              `onValueChange`. So a failed submit left the typed name on screen and quietly
+              moved the project back to the personal account, which is the exact silence
+              this control was added to remove.
+
+              Nothing here wanted that reset. The action is called by hand either way — the
+              form only ever built the FormData — and a successful create closes the dialog,
+              which clears everything on the way out.
+            */}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                submit(new FormData(event.currentTarget));
+              }}
+              className="mt-4"
+            >
               {Object.entries(hidden ?? {}).map(([name, value]) => (
                 <input key={name} type="hidden" name={name} value={value} />
               ))}
@@ -188,6 +254,26 @@ export function CreateNameDialog({
                   />
                 )}
               </Field>
+
+              {/*
+                After the name, because the name is what the reader came to type and this
+                qualifies it. `Select` owns the hidden input that submits — its own `name`
+                prop — so nothing here reaches `FormData` twice.
+              */}
+              {choice && (
+                <div className="mt-4">
+                  <Select
+                    name={choice.name}
+                    label={choice.label}
+                    value={chosen}
+                    options={choice.options}
+                    onValueChange={setChosen}
+                    {...(choice.disabledReason
+                      ? { disabledReason: choice.disabledReason }
+                      : {})}
+                  />
+                </div>
+              )}
 
               {/* The button's own label change is not announced; this is. */}
               <PendingStatus

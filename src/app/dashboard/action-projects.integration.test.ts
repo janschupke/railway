@@ -119,21 +119,91 @@ describe("createProject", () => {
      * No MANAGED_PREFIX, and no other member of ProjectCreateInput. The prefix gates
      * destroy and this app never deletes a project, so marking one would only put `spun-`
      * on a name the user reads back in Railway's own dashboard.
+     *
+     * `workspaceId` is absent rather than null, and this exact assertion is what says so:
+     * Railway reads an absent workspace as the personal account, and a null would be this
+     * app asserting something about a member it was not told anything about.
      */
     expect(sent[0]?.input).toEqual({ name: "Client work" });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
   });
 
-  it("records the creation of billable infrastructure", async () => {
+  it("creates the project in the workspace that was chosen", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      api.mutation("ProjectCreate", ({ variables }) => {
+        sent.push(variables);
+        return HttpResponse.json(created());
+      }),
+    );
+
+    const result = await createProject(
+      null,
+      form({ projectName: "Client work", workspaceId: "ws_1" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(sent[0]?.input).toEqual({ name: "Client work", workspaceId: "ws_1" });
+  });
+
+  it("reads the personal option's blank value as no workspace at all", async () => {
+    // What the select actually posts for "Personal account". It must reach Railway as an
+    // omitted member, not as an empty string it would have to interpret.
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      api.mutation("ProjectCreate", ({ variables }) => {
+        sent.push(variables);
+        return HttpResponse.json(created());
+      }),
+    );
+
+    await createProject(null, form({ projectName: "Client work", workspaceId: "" }));
+
+    expect(sent[0]?.input).toEqual({ name: "Client work" });
+  });
+
+  it("toasts rather than points at a field when the workspace id is not one", async () => {
+    /*
+     * Nothing on screen to attribute it to: the workspace is a select drawn from a list
+     * Railway gave this app, so the only way to reach this is a stale page. `workspaceId`
+     * is not an ActionField, which is what sends the sentence to a toast instead.
+     */
+    const result = await createProject(
+      null,
+      form({ projectName: "Client work", workspaceId: "ws/1" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "That reference is not one Railway could have issued. Reload the page and try again.",
+    });
+  });
+
+  it("records the creation of billable infrastructure, and where it went", async () => {
     server.use(api.mutation("ProjectCreate", () => HttpResponse.json(created())));
 
-    await createProject(null, form({ projectName: "Client work" }));
+    await createProject(
+      null,
+      form({ projectName: "Client work", workspaceId: "ws_1" }),
+    );
 
     expect(record("project.created")).toMatchObject({
       project_id: "proj_new",
       project_name: "Client work",
       environment_count: 1,
+      workspace_id: "ws_1",
     });
+  });
+
+  it("records a personal project as one, rather than as a missing field", async () => {
+    server.use(api.mutation("ProjectCreate", () => HttpResponse.json(created())));
+
+    await createProject(null, form({ projectName: "Client work" }));
+
+    // Null, not absent. This is the only record of where a project ended up — the app
+    // cannot move it afterwards — so "personal" and "unlogged" must not read alike.
+    expect(record("project.created")).toMatchObject({ workspace_id: null });
   });
 
   it("selects the project alone when Railway returns no environment with it", async () => {

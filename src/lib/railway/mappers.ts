@@ -5,6 +5,7 @@ import {
   type ContainerMetrics,
   type ContainerVolume,
   type RailwayProject,
+  type RailwayWorkspace,
   type RegionOption,
   type WorkspaceSpend,
 } from "./types";
@@ -93,6 +94,28 @@ export function toProjects(viewer: ViewerNode): RailwayProject[] {
   }
 
   return [...byId.values()];
+}
+
+/**
+ * The workspaces the viewer can reach, as places a project could be created.
+ *
+ * Nameless entries are dropped rather than given a placeholder. `name` is nullable on the
+ * live schema, and the only thing this list becomes is a select — a row with no accessible
+ * name is not a choice a reader can make, and an id shown in its place is not one either.
+ *
+ * One pass for the same reason toRegionOptions gives: the null test and the read of the
+ * value it narrows stay in one expression, so a later edit cannot pull them apart.
+ *
+ * Sorted, because Railway documents no ordering for this connection — the same argument
+ * toPublicUrl makes about domains. An unordered list would reshuffle the picker between
+ * two reads that found the same workspaces.
+ */
+export function toWorkspaces(viewer: ViewerNode): RailwayWorkspace[] {
+  return (viewer.workspaces ?? [])
+    .flatMap((workspace) =>
+      workspace.name ? [{ id: workspace.id, name: workspace.name }] : [],
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 /**

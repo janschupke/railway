@@ -3,7 +3,12 @@
 import { useTranslations } from "next-intl";
 import { createEnvironment, createProject } from "@/app/dashboard/actions";
 import { useDashboardSelection } from "@/hooks/use-dashboard-selection";
-import { CreateNameDialog, type CreateNameCopy } from "./create-name-dialog";
+import type { RailwayWorkspace } from "@/lib/railway/types";
+import {
+  CreateNameDialog,
+  type CreateNameChoice,
+  type CreateNameCopy,
+} from "./create-name-dialog";
 import { PendingStatus } from "./ui/misc";
 
 /**
@@ -51,12 +56,18 @@ function copyFor(
 export function CreateProjectDialog({
   variant = "secondary",
   triggerLabel,
+  workspaces,
+  deniedWorkspaces,
   open,
   onOpenChange,
 }: {
   variant?: "primary" | "secondary";
   /** Overridden in the empty state, where the button is a first-run invitation. */
   triggerLabel?: string;
+  /** Where this project could go besides the personal account. */
+  workspaces: RailwayWorkspace[];
+  /** True when the list above is empty because Railway withheld `workspace:viewer`. */
+  deniedWorkspaces: boolean;
   /** Supplied, the trigger is the caller's. See CreateNameDialog. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -64,12 +75,48 @@ export function CreateProjectDialog({
   const t = useTranslations("createProject");
   const { select, pending } = useDashboardSelection();
 
+  /*
+   * Three states, and the middle one is the reason this is not a ternary in the JSX.
+   *
+   * With workspaces, the personal account leads the list as the blank option — the same
+   * shape advanced-settings.tsx builds its region list in, and what keeps today's behaviour
+   * the default rather than changing it silently.
+   *
+   * With none because the scope was withheld, the control is drawn with nothing in it,
+   * which is what makes `Select` inert and puts the reason under it. A reader who works out
+   * of a workspace is otherwise told nothing about why their project went elsewhere.
+   *
+   * With none because there are none, there is no choice to make and nothing is drawn.
+   */
+  const choice: CreateNameChoice | undefined =
+    workspaces.length > 0
+      ? {
+          name: "workspaceId",
+          label: t("workspaceLabel"),
+          options: [
+            { value: "", label: t("workspacePersonal") },
+            ...workspaces.map((workspace) => ({
+              value: workspace.id,
+              label: workspace.name,
+            })),
+          ],
+        }
+      : deniedWorkspaces
+        ? {
+            name: "workspaceId",
+            label: t("workspaceLabel"),
+            options: [],
+            disabledReason: t("workspaceUnavailable"),
+          }
+        : undefined;
+
   return (
     <>
       <CreateNameDialog
         action={createProject}
         field="projectName"
         triggerVariant={variant}
+        {...(choice ? { choice } : {})}
         {...(open === undefined ? {} : { open })}
         {...(onOpenChange ? { onOpenChange } : {})}
         copy={copyFor(t, { trigger: triggerLabel })}

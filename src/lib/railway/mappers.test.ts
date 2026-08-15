@@ -9,6 +9,7 @@ import {
   toProject,
   toRegionOptions,
   toWorkspaceSpend,
+  toWorkspaces,
 } from "./mappers";
 import type {
   MetricsResultNode,
@@ -90,6 +91,42 @@ describe("toProject", () => {
       name: "Demo",
       environments: [{ id: "e1", name: "production" }],
     });
+  });
+});
+
+describe("toWorkspaces", () => {
+  it("names each workspace a project could be created in", () => {
+    expect(
+      toWorkspaces({
+        id: "u1",
+        workspaces: [
+          { id: "ws2", name: "Beta" },
+          { id: "ws1", name: "Acme" },
+        ],
+      }),
+    ).toEqual([
+      { id: "ws1", name: "Acme" },
+      { id: "ws2", name: "Beta" },
+    ]);
+  });
+
+  it("drops a workspace with no name, which could only render as a blank row", () => {
+    expect(
+      toWorkspaces({
+        id: "u1",
+        workspaces: [
+          { id: "ws1", name: null },
+          { id: "ws2", name: "Acme" },
+        ],
+      }),
+    ).toEqual([{ id: "ws2", name: "Acme" }]);
+  });
+
+  it("reads a refused or absent workspace list as none", () => {
+    // Both spellings arrive: `null` from a refused field, absent from the document that
+    // does not select workspaces at all.
+    expect(toWorkspaces({ id: "u1", workspaces: null })).toEqual([]);
+    expect(toWorkspaces({ id: "u1" })).toEqual([]);
   });
 });
 

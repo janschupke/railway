@@ -22,6 +22,7 @@ import type {
   ContainerVolume,
   RailwayEnvironment,
   RailwayProject,
+  RailwayWorkspace,
   RegionOption,
   WorkspaceSpend,
 } from "@/lib/railway/types";
@@ -29,6 +30,14 @@ import type {
 export type DashboardShell = {
   user: { name?: string; email?: string };
   projects: RailwayProject[];
+  /**
+   * Where a new project could be created, for the create dialog's workspace select.
+   *
+   * Empty for two situations that need different answers on screen and are told apart by
+   * `missingScopes` rather than by this: an account with no workspaces, and a token whose
+   * `workspace:viewer` was withheld — which reads as no workspaces from here.
+   */
+  workspaces: RailwayWorkspace[];
   project: RailwayProject | null;
   environment: RailwayEnvironment | null;
   /** Set when the project list failed; the header and shell still render. */
@@ -162,6 +171,7 @@ async function shell(params: {
   const base: DashboardShell = {
     user: { name: session.user.name, email: session.user.email },
     projects: [],
+    workspaces: [],
     project: null,
     environment: null,
     error: null,
@@ -172,9 +182,10 @@ async function shell(params: {
   };
 
   let projects: RailwayProject[];
+  let workspaces: RailwayWorkspace[];
   let failures: RailwayApiError[];
   try {
-    ({ projects, failures } = await listProjects(session.accessToken));
+    ({ projects, workspaces, failures } = await listProjects(session.accessToken));
   } catch (error) {
     return {
       ...base,
@@ -203,6 +214,7 @@ async function shell(params: {
   return {
     ...base,
     projects,
+    workspaces,
     project,
     environment,
     // Reported, not thrown: these projects are real and usable, and the sentence says

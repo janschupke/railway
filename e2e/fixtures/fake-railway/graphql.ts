@@ -63,11 +63,16 @@ export function execute(
       const source = store.faults.projectsSource;
       const projects =
         source === "personal" || source === "both"
-          ? store.projects.map((p) => ({
-              id: p.id,
-              name: p.name,
-              environments: edges(p.environments),
-            }))
+          ? store.projects
+              // A project created into a workspace is not a personal one. The knob still
+              // decides whether this source answers at all; this only decides what is in
+              // it once it does, which is what makes a sent `workspaceId` observable.
+              .filter((p) => !p.workspaceId)
+              .map((p) => ({
+                id: p.id,
+                name: p.name,
+                environments: edges(p.environments),
+              }))
           : [];
 
       // Identity rides on this document; there is no separate Viewer query.
@@ -89,22 +94,36 @@ export function execute(
       if (store.faults.rejectWorkspaces) return notAuthorized(["me", "workspaces"]);
 
       const source = store.faults.projectsSource;
-      const projects =
-        source === "workspace" || source === "both"
-          ? store.projects.map((p) => ({
+      const answers = source === "workspace" || source === "both";
+
+      /*
+       * A workspace holds what was created in it, plus — while this source is answering —
+       * the unassigned projects it held before any of this existed.
+       *
+       * The second half is what keeps `projectsSource: "workspace"` meaning what it meant:
+       * the seeded account's projects reachable through a workspace rather than personally.
+       * The first half is not gated, because a project someone put in a workspace is there
+       * whatever this knob says about where the seeded ones are found.
+       */
+      const workspaces = store.workspaces.map((workspace) => {
+        const projects = store.projects.filter(
+          (p) => p.workspaceId === workspace.id || (answers && !p.workspaceId),
+        );
+        return {
+          id: workspace.id,
+          name: workspace.name,
+          projects: edges(
+            projects.map((p) => ({
               id: p.id,
               name: p.name,
               environments: edges(p.environments),
-            }))
-          : [];
+            })),
+          ),
+        };
+      });
 
       return {
-        data: {
-          me: {
-            id: "user_e2e",
-            workspaces: [{ id: "ws_e2e", name: "Acme", projects: edges(projects) }],
-          },
-        },
+        data: { me: { id: "user_e2e", workspaces } },
       };
     }
 
@@ -248,8 +267,10 @@ export function execute(
     }
 
     case "ProjectCreate": {
-      const input = variables.input as { name: string };
-      const project = store.addProject(input.name);
+      // `workspaceId` is optional on the input and absent means personal, which is
+      // Railway's rule — so it is read as optional here rather than defaulted.
+      const input = variables.input as { name: string; workspaceId?: string };
+      const project = store.addProject(input.name, input.workspaceId);
       // The full ProjectFields selection: the app reads the default environment straight
       // out of this response rather than re-reading the project list to find it.
       return {

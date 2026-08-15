@@ -68,9 +68,13 @@ const projects = [
   { id: "p2", name: "Other", environments: [{ id: "e3", name: "production" }] },
 ];
 
+const workspaces = [{ id: "ws1", name: "Acme" }];
+
 beforeEach(() => {
   getSession.mockReset().mockResolvedValue(session);
-  listProjects.mockReset().mockResolvedValue({ viewer: {}, projects, failures: [] });
+  listProjects
+    .mockReset()
+    .mockResolvedValue({ viewer: {}, projects, workspaces, failures: [] });
   getProjectMetrics.mockReset().mockResolvedValue({ metrics: {}, spend: null });
   getEnvironmentVolumes.mockReset().mockResolvedValue({});
   // Per test, so an override cannot outlive the case that wanted it.
@@ -136,7 +140,12 @@ describe("loadDashboardShell", () => {
   });
 
   it("does not report a substitution when there was nothing to substitute", async () => {
-    listProjects.mockResolvedValue({ viewer: {}, projects: [], failures: [] });
+    listProjects.mockResolvedValue({
+      viewer: {},
+      projects: [],
+      workspaces,
+      failures: [],
+    });
 
     const shell = await loadDashboardShell({ projectId: "gone" });
 
@@ -198,7 +207,12 @@ describe("loadDashboardShell", () => {
   });
 
   it("handles a user with no projects shared", async () => {
-    listProjects.mockResolvedValue({ viewer: {}, projects: [], failures: [] });
+    listProjects.mockResolvedValue({
+      viewer: {},
+      projects: [],
+      workspaces,
+      failures: [],
+    });
 
     const shell = await loadDashboardShell({});
 
@@ -212,6 +226,7 @@ describe("loadDashboardShell", () => {
     listProjects.mockResolvedValue({
       viewer: {},
       projects: [{ id: "p9", name: "Empty", environments: [] }],
+      workspaces,
       failures: [],
     });
 
@@ -219,6 +234,18 @@ describe("loadDashboardShell", () => {
 
     expect(shell?.project?.id).toBe("p9");
     expect(shell?.environment).toBeNull();
+  });
+
+  it("carries the workspaces a project could be created in", async () => {
+    expect((await loadDashboardShell({}))?.workspaces).toEqual(workspaces);
+  });
+
+  it("carries an empty workspace list when the project read failed", async () => {
+    // The create dialog reads `.length` off this. A failed read has to leave a list that
+    // says "nothing to choose", not one that says nothing at all.
+    listProjects.mockRejectedValue(new Error("socket hang up"));
+
+    expect((await loadDashboardShell({}))?.workspaces).toEqual([]);
   });
 
   it("carries the signed-in identity for the header", async () => {

@@ -39,7 +39,15 @@ export default async function DashboardPage({
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
   const tCreate = await getTranslations("createProject");
-  const { projects, project, environment, error, errorKind, missingScopes } = shell;
+  const {
+    projects,
+    workspaces,
+    project,
+    environment,
+    error,
+    errorKind,
+    missingScopes,
+  } = shell;
 
   /*
    * Deliberately not awaited. The spin-up form checks a typed name against the names
@@ -84,6 +92,20 @@ export default async function DashboardPage({
   const deniedProjectAccess = missingScopes.some(
     (scope) => scope === "project:admin" || scope === "workspace:viewer",
   );
+
+  /*
+   * The narrower half of the line above, and the create dialog needs it told apart.
+   *
+   * An empty workspace list has two causes with nothing in common: an account that has no
+   * workspaces, where there is no choice to offer, and a token that was refused the scope
+   * that lists them, where there is a choice and this app cannot see it. Only the second is
+   * owed a sentence about why the project will be personal.
+   *
+   * Reachable only through the picker below. On the empty-state branch a withheld
+   * `workspace:viewer` already makes `deniedProjectAccess` true, and that branch offers
+   * re-consent rather than a create dialog.
+   */
+  const deniedWorkspaces = missingScopes.includes("workspace:viewer");
 
   /*
    * A failed project read means there is nothing to pick, nothing to spin up into and
@@ -207,6 +229,8 @@ export default async function DashboardPage({
                         <CreateProjectDialog
                           variant="primary"
                           triggerLabel={tCreate("triggerFirst")}
+                          workspaces={workspaces}
+                          deniedWorkspaces={deniedWorkspaces}
                         />
                         {/* Asking Railway again is both cheaper and likelier to help
                               than a consent screen that already granted everything. */}
@@ -235,6 +259,8 @@ export default async function DashboardPage({
                 projects={projects}
                 projectId={project?.id ?? null}
                 environmentId={environment?.id ?? null}
+                workspaces={workspaces}
+                deniedWorkspaces={deniedWorkspaces}
               />
 
               {/*
