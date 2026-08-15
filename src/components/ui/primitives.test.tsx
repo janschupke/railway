@@ -552,24 +552,6 @@ describe("Select, as a form field", () => {
     expect(groups).toHaveLength(2);
   });
 
-  it("renders an error inline and marks the control invalid", () => {
-    render(
-      <Select
-        label="Region"
-        options={options}
-        value=""
-        onValueChange={vi.fn()}
-        error="That is not a region."
-      />,
-    );
-
-    const combobox = screen.getByRole("combobox", { name: "Region" });
-    expect(combobox).toHaveAttribute("aria-invalid", "true");
-    const message = screen.getByRole("alert");
-    expect(message).toHaveTextContent("That is not a region.");
-    expect(combobox).toHaveAttribute("aria-describedby", message.id);
-  });
-
   it("prefers the disabled reason over the static hint", () => {
     // `Field` shows one message, so the two have to be ranked somewhere. A dead control
     // explains why it is dead before it explains what it would have done.

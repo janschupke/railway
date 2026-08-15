@@ -57,7 +57,13 @@ const ACTION_VALUE = "\u0000action";
  *     a form, so it genuinely appears in the DOM — that control is unnamed and therefore
  *     contributes nothing to `FormData`. `primitives.test.tsx` asserts the submission, not
  *     the markup, which is the property that is actually true.
- *   - **An error** is the `error` prop, forwarded to `Field` exactly as the native one did.
+ *   - **An error** is not carried at all, and that is deliberate. `Field` still takes one
+ *     for every attributable control; no select is one. `region` and `restartPolicy` are
+ *     closed-set options this app rendered, so a person cannot reach an invalid value, and
+ *     `ACTION_FIELDS` excludes both on purpose — see the note on that type. The prop
+ *     existed because the native control it replaced had it, its own docblock said nothing
+ *     wired it, and the only caller was the test covering it. Wrap a select in a `Field`
+ *     directly if one ever becomes attributable.
  *   - **Groups** are a portal and a popper per control rather than one `<optgroup>`. That
  *     cost is real and was accepted: Radix Select is already in this route's graph for the
  *     project picker and the filter bar, so the second and third instance add no module.
@@ -73,7 +79,6 @@ export function Select({
   onValueChange,
   name,
   hint,
-  error,
   disabled,
   disabledReason,
   placeholder,
@@ -101,16 +106,6 @@ export function Select({
   name?: string;
   /** Static help under the control. Ignored inline, which has no under. */
   hint?: string;
-  /**
-   * The form will refuse this value. `Field` supplies `aria-invalid` and a `role="alert"`
-   * message; the trigger takes the danger border.
-   *
-   * Nothing wires this today: `region` and `restartPolicy` are not members of
-   * `ActionField`, so their server errors reach the user as a toast. It exists because the
-   * control it replaced had it, and a primitive that can only be used correctly by
-   * knowing which fields are attributable is the wrong shape.
-   */
-  error?: string;
   disabled?: boolean;
   /**
    * Why this control cannot be used, shown under it.
@@ -405,7 +400,6 @@ export function Select({
       label={label}
       // A dead control explains itself first; otherwise the static hint stands.
       {...(reason ? { hint: reason } : hint ? { hint } : {})}
-      {...(error ? { error } : {})}
     >
       {({ id, "aria-describedby": describedBy, invalid }) =>
         control({ id, "aria-describedby": describedBy, invalid })
