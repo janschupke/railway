@@ -226,6 +226,24 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
   `estimatedUsage` and the `project.workspace.customer` chain answer for a real OAuth
   session. Introspection says what the schema declares; only this says what the token is
   permitted to read, which is a different question and the one the readouts depend on.
+- `pnpm probe:deployment <deploymentId>` — prints a failed deployment's events verbatim and
+  what `pickFailureReason` chose from them, which is the only way to check the order in
+  `failure-reason.ts` against a real failure.
+- `pnpm probe:logs <deploymentId> [--phase build]` — settles what the two log feeds
+  actually return: whether a line carries an id, whether `limit` means the most recent N,
+  and how far back a subscription replays. `src/lib/log-overlap.ts` is built on the
+  answers, and the e2e fake decides all of them by fiat.
+- `pnpm probe:subscription [deploymentId]` — whether Railway lets a client subscribe to
+  deployment status. It carries its own control: it subscribes to a field that does not
+  exist first, and refuses to conclude anything unless the server rejects that one by name.
+  This is the probe that found three ADRs and a constant asserting a subscription does not
+  exist when it does.
+
+  **All five prefer `RC_SESSION` over `RAILWAY_TOKEN`, and the difference is the point.**
+  An account token has wider visibility than a delegated OAuth grant — it is refused
+  `me { projects }` outright — so it can establish that a capability exists and never that
+  this app could use it. Sign in locally and copy the `rc_session` cookie.
+
 - `pnpm schema:pull` — dumps Railway's schema from live introspection into
   `src/lib/railway/schema.graphql`, which is **committed**. Needs `RAILWAY_TOKEN`.
 - `pnpm codegen` — generates `src/lib/railway/graphql.generated.ts` from that artifact and

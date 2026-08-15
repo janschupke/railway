@@ -3,10 +3,26 @@
 A container created, redeployed or destroyed in Railway's own dashboard did not appear
 here until someone pressed Refresh. The app was one-way.
 
-**There is nothing to subscribe to.** Railway publishes `deploymentLogs` and `buildLogs`,
-both keyed to a single deployment id, and no project, service or deployment-status
-subscription — `pnpm verify:schema` introspects the live API and would say otherwise if
-that changed. So closing the loop means polling. The only real question is who polls.
+**There is nothing to subscribe to at this level.** Railway's subscriptions are all keyed
+to one deployment, one environment or one plugin — `deploymentLogs`, `buildLogs`,
+`deployment`, `deploymentEvents`, `environmentLogs` and so on. **There is no project or
+service subscription**, and that is what this decision rests on: a dashboard watching a
+project has nothing to hold open. So closing the loop means polling, and the only real
+question is who polls.
+
+Two corrections to what this paragraph used to say, both worth keeping visible.
+
+It claimed there was no **deployment-status** subscription either. There is —
+`Subscription.deployment(id:)` carries a non-null `status` — and
+[ADR-3](0003-sse-downstream-websocket-upstream.md) now gives the real reason the log
+stream polls for status rather than subscribing. That absence was never the reason this
+watcher exists; the project-level one is.
+
+And it claimed `pnpm verify:schema` "would say otherwise if that changed". It would not
+have: the script contained no reference to `Subscription` at all. It does now —
+`checkSubscriptions` fails the build if a project or service subscription appears, and
+prints what Railway offers and this app does not use, which is how the first error above
+would have been caught years earlier.
 
 **The server does.** `/api/watch/[projectId]` runs one `PROJECT_QUERY` per interval,
 hashes the result, and pushes a `changed` event when the hash moves. The browser answers

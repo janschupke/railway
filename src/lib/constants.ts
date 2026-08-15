@@ -35,7 +35,13 @@ export const STREAM = {
   /** Comment frames stop proxies idling the connection out during a long build. */
   KEEPALIVE_MS: 15_000,
   /**
-   * Railway has no deployment-status subscription, so status is polled.
+   * Status is polled rather than subscribed to. See ADR-3 for why.
+   *
+   * Not because Railway lacks the subscription — it publishes `deployment(id:)` with a
+   * non-null `status`, which this comment used to deny. The reason is that subscribing
+   * would hold a second upstream socket per open log pane, against
+   * MAX_CONCURRENT_PER_USER, to replace a poll that already stretches to nothing while a
+   * deployment sits still.
    *
    * Where a poll *starts*, not where it stays: every reported state change resets to this
    * value, so a deployment that is actually moving is watched at this cadence from end to

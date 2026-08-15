@@ -26,6 +26,7 @@
     "probe:deployment": "tsx --env-file-if-exists=.env scripts/probe-deployment.ts",
     "probe:logs": "tsx --env-file-if-exists=.env scripts/probe-logs.ts",
     "probe:metrics": "tsx --env-file-if-exists=.env scripts/probe-metrics.ts",
+    "probe:subscription": "tsx --env-file-if-exists=.env scripts/probe-subscription.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm codegen:check && pnpm knip && pnpm test:coverage",
     "size": "node --no-warnings --experimental-strip-types scripts/check-bundle-budget.ts",
     "knip": "knip",

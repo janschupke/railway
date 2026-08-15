@@ -20,8 +20,9 @@ even if one were wanted.
 **The subscription path is not Apollo-shaped.** App Router route handlers cannot accept
 WebSocket upgrades, so logs arrive over `graphql-ws` upstream and leave over SSE
 downstream, merged with a status poll — starting at 2.5s and stretching as a deployment
-sits still — because Railway exposes no deployment-status subscription. A link chain does
-not cross that boundary.
+sits still. (Railway does publish a deployment-status subscription; this app polls for the
+reasons [ADR-3](0003-sse-downstream-websocket-upstream.md) now gives, which this file used
+to state as an absence.) A link chain does not cross that boundary either way.
 
 **What `client.ts` buys that `RetryLink` does not** is Railway-specific: a 200 response
 carrying `errors[]` is a failure; `UNAUTHENTICATED`/`FORBIDDEN` in `extensions` is an
