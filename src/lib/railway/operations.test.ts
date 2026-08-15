@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { buildSchema, Kind, parse, validate } from "graphql";
 import { describe, expect, it } from "vitest";
+import { operationNameOf as derivedOperationName } from "./client";
 import { DOCUMENTS, type NamedDocument } from "./documents";
 import { DEGRADING_OPERATIONS, OPTIONAL_FIELDS } from "./operations";
 import { SCHEMA_PATH } from "./schema-path";
@@ -30,6 +31,29 @@ const operationNameOf = (document: NamedDocument): string => {
 };
 
 describe("the GraphQL documents", () => {
+  it("are named the same by the client's regex and by a real parse", () => {
+    /*
+     * `client.ts` labels every log record and every RailwayApiError with a name it reads
+     * off the document with a regex, because parsing the document on each request to learn
+     * something fixed would be absurd. This is what makes the shortcut safe: the regex has
+     * to agree with graphql's own parser on all twenty-eight, or the label is wrong.
+     *
+     * It matters more than a label. `DEGRADING_OPERATIONS` is keyed by operation name, and
+     * `scripts/verify-schema.ts` looks it up using the parsed name — so a document the
+     * regex reads differently would silently stop being recognised as one whose failure the
+     * app survives, and the schema job would start failing on it.
+     *
+     * The name used to be written a second time at each of the twenty-six call sites in
+     * api.ts. This assertion is what replaced those literals.
+     */
+    for (const document of DOCUMENTS) {
+      expect(
+        derivedOperationName(document.document),
+        `${document.export} is read differently by the regex than by the parser`,
+      ).toBe(operationNameOf(document));
+    }
+  });
+
   it("finds every document in operations.ts", () => {
     /*
      * A count and a list, because DOCUMENTS is derived from the module's string exports —

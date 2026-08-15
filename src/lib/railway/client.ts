@@ -74,10 +74,48 @@ function toApiError(
 
 export type GqlOptions = {
   accessToken: string;
-  operationName: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 };
+
+/**
+ * The name Railway knows a document by, read off the document.
+ *
+ * It used to be a required `GqlOptions` member, which meant every one of the twenty-eight
+ * calls in `api.ts` wrote the name a second time — once inside the document as
+ * `query Project(…)`, once beside it as `operationName: "Project"`. Two literals with
+ * nothing comparing them.
+ *
+ * The cost of a disagreement is not only a mislabelled log line. `DEGRADING_OPERATIONS` in
+ * `operations.ts` is keyed by operation name, and `scripts/verify-schema.ts` matches on the
+ * name it parses out of the **document** — so a call site whose literal had drifted would
+ * quietly stop being recognised as degrading, and a validation failure this app is designed
+ * to survive would start failing the schema job instead. A gate going wrong quietly is the
+ * failure this repository takes most seriously, and this was one edit away from it.
+ *
+ * It is not sent on the wire: the request body is `{ query, variables }`, so this value only
+ * ever labelled a log record and an error. That is what makes deriving it safe rather than a
+ * protocol change.
+ *
+ * Cached because the regex would otherwise run on every request. Keyed by the document
+ * itself, which is a module-level constant in every real call — twenty-eight entries, fixed
+ * for the life of the process.
+ */
+const operationNames = new Map<string, string>();
+
+export function operationNameOf(document: string): string {
+  const cached = operationNames.get(document);
+  if (cached) return cached;
+  /*
+   * `anonymous` rather than a throw: this names a log field, and a document without a name
+   * is a test fixture rather than a mistake worth failing a request over. Every document in
+   * `operations.ts` is named, and `operations.test.ts` is what holds that true.
+   */
+  const name =
+    /\b(?:query|mutation|subscription)\s+(\w+)/.exec(document)?.[1] ?? "anonymous";
+  operationNames.set(document, name);
+  return name;
+}
 
 function backoffMs(attempt: number, retryAfterSeconds?: number): number {
   if (retryAfterSeconds) return retryAfterSeconds * 1000;
@@ -154,12 +192,8 @@ async function execute<T>(
   variables: Record<string, unknown>,
   options: GqlOptions,
 ): Promise<{ body: GraphQLResponse<T>; status: number }> {
-  const {
-    accessToken,
-    operationName,
-    signal,
-    timeoutMs = NETWORK.REQUEST_TIMEOUT_MS,
-  } = options;
+  const { accessToken, signal, timeoutMs = NETWORK.REQUEST_TIMEOUT_MS } = options;
+  const operationName = operationNameOf(query);
 
   const startedAt = Date.now();
 
@@ -303,14 +337,14 @@ export async function gql<TDocument extends AnyTypedDocument>(
     // An auth entry outranks the rest: if one field was refused for permissions, that
     // is the actionable cause even when a later entry merely reports the knock-on null.
     const entry = body.errors?.find(isAuthEntry) ?? firstError;
-    throw toApiError(entry, options.operationName, status);
+    throw toApiError(entry, operationNameOf(query), status);
   }
 
   if (!body.data) {
     throw new RailwayApiError("Railway returned an empty response", {
       kind: "graphql",
       status,
-      operation: options.operationName,
+      operation: operationNameOf(query),
     });
   }
 
@@ -347,7 +381,7 @@ export async function gqlPartial<TDocument extends AnyTypedDocument>(
   return {
     data: body.data ?? null,
     errors: (body.errors ?? []).map((entry) =>
-      toApiError(entry, options.operationName, status),
+      toApiError(entry, operationNameOf(query), status),
     ),
   };
 }

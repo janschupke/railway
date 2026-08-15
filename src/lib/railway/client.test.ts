@@ -31,7 +31,12 @@ const QUERY: TypedDocument<
   }
 `;
 
-const call = () => gql(QUERY, {}, { accessToken: "t0ken", operationName: "Ping" });
+/*
+ * No `operationName`: the client reads it off the document now, so QUERY being named
+ * `Ping` is what makes the log records below say `Ping`. That is the property this file
+ * asserts rather than a value it supplies.
+ */
+const call = () => gql(QUERY, {}, { accessToken: "t0ken" });
 
 describe("gql", () => {
   it("returns data and sends a bearer token", async () => {
@@ -203,7 +208,7 @@ describe("gql", () => {
     const error = await gql(
       QUERY,
       {},
-      { accessToken: "t0ken", operationName: "Ping", signal: controller.signal },
+      { accessToken: "t0ken", signal: controller.signal },
     ).catch((e: unknown) => e);
     const elapsed = Date.now() - startedAt;
 

@@ -112,15 +112,10 @@ export async function listProjects(
   const read = async <TResult extends { me: unknown }>(
     name: SourceResult["name"],
     query: TypedDocument<TResult, Record<string, never>>,
-    operationName: string,
     toViewer: (me: NonNullable<Refusable<TResult>["me"]>) => ViewerNode,
   ): Promise<SourceResult> => {
     try {
-      const { data, errors } = await gqlPartial(
-        query,
-        {},
-        { accessToken, operationName, signal },
-      );
+      const { data, errors } = await gqlPartial(query, {}, { accessToken, signal });
       // `me` itself refused means nothing usable came back, however the transport went.
       if (!data?.me) return { name, viewer: null, error: errors[0] ?? null };
       return { name, viewer: toViewer(data.me), error: errors[0] ?? null };
@@ -131,7 +126,7 @@ export async function listProjects(
   };
 
   const sources = await Promise.all([
-    read("personal", PROJECTS_PERSONAL_QUERY, "ProjectsPersonal", (me) => ({
+    read("personal", PROJECTS_PERSONAL_QUERY, (me) => ({
       id: me.id,
       // Narrowed rather than spread through: `name` is nullable on the live schema, and
       // ViewerNode carries both of these as absent-or-present rather than nullable.
@@ -139,7 +134,7 @@ export async function listProjects(
       ...(me.email ? { email: me.email } : {}),
       projects: me.projects,
     })),
-    read("workspace", PROJECTS_WORKSPACE_QUERY, "ProjectsWorkspace", (me) => ({
+    read("workspace", PROJECTS_WORKSPACE_QUERY, (me) => ({
       id: me.id,
       workspaces: me.workspaces,
     })),
@@ -230,11 +225,7 @@ export async function getProjectContainers(
   environmentId: string,
   signal?: AbortSignal,
 ): Promise<{ project: RailwayProject; containers: Container[] }> {
-  const data = await gql(
-    PROJECT_QUERY,
-    { id: projectId },
-    { accessToken, operationName: "Project", signal },
-  );
+  const data = await gql(PROJECT_QUERY, { id: projectId }, { accessToken, signal });
 
   return {
     project: toProject(data.project),
@@ -278,7 +269,7 @@ export async function getProjectMetrics(
       sampleRateSeconds: METRICS.SAMPLE_RATE_SECONDS,
       averagingWindowSeconds: METRICS.AVERAGING_WINDOW_SECONDS,
     },
-    { accessToken, operationName: "ProjectMetrics", signal },
+    { accessToken, signal },
   );
 
   for (const error of errors) {
@@ -328,7 +319,7 @@ export async function getEnvironmentVolumes(
   const { data, errors } = await gqlPartial(
     ENVIRONMENT_VOLUMES_QUERY,
     { id: environmentId },
-    { accessToken, operationName: "EnvironmentVolumes", signal },
+    { accessToken, signal },
   );
 
   for (const error of errors) {
@@ -352,11 +343,7 @@ export async function listRegions(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<RegionOption[]> {
-  const data = await gql(
-    REGIONS_QUERY,
-    { projectId },
-    { accessToken, operationName: "Regions", signal },
-  );
+  const data = await gql(REGIONS_QUERY, { projectId }, { accessToken, signal });
   return toRegionOptions(data.regions);
 }
 
@@ -380,7 +367,7 @@ export async function createProject(
   const data = await gql(
     PROJECT_CREATE_MUTATION,
     { input: { name } },
-    { accessToken, operationName: "ProjectCreate", signal },
+    { accessToken, signal },
   );
   return toProject(data.projectCreate);
 }
@@ -400,7 +387,7 @@ export async function createEnvironment(
   const data = await gql(
     ENVIRONMENT_CREATE_MUTATION,
     { input: { projectId, name, skipInitialDeploys: true } },
-    { accessToken, operationName: "EnvironmentCreate", signal },
+    { accessToken, signal },
   );
   return { id: data.environmentCreate.id, name: data.environmentCreate.name };
 }
@@ -513,7 +500,7 @@ export async function createContainer(
         source: { image: params.image },
       },
     },
-    { accessToken, operationName: "ServiceCreate", signal },
+    { accessToken, signal },
   );
 
   const serviceId = created.serviceCreate.id;
@@ -565,7 +552,7 @@ export async function createContainer(
               : { startCommand: settings.startCommand }),
           },
         },
-        { accessToken, operationName: "ServiceInstanceUpdate", signal },
+        { accessToken, signal },
       );
     } catch (error) {
       /*
@@ -611,7 +598,7 @@ export async function createContainer(
             ...(limits.memory === undefined ? {} : { memoryGB: limits.memory }),
           },
         },
-        { accessToken, operationName: "ServiceInstanceLimitsUpdate", signal },
+        { accessToken, signal },
       );
     } catch (error) {
       log.warn("railway.limits_failed", {
@@ -658,7 +645,7 @@ export async function createContainer(
             mountPath: volume.mountPath,
           },
         },
-        { accessToken, operationName: "VolumeCreate", signal },
+        { accessToken, signal },
       );
 
       /*
@@ -723,7 +710,7 @@ export async function createContainer(
             skipDeploys: true,
           },
         },
-        { accessToken, operationName: "VariableCollectionUpsert", signal },
+        { accessToken, signal },
       );
     } catch (error) {
       /*
@@ -859,7 +846,7 @@ export async function createServiceDomain(
         ...(params.targetPort === undefined ? {} : { targetPort: params.targetPort }),
       },
     },
-    { accessToken, operationName: "ServiceDomainCreate", signal },
+    { accessToken, signal },
   );
 
   return `https://${created.serviceDomainCreate.domain}`;
@@ -896,7 +883,7 @@ export async function readServiceVariableNames(
       environmentId: params.environmentId,
       serviceId: params.serviceId,
     },
-    { accessToken, operationName: "ServiceVariables", signal },
+    { accessToken, signal },
   );
 
   const shared = data.shared ?? {};
@@ -974,7 +961,7 @@ export async function updateContainer(
     await gql(
       SERVICE_UPDATE_MUTATION,
       { id: serviceId, input: { name: params.name } },
-      { accessToken, operationName: "ServiceUpdate", signal },
+      { accessToken, signal },
     );
   }
 
@@ -982,7 +969,7 @@ export async function updateContainer(
     await gql(
       SERVICE_INSTANCE_UPDATE_MUTATION,
       { serviceId, environmentId, input: { source: { image: params.image } } },
-      { accessToken, operationName: "ServiceInstanceUpdate", signal },
+      { accessToken, signal },
     );
   }
 
@@ -996,7 +983,7 @@ export async function updateContainer(
         await gql(
           VARIABLE_DELETE_MUTATION,
           { input: { projectId, environmentId, serviceId, name } },
-          { accessToken, operationName: "VariableDelete", signal },
+          { accessToken, signal },
         );
       }
 
@@ -1020,7 +1007,7 @@ export async function updateContainer(
               skipDeploys: true,
             },
           },
-          { accessToken, operationName: "VariableCollectionUpsert", signal },
+          { accessToken, signal },
         );
       }
     } catch (error) {
@@ -1081,7 +1068,7 @@ export async function deployService(
   const deployed = await gql(
     SERVICE_DEPLOY_MUTATION,
     { serviceId: params.serviceId, environmentId: params.environmentId },
-    { accessToken, operationName: "ServiceInstanceDeployV2", signal },
+    { accessToken, signal },
   );
   /*
    * `?? null` on a field the schema calls `String!`, kept deliberately. This value is the
@@ -1105,11 +1092,7 @@ export async function stopDeployment(
   deploymentId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await gql(
-    DEPLOYMENT_STOP_MUTATION,
-    { id: deploymentId },
-    { accessToken, operationName: "DeploymentStop", signal },
-  );
+  await gql(DEPLOYMENT_STOP_MUTATION, { id: deploymentId }, { accessToken, signal });
 }
 
 /** Restart a deployment's container in place, keeping the deployment and its log stream. */
@@ -1118,11 +1101,7 @@ export async function restartDeployment(
   deploymentId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await gql(
-    DEPLOYMENT_RESTART_MUTATION,
-    { id: deploymentId },
-    { accessToken, operationName: "DeploymentRestart", signal },
-  );
+  await gql(DEPLOYMENT_RESTART_MUTATION, { id: deploymentId }, { accessToken, signal });
 }
 
 export async function destroyContainer(
@@ -1130,11 +1109,7 @@ export async function destroyContainer(
   serviceId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await gql(
-    SERVICE_DELETE_MUTATION,
-    { id: serviceId },
-    { accessToken, operationName: "ServiceDelete", signal },
-  );
+  await gql(SERVICE_DELETE_MUTATION, { id: serviceId }, { accessToken, signal });
 }
 
 /**
@@ -1155,11 +1130,7 @@ export async function deleteVolume(
   volumeId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await gql(
-    VOLUME_DELETE_MUTATION,
-    { volumeId },
-    { accessToken, operationName: "VolumeDelete", signal },
-  );
+  await gql(VOLUME_DELETE_MUTATION, { volumeId }, { accessToken, signal });
 }
 
 export async function getDeployment(
@@ -1170,7 +1141,7 @@ export async function getDeployment(
   const data = await gql(
     DEPLOYMENT_QUERY,
     { id: deploymentId },
-    { accessToken, operationName: "Deployment", signal },
+    { accessToken, signal },
   );
   return data.deployment;
 }
@@ -1199,7 +1170,7 @@ export async function getDeploymentFailure(
   const { data, errors } = await gqlPartial(
     DEPLOYMENT_EVENTS_QUERY,
     { id: deploymentId, last: STREAM.FAILURE_EVENTS },
-    { accessToken, operationName: "DeploymentEvents", signal },
+    { accessToken, signal },
   );
 
   for (const error of errors) {
@@ -1259,7 +1230,7 @@ export async function getLogs(
     const data = await gql(
       BUILD_LOGS_QUERY,
       { deploymentId, limit },
-      { accessToken, operationName: "BuildLogs", signal },
+      { accessToken, signal },
     );
     // `?? []` although the schema says `[Log!]!`: a Railway that answered null here without
     // an errors[] entry would reach the log pane as a null array, and a backfill that
@@ -1270,7 +1241,7 @@ export async function getLogs(
   const data = await gql(
     DEPLOYMENT_LOGS_QUERY,
     { deploymentId, limit },
-    { accessToken, operationName: "DeploymentLogs", signal },
+    { accessToken, signal },
   );
   return data.deploymentLogs ?? [];
 }
