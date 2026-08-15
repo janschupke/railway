@@ -182,6 +182,24 @@ export const STREAM = {
  * upstream socket.
  */
 export const WATCH = {
+  /**
+   * Where the BROWSER's reconnect backoff starts after the EventSource dies, and its
+   * ceiling.
+   *
+   * The client half of this loop, and it was declared in `use-project-watcher.ts` instead —
+   * two module constants sitting a directory away from `MAX_POLL_MS` below, which is the
+   * server half of the same loop. They had already diverged: the client ceiling was a
+   * minute against the server's two, with nothing saying whether that was reasoned or
+   * accidental.
+   *
+   * It is reasoned, and now it is next to the number it is reasoned against. A browser that
+   * has lost the connection is retrying a request that costs this server nothing until it
+   * succeeds, so it can afford to come back sooner than the server's own poll ladder backs
+   * off. Nothing here is urgent: a watcher that reconnects a minute late costs a stale
+   * container list, not a missed action.
+   */
+  CLIENT_RETRY_BASE_MS: 5_000,
+  CLIENT_RETRY_CEILING_MS: 60_000,
   /*
    * The poll interval itself is not here — it is WATCH_POLL_MS in env.ts, because the
    * right value depends on the plan behind the token. One request per tick per *visible*
@@ -253,6 +271,18 @@ export const METRICS = {
 export const SESSION = {
   /** Refresh this far ahead of expiry. Railway access tokens live one hour. */
   REFRESH_SKEW_SECONDS: 300,
+  /**
+   * How long to assume an access token lives when Railway's response omits `expires_in`.
+   *
+   * One hour, which is what Railway issues. Both grant paths need it — the callback and
+   * the refresh — and both had it inline as a bare `?? 3600`, in different files, which is
+   * exactly the two-file drift this module exists to prevent. The comment above already
+   * said "Railway access tokens live one hour" without there being a constant for it.
+   *
+   * A fallback rather than a tuning knob: if it is ever wrong, the session is refreshed
+   * early or late by the difference, and REFRESH_SKEW_SECONDS is the margin that absorbs it.
+   */
+  DEFAULT_EXPIRES_IN_SECONDS: 3600,
   /**
    * How long a settled refresh stays claimable by a caller still holding the token it
    * spent.
@@ -599,6 +629,19 @@ export const UI = {
    * again. Below roughly a second this reads as a flicker.
    */
   ACTION_FEEDBACK_MS: 1_500,
+  /**
+   * Backstop for a CSS transition whose `transitionend` never arrives.
+   *
+   * Toggling a disclosure faster than it animates means the event can be missed, which
+   * would leave a zero-height panel mounted — invisible, and still in the tab order.
+   *
+   * **Twice `--duration-base`**, which is 200ms in `tokens.css`. That relationship is the
+   * whole value of the number and it was previously an unexplained `400` inline in
+   * `container-row.tsx`: raise the token past 400ms and the backstop starts firing *during*
+   * the animation, unmounting a panel that is still opening — which is the class of bug the
+   * `intent` ref beside it was added to fix. If the token moves, this moves with it.
+   */
+  TRANSITION_BACKSTOP_MS: 400,
 } as const;
 
 /**

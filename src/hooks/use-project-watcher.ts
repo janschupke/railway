@@ -1,11 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { WATCH } from "@/lib/constants";
 import { useThrottledRefresh } from "./use-throttled-refresh";
-
-/** Backoff after a fatal connection failure. Nothing here is urgent. */
-const RETRY_BASE_MS = 5_000;
-const RETRY_CEILING_MS = 60_000;
 
 /**
  * Keeps the container list in step with Railway without polling from the browser.
@@ -85,7 +82,10 @@ export function useProjectWatcher(
         close();
         timer = setTimeout(
           open,
-          Math.min(RETRY_CEILING_MS, RETRY_BASE_MS * 2 ** retry++),
+          Math.min(
+            WATCH.CLIENT_RETRY_CEILING_MS,
+            WATCH.CLIENT_RETRY_BASE_MS * 2 ** retry++,
+          ),
         );
       });
     };

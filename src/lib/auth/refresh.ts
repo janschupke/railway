@@ -137,7 +137,9 @@ async function grant(
     user: session.user,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? refreshToken,
-    expiresAt: Math.floor(now() / 1000) + (tokens.expires_in ?? 3600),
+    expiresAt:
+      Math.floor(now() / 1000) +
+      (tokens.expires_in ?? SESSION.DEFAULT_EXPIRES_IN_SECONDS),
     scope: tokens.scope ?? session.scope,
   };
 }

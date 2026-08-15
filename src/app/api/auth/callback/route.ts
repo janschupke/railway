@@ -161,7 +161,9 @@ async function complete(request: NextRequest) {
     },
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
-    expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 3600),
+    expiresAt:
+      Math.floor(Date.now() / 1000) +
+      (tokens.expires_in ?? SESSION.DEFAULT_EXPIRES_IN_SECONDS),
     scope: tokens.scope ?? "",
   };
 

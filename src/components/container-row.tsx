@@ -16,7 +16,7 @@ import {
   type ContainerVolume,
   type LogPhase,
 } from "@/lib/railway/types";
-import { railwayServiceUrl } from "@/lib/constants";
+import { railwayServiceUrl, UI } from "@/lib/constants";
 import { relativeTime } from "@/lib/format";
 import { useVolumeSize } from "@/hooks/use-volume-size";
 import { cn } from "@/lib/utils";
@@ -158,7 +158,7 @@ export function ContainerRow({
    */
   useEffect(() => {
     if (expanded || !mounted || intent.current === "open") return;
-    const timer = setTimeout(() => setMounted(false), 400);
+    const timer = setTimeout(() => setMounted(false), UI.TRANSITION_BACKSTOP_MS);
     return () => clearTimeout(timer);
   }, [expanded, mounted]);
 

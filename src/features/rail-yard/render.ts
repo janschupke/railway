@@ -29,8 +29,10 @@ import {
   LOCOMOTIVE,
   SHED,
   SIGNAL,
+  SIM,
   VIEW,
   WAGON,
+  YARD,
   type Box,
 } from "./config";
 import {
@@ -50,7 +52,6 @@ import type { Freight } from "./conveyor";
 import { spreaderZ } from "./crane";
 import { aspectOf } from "./traffic";
 import { toScreenX, toScreenY, viewDepth, type ViewTransform } from "./view";
-import { YARD } from "./config";
 
 export type Layer = {
   readonly ctx: CanvasRenderingContext2D;
@@ -236,7 +237,11 @@ function placeTrain(
   palette: YardPalette,
   alpha: number,
 ): Drawable[] {
-  const nose = train.distance + train.speed * alpha * (20 / 1000);
+  // SIM.STEP_MS, not a literal: this interpolates one simulation step forward, so the two
+  // have to be the same number. They were not linked, and nothing would have failed if
+  // STEP_MS moved — the motion would simply have drifted out of step with the simulation,
+  // since both test suites pass their own dtMs and never compare the two.
+  const nose = train.distance + train.speed * alpha * (SIM.STEP_MS / 1000);
   const out: Drawable[] = [];
 
   for (let index = train.wagons.length - 1; index >= 0; index--) {
