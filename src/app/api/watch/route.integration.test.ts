@@ -51,6 +51,34 @@ const request = (path: string) =>
 const params = (projectId: string) => ({ params: Promise.resolve({ projectId }) });
 
 /** Reads frames until the producer stops, with a ceiling so a wedge fails loudly. */
+/**
+ * Drains whole SSE frames out of a buffer, returning what is left of a partial one.
+ *
+ * The trailing element of the split is whatever followed the last `\n\n` — a frame that
+ * has not finished arriving — so it goes back to the caller rather than being matched or
+ * discarded.
+ *
+ * Both readers below used to clear their buffer outright after each read, and the failure
+ * that caused is worse than losing the frame. `\w+` happily matches a truncated name, so a
+ * read ending mid-`event: stale` recorded **`"st"`** and then threw away the remainder
+ * that would have completed it — an assertion comparing an exact list saw `["ready", "st"]`
+ * and reported a frame nobody sent.
+ *
+ * Nothing controls where a chunk boundary falls, so it depended on machine load: these
+ * specs passed every time they ran alone or as a project, and produced one failure across
+ * the full run under coverage. Found by reading the helper rather than by re-running it,
+ * and confirmed by feeding this function a stream split at that byte.
+ */
+function drainFrames(buffer: string, frames: string[]): string {
+  const parts = buffer.split("\n\n");
+  const partial = parts.pop() ?? "";
+  for (const chunk of parts) {
+    const match = /^event: (\w+)/m.exec(chunk);
+    if (match) frames.push(match[1]!);
+  }
+  return partial;
+}
+
 async function readFrames(response: Response, count: number): Promise<string[]> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -60,12 +88,7 @@ async function readFrames(response: Response, count: number): Promise<string[]> 
   while (frames.length < count) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    for (const chunk of buffer.split("\n\n")) {
-      const match = /^event: (\w+)/m.exec(chunk);
-      if (match) frames.push(match[1]!);
-    }
-    buffer = "";
+    buffer = drainFrames(buffer + decoder.decode(value, { stream: true }), frames);
   }
   await reader.cancel();
   return frames;
@@ -254,12 +277,10 @@ describe("GET /api/watch/[projectId]", () => {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          for (const chunk of buffer.split("\n\n")) {
-            const match = /^event: (\w+)/m.exec(chunk);
-            if (match) frames.push(match[1]!);
-          }
-          buffer = "";
+          buffer = drainFrames(
+            buffer + decoder.decode(value, { stream: true }),
+            frames,
+          );
         }
       })();
 
