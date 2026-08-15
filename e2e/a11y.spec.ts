@@ -12,8 +12,10 @@ import {
   fillAdvanced,
   injectFaults,
   onlyVisible,
+  openBillingTab,
   openDestroyDialog,
   openEditDialog,
+  openNewContainerTab,
   row,
   searchBox,
   seedServices,
@@ -96,6 +98,27 @@ test.describe("accessibility", () => {
       await setTheme(page, theme);
       await expect(row(page, "postgres")).toBeVisible();
       await expectNoA11yViolations(page, `dashboard/${theme}`);
+    });
+
+    test(`the provisioning tab has no violations (${theme})`, async ({ page }) => {
+      // Its own route now, so the tab strip is on screen with a different tab current —
+      // and the strip's on-state colours only exist there.
+      await signIn(page);
+      await openNewContainerTab(page);
+      await setTheme(page, theme);
+      await expectNoA11yViolations(page, `dashboard-new/${theme}`);
+    });
+
+    test(`the billing tab has no violations (${theme})`, async ({ page }) => {
+      /*
+       * Entirely new surface: two cards of definition lists, a figure at display weight,
+       * two caption-tone scope sentences and an external link. The caption tone on a card
+       * is the contrast pair most likely to fall under a threshold nobody checked.
+       */
+      await signIn(page);
+      await openBillingTab(page);
+      await setTheme(page, theme);
+      await expectNoA11yViolations(page, `dashboard-billing/${theme}`);
     });
 
     test(`a filtered, paged list has no violations (${theme})`, async ({ page }) => {
@@ -267,6 +290,7 @@ test.describe("accessibility", () => {
 
     test(`form validation errors have no violations (${theme})`, async ({ page }) => {
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       await field(page, "Image reference").fill("not a valid image");
@@ -289,6 +313,7 @@ test.describe("accessibility", () => {
        * trigger holding a selection rather than a placeholder.
        */
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       await fillAdvanced(page, { region: "US West (Oregon)" });
@@ -319,6 +344,7 @@ test.describe("accessibility", () => {
        * and this paragraph is not. If Radix moves to `inert`, drop the `within` argument.
        */
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       await fillAdvanced(page, {});
@@ -344,6 +370,7 @@ test.describe("accessibility", () => {
        * has to be able to find from the message.
        */
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       await field(page, "Image reference").fill("nginx:1.27-alpine");
@@ -364,6 +391,7 @@ test.describe("accessibility", () => {
        * The contrast test covers the token pair; this covers what axe sees rendered.
        */
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       const answered = page.waitForResponse((response) =>
@@ -384,6 +412,7 @@ test.describe("accessibility", () => {
        * inside a fieldset, and a per-row alert. An empty editor asserts almost nothing.
        */
       await signIn(page);
+      await openNewContainerTab(page);
       await setTheme(page, theme);
 
       await onlyVisible(

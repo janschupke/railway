@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { routerMock } from "@/test/setup-dom";
+import { routerMock, setPathname, setSearchParams } from "@/test/setup-dom";
 import { REGISTRY } from "@/lib/constants";
 import { ACTION_FIELDS, type ActionResult } from "@/lib/action-result";
 import { ADVANCED_FIELD_NAMES } from "@/lib/validation/schemas";
@@ -109,7 +109,7 @@ describe("SpinUpForm", () => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
     // Shared across the file; without this a call count is a running total.
-    routerMock.refresh.mockClear();
+    routerMock.push.mockClear();
     fetchMock.mockReset();
     imageCheckAnswers("available");
     vi.stubGlobal("fetch", fetchMock);
@@ -286,21 +286,39 @@ describe("SpinUpForm", () => {
     expect(screen.getByText("Rate limited by Railway")).toBeInTheDocument();
   });
 
-  it("pulls the fresh list exactly once on success", async () => {
+  it("goes to the container list exactly once on success", async () => {
     /*
-     * Only the call is asserted, not the busy window it opens. `refresh` is a no-op spy
+     * Only the call is asserted, not the busy window it opens. `push` is a no-op spy
      * here, so the transition wrapping it resolves in the same tick; in the browser it
      * stays pending for the Railway round trip, which is covered by
      * e2e/skeleton.spec.ts. "Exactly once" is the guard against the effect-dependency
-     * loop that fired this repeatedly before.
+     * loop that fired this repeatedly before — and it guards a new instance of it, since
+     * useDashboardSelection hands back a fresh callback identity every render.
      */
     const user = userEvent.setup();
     renderForm();
     await user.type(screen.getByLabelText("Name"), "cache");
     await user.click(submitButton());
 
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(routerMock.push).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText("Name")).toHaveValue("");
+  });
+
+  it("carries the selection to the container tab rather than reloading this one", async () => {
+    // The form has its own route now; the container it just made — and the build logs
+    // streaming into it — are on the other one, under the same project and environment.
+    setPathname("/dashboard/new");
+    setSearchParams("project=p1&environment=e1");
+    const user = userEvent.setup();
+    renderForm();
+    await user.type(screen.getByLabelText("Name"), "cache");
+    await user.click(submitButton());
+
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith(
+        "/dashboard?project=p1&environment=e1",
+      ),
+    );
   });
 
   describe("the submission key", () => {
@@ -323,17 +341,29 @@ describe("SpinUpForm", () => {
     });
 
     it("mints a new one after a success", async () => {
-      // The submission that key named is over. Reusing it would have the server answer
-      // the next container with the last one's result.
+      /*
+       * The submission that key named is over. Reusing it would have the server answer
+       * the next container with the last one's result.
+       *
+       * The second submission comes from a fresh mount, which is what a browser does here:
+       * a success hands over to the container tab and this form goes with the route. In
+       * jsdom nothing unmounts it, and it stays marked busy for a navigation that never
+       * lands — so submitting again on the same instance would be asserting against a
+       * state the app cannot reach.
+       */
       const user = userEvent.setup();
-      renderForm();
+      const first = renderForm();
 
       await submitNamed(user, "cache");
-      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(routerMock.push).toHaveBeenCalledTimes(1));
+      const firstKey = keyFrom(0);
+
+      first.unmount();
+      renderForm();
       await submitNamed(user, "queue");
 
       await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(2));
-      expect(keyFrom(1)).not.toBe(keyFrom(0));
+      expect(keyFrom(1)).not.toBe(firstKey);
     });
 
     it("keeps the same one after a failure", async () => {
@@ -616,7 +646,7 @@ describe("SpinUpForm", () => {
       await user.type(screen.getByLabelText("Name"), "db");
       await user.click(submitButton());
 
-      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(routerMock.push).toHaveBeenCalledTimes(1));
       expect(screen.getByLabelText("Variable name 1")).toHaveValue("POSTGRES_PASSWORD");
       expect(screen.getByLabelText("Variable name 2")).toHaveValue("PGDATA");
       expect(screen.queryByLabelText("Variable name 3")).not.toBeInTheDocument();
@@ -798,7 +828,7 @@ describe("the public port", () => {
   beforeEach(() => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
-    routerMock.refresh.mockClear();
+    routerMock.push.mockClear();
     fetchMock.mockReset();
     imageCheckAnswers("available");
     vi.stubGlobal("fetch", fetchMock);
@@ -954,7 +984,7 @@ describe("the advanced panel", () => {
   beforeEach(() => {
     spinUp.mockReset();
     spinUp.mockResolvedValue({ ok: true, message: "Spinning up cache" });
-    routerMock.refresh.mockClear();
+    routerMock.push.mockClear();
     fetchMock.mockReset();
     imageCheckAnswers("available");
     vi.stubGlobal("fetch", fetchMock);

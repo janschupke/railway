@@ -6,12 +6,11 @@ import {
   useEffect,
   useRef,
   useState,
-  useTransition,
   type FormEvent,
 } from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useDashboardSelection } from "@/hooks/use-dashboard-selection";
 import { useImageCheck } from "@/hooks/use-image-check";
 import { useResolved } from "@/hooks/use-resolved";
 import { spinUp } from "@/app/dashboard/actions";
@@ -102,19 +101,12 @@ export function SpinUpForm({
   const t = useTranslations("spinUp");
   const tActions = useTranslations("actions");
   const tPresets = useTranslations("presets");
-  const router = useRouter();
+  const { goToContainers } = useDashboardSelection();
   const { toast } = useToast();
   const [result, formAction, pending] = useActionState<ActionResult | null, FormData>(
     spinUp,
     null,
   );
-  /*
-   * The refresh gets its own transition so the wait for the fresh list is observable.
-   * A bare router.refresh() runs for two Railway round trips with nothing on screen
-   * marked busy: the toast has already fired and the submit button has gone idle, so
-   * the row simply appears at an unpredictable later moment.
-   */
-  const [refreshing, startRefresh] = useTransition();
   const [image, setImage] = useState<string>(DEFAULT_IMAGE);
   const [rows, setRows] = useState<VariableRow[]>(() => seedRows(DEFAULT_IMAGE));
   /*
@@ -202,6 +194,25 @@ export function SpinUpForm({
    */
   const failedTitle = t("failedTitle");
 
+  /*
+   * The navigation, held where the effect below can reach it without depending on it.
+   *
+   * Same hazard as `failedTitle` directly above, and worse: useDashboardSelection builds
+   * a fresh object every render, so `goToContainers` has a new identity each time. In the
+   * effect's dependency list that re-runs it with the same successful `result` still in
+   * hand — firing the toast again and pushing again, which changes the URL, which renders,
+   * which re-runs it. That is exactly the loop the comment above records happening once
+   * already with `t`. A string could be resolved during render; a callback cannot, so it
+   * goes in a ref instead.
+   *
+   * Synced in its own effect, declared before the one that reads it: effects run in
+   * declaration order after commit, so the ref is current by the time success is handled.
+   */
+  const goToContainersRef = useRef(goToContainers);
+  useEffect(() => {
+    goToContainersRef.current = goToContainers;
+  });
+
   const rowError = rowErrorFor(result, rows);
 
   useEffect(() => {
@@ -228,7 +239,22 @@ export function SpinUpForm({
       // container, and must not be answered with this one's result.
       setSubmissionKey(newIdempotencyKey());
       toast({ title: result.message, tone: "success" });
-      startRefresh(() => router.refresh());
+      /*
+       * The container this made — and the build logs streaming into it — are on the
+       * container tab, carrying the same project and environment.
+       *
+       * Nothing here marks the wait, and that is a deliberate deletion rather than an
+       * omission. This used to be `startRefresh(() => router.refresh())`: a refresh joins
+       * the transition that started it, so the button could stay busy across the two
+       * Railway reads that followed. A push cannot be reported the same way — Next drives a
+       * navigation with a transition of its own, and more to the point /dashboard has a
+       * loading.tsx, so the route COMMITS immediately and this form unmounts before any
+       * state it set could paint. The container tab's own skeleton is what covers the wait
+       * now, which is the better signal anyway: it is on the thing being waited for.
+       * e2e/skeleton.spec.ts asserts that, and is what caught two attempts to report it
+       * from here instead.
+       */
+      goToContainersRef.current();
     } else if (ADVANCED_FIELDS.has(result.field ?? "")) {
       /*
        * The error renders inline beside its field like every other one — but that field is
@@ -242,7 +268,7 @@ export function SpinUpForm({
       // Everything else renders inline next to its own input. See isUnattributable.
       toast({ title: failedTitle, description: result.error, tone: "error" });
     }
-  }, [result, router, toast, failedTitle, startRefresh]);
+  }, [result, toast, failedTitle]);
 
   /*
    * Read in an effect rather than with `use`, which is the point of taking a promise at
@@ -517,8 +543,8 @@ export function SpinUpForm({
             type="submit"
             variant="primary"
             disabled={disabled}
-            pending={pending || refreshing}
-            pendingLabel={pending ? t("submitPending") : t("refreshPending")}
+            pending={pending}
+            pendingLabel={t("submitPending")}
           >
             <Plus aria-hidden />
             {t("submit")}
@@ -531,9 +557,7 @@ export function SpinUpForm({
           {/* The button's own label change is not announced; this is. */}
           <PendingStatus
             className="sr-only"
-            label={
-              pending ? t("announce") : refreshing ? t("refreshAnnounce") : undefined
-            }
+            label={pending ? t("announce") : undefined}
           />
         </div>
       </form>

@@ -4,7 +4,10 @@ import {
   expect,
   injectFaults,
   onlyVisible,
+  openBillingTab,
   openCreateFromSelect,
+  openNewContainerTab,
+  signIn,
   test,
   toast,
 } from "./support";
@@ -320,9 +323,11 @@ test.describe("a project read Railway refuses outright", () => {
   });
 
   test("draws no controls that cannot work", async ({ page }) => {
-    // With no project list there is nothing to pick and nothing to spin up into.
+    // With no project list there is nothing to pick. The spin-up form is on another
+    // route now, and DashboardFrame withholds every tab's content on this branch — so
+    // what is asserted here is the picker's absence and the frame's own gate.
     await expect(page.getByRole("combobox")).toHaveCount(0);
-    await expect(button(page, /spin up container/i)).toHaveCount(0);
+    await expect(onlyVisible(page.getByLabel("Project"))).toHaveCount(0);
   });
 
   test("says nothing about the upstream failure itself", async ({ page }) => {
@@ -331,5 +336,42 @@ test.describe("a project read Railway refuses outright", () => {
     const main = page.locator("main");
     await expect(main).not.toContainText(/Not authorized/);
     await expect(main).toContainText(/[Rr]eference/);
+  });
+});
+
+/**
+ * Changing the selection is not a navigation.
+ *
+ * use-dashboard-selection.ts used to push a hardcoded `/dashboard`, which was right while
+ * that was the only route. It is one of three now, and the literal would have yanked anyone
+ * changing project on another tab back to the container list. This is the direct test of
+ * the usePathname fix.
+ */
+test.describe("the selection on other tabs", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("switching project keeps the reader on the provisioning tab", async ({
+    page,
+  }) => {
+    await openNewContainerTab(page);
+
+    await onlyVisible(page.getByRole("combobox", { name: "Project" })).click();
+    await onlyVisible(page.getByRole("option", { name: "Second Project" })).click();
+
+    await expect(page).toHaveURL(/\/dashboard\/new\?/);
+    await expect(page).toHaveURL(/project=proj_other/);
+    await expect(button(page, /spin up container/i)).toBeVisible();
+  });
+
+  test("switching project keeps the reader on the billing tab", async ({ page }) => {
+    await openBillingTab(page);
+
+    await onlyVisible(page.getByRole("combobox", { name: "Project" })).click();
+    await onlyVisible(page.getByRole("option", { name: "Second Project" })).click();
+
+    await expect(page).toHaveURL(/\/dashboard\/billing\?/);
+    await expect(page).toHaveURL(/project=proj_other/);
   });
 });

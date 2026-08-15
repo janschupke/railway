@@ -1,10 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
+  BillingSectionSkeleton,
   ContainerSectionSkeleton,
   ProjectPickerSkeleton,
   SpinUpFormSkeleton,
 } from "./dashboard-skeletons";
+
+const billing = { spendHeading: "Workspace spend", usageHeading: "Usage" };
 
 describe("ContainerSectionSkeleton", () => {
   it("keeps the heading as real text so it does not flicker", () => {
@@ -92,5 +95,39 @@ describe("ContainerSectionSkeleton", () => {
     );
     expect(ProjectPickerSkeleton()).not.toBeInstanceOf(Promise);
     expect(SpinUpFormSkeleton()).not.toBeInstanceOf(Promise);
+    expect(BillingSectionSkeleton(billing)).not.toBeInstanceOf(Promise);
+  });
+});
+
+describe("BillingSectionSkeleton", () => {
+  it("keeps both headings as real text so neither flickers", () => {
+    // Same argument as the container section's: they never depend on the fetch.
+    render(<BillingSectionSkeleton {...billing} />);
+
+    expect(
+      screen.getByRole("heading", { name: "Workspace spend" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+  });
+
+  it("renders no list, so the real container list stays uniquely findable", () => {
+    render(<BillingSectionSkeleton {...billing} />);
+    expect(screen.queryAllByRole("list")).toHaveLength(0);
+  });
+
+  it("marks the section busy without claiming a live region", () => {
+    const { container } = render(<BillingSectionSkeleton {...billing} />);
+    const section = container.querySelector("section");
+
+    expect(section).toHaveAttribute("aria-busy", "true");
+    expect(section).not.toHaveAttribute("role");
+    expect(section).not.toHaveAttribute("aria-label");
+  });
+
+  it("hides every placeholder from assistive tech", () => {
+    const { container } = render(<BillingSectionSkeleton {...billing} />);
+    for (const el of container.querySelectorAll(".bg-skeleton")) {
+      expect(el).toHaveAttribute("aria-hidden", "true");
+    }
   });
 });

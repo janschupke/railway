@@ -9,6 +9,7 @@ import {
   expect,
   field,
   onlyVisible,
+  openNewContainerTab,
   row,
   searchBox,
   seedServices,
@@ -280,6 +281,7 @@ test.describe("keyboard operation", () => {
      * the highlight is carried by aria-activedescendant instead.
      */
     await signIn(page);
+    await openNewContainerTab(page);
     const image = field(page, "Image reference");
 
     await image.focus();
@@ -299,6 +301,7 @@ test.describe("keyboard operation", () => {
     page,
   }) => {
     await signIn(page);
+    await openNewContainerTab(page);
     const image = field(page, "Image reference");
 
     await image.fill("ghcr.io/owner/app");
@@ -316,6 +319,7 @@ test.describe("keyboard operation", () => {
     // The chevron is not a tab stop: a second stop on the way to Name, for a shortcut
     // to something ArrowDown already does, is noise.
     await signIn(page);
+    await openNewContainerTab(page);
 
     await field(page, "Image reference").focus();
     await page.keyboard.press("Tab");
@@ -331,6 +335,7 @@ test.describe("keyboard operation", () => {
    */
   test("opens and closes the advanced panel with Enter and Space", async ({ page }) => {
     await signIn(page);
+    await openNewContainerTab(page);
 
     const summary = page.getByText("Advanced settings");
     await summary.focus();
@@ -350,6 +355,7 @@ test.describe("keyboard operation", () => {
      * before it.
      */
     await signIn(page);
+    await openNewContainerTab(page);
 
     await button(page, /add variable/i).focus();
     await page.keyboard.press("Tab");
@@ -532,31 +538,97 @@ test.describe("keyboard operation", () => {
     await expect(wrap).toHaveAttribute("aria-pressed", "true");
   });
 
+  test("moves between the dashboard tabs with Tab, not Arrow", async ({ page }) => {
+    /*
+     * The assertion that makes ui/tab-nav.tsx's decision a fact rather than a comment.
+     * The strip is links with `aria-current`, not `role="tablist"` — so the browser's own
+     * sequential navigation moves between them and Enter follows one, where a real tablist
+     * would roving-focus on Arrow and swap an in-document panel. The panel here IS a route,
+     * which is why the pattern would be a promise the markup cannot keep.
+     */
+    await signIn(page);
+
+    const containers = onlyVisible(page.getByRole("link", { name: "Containers" }));
+    await containers.focus();
+
+    // Arrow does not move focus between them: they are not a roving-tabindex group.
+    await page.keyboard.press("ArrowRight");
+    await expect(containers).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(
+      onlyVisible(page.getByRole("link", { name: "New container" })),
+    ).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await page.waitForURL(/\/dashboard\/new(\?|$)/);
+    await expect(
+      onlyVisible(page.getByRole("link", { name: "New container" })),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
   test("keeps a visible focus indicator on every interactive control", async ({
     page,
   }) => {
     await signIn(page);
+
+    /*
+     * Two passes, because the controls live on two routes now: the picker and the list's
+     * filters are on the container tab, the whole spin-up form is on the provisioning one.
+     * Running them as one loop is what a single `signIn` used to buy, and the split costs
+     * one navigation rather than any coverage.
+     */
+    const check = async (controls: Array<[string, Locator]>) => {
+      for (const [name, locator] of controls) {
+        await locator.focus();
+        const outlineVisible = await locator.evaluate((el) => {
+          const style = getComputedStyle(el);
+          return style.outlineStyle !== "none" || style.boxShadow !== "none";
+        });
+        // Labelled, because a bare `expect(false).toBe(true)` inside a loop names neither
+        // the control that lost its ring nor how far the loop got.
+        expect(outlineVisible, name).toBe(true);
+      }
+    };
+
     // So the chip's remove control exists to be checked. It is the one focusable thing
     // on this page drawn from scratch rather than from the Button primitive, which makes
     // it the one most able to lose its ring without anyone noticing.
-    /*
-     * So the editor's own controls exist to be checked: a remove button is the next
-     * candidate for a control that loses its ring without anyone noticing.
-     *
-     * Before selectStatus, and that order is load-bearing. `focus-ring` is a
-     * :focus-visible style, and Chromium decides whether a *programmatic* .focus() counts
-     * as visible from the modality of the last real interaction. selectStatus ends on
-     * keyboard.press("Escape"); addVariable ends on a click and a fill. Adding the row
-     * afterwards flipped the whole loop to pointer modality, and the first control in it —
-     * the project select, which this change does not touch — lost its ring.
-     */
-    await addVariable(page, "MY_FLAG", "on");
     await selectStatus(page, "Running");
 
-    // Labelled, because a bare `expect(false).toBe(true)` inside a loop names neither the
-    // control that lost its ring nor how far the loop got.
-    const controls: Array<[string, Locator]> = [
+    await check([
+      ["containers tab", onlyVisible(page.getByRole("link", { name: "Containers" }))],
+      ["billing tab", onlyVisible(page.getByRole("link", { name: "Billing" }))],
       ["project select", onlyVisible(page.getByRole("combobox", { name: "Project" }))],
+      ["search", searchBox(page)],
+      ["status filter", button(page, /^Status/)],
+      ["remove filter chip", button(page, "Remove the Running filter")],
+      ["created-here toggle", onlyVisible(page.getByLabel("Created here"))],
+    ]);
+
+    await openNewContainerTab(page);
+    // So the editor's own controls exist to be checked: a remove button is the next
+    // candidate for a control that loses its ring without anyone noticing.
+    await addVariable(page, "MY_FLAG", "on");
+
+    /*
+     * The modality reset, and it is load-bearing rather than tidy.
+     *
+     * `focus-ring` is a `:focus-visible` style, and Chromium decides whether a
+     * *programmatic* `.focus()` counts as visible from the modality of the last real
+     * interaction. `addVariable` ends on a click and a fill, so without this the whole pass
+     * below runs in pointer modality and every ring is legitimately absent — which is
+     * exactly how this failed. The first pass needs no equivalent because `selectStatus`
+     * already ends on an Escape.
+     *
+     * The two passes used to be one loop for this reason: everything before it was ordered
+     * so that a keypress came last. Splitting across routes made that ordering impossible
+     * to keep, so the requirement is stated here instead of being carried by an order
+     * nobody could see.
+     */
+    await page.keyboard.press("Escape");
+
+    await check([
       ["image reference", field(page, "Image reference")],
       ["container name", field(page, "Name")],
       ["variable name cell", page.getByLabel("Variable name 1")],
@@ -565,19 +637,6 @@ test.describe("keyboard operation", () => {
       ["add variable", button(page, /add variable/i)],
       ["advanced summary", page.getByText("Advanced settings")],
       ["submit", button(page, /spin up container/i)],
-      ["search", searchBox(page)],
-      ["status filter", button(page, /^Status/)],
-      ["remove filter chip", button(page, "Remove the Running filter")],
-      ["created-here toggle", onlyVisible(page.getByLabel("Created here"))],
-    ];
-
-    for (const [name, locator] of controls) {
-      await locator.focus();
-      const outlineVisible = await locator.evaluate((el) => {
-        const style = getComputedStyle(el);
-        return style.outlineStyle !== "none" || style.boxShadow !== "none";
-      });
-      expect(outlineVisible, name).toBe(true);
-    }
+    ]);
   });
 });

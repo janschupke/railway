@@ -17,6 +17,18 @@ over OIDC, picks or creates a project and environment, and creates, stops, resta
 redeploys and destroys Docker-image services with live build and deploy logs streamed into
 the browser.
 
+The signed-in half is three routes behind one tab strip — `/dashboard` (the container
+list), `/dashboard/new` (creating one) and `/dashboard/billing` (workspace spend and what
+this app's own containers are using). Two things about that split are load-bearing and are
+argued where they live rather than here. The **project and environment pickers are in each
+page**, not in `src/app/dashboard/layout.tsx`, because a layout cannot read `searchParams`
+and the picker needs the resolved selection — `dashboard-frame.tsx` is the server component
+all three hand their shell to. The **tab strip is the opposite**: it is in the layout, above
+the route's own `loading.tsx` and `error.tsx`, so it survives a tab change as the same
+element and still works when a tab fails. It reads the query string on the client, which is
+also the only way the container list's filters travel between tabs — the pages' `searchParams`
+type stays `{project, environment}`, because widening it would claim the server reads filters.
+
 Single package — not a monorepo. `pnpm-workspace.yaml` exists only to carry `allowBuilds`
 toggles; there is no `packages:` list. That is not a reason to move to npm: `allowBuilds` is
 a per-package postinstall allowlist with no npm equivalent, and therefore a supply-chain
@@ -33,8 +45,19 @@ inside `src/components`.
 
 Three lanes, and a change belongs in exactly one of them.
 
-- **Read** — `src/app/dashboard/data.ts`. Called from Server Components. Never from a
-  client component.
+- **Read** — the `data-*.ts` modules beside the dashboard's routes: `data-shell.ts` (the
+  project list and the resolved selection), `data-containers.ts` (one environment's
+  containers, their usage and their volumes) and `data-regions.ts`. Called from Server
+  Components. Never from a client component.
+
+  **Both of the first two are `cache()`-wrapped, and both take positional arguments for the
+  same reason.** `/dashboard`, `/dashboard/new` and `/dashboard/billing` each load the
+  shell, and the container read is shared between the list and the spin-up form's duplicate
+  check — the memo is what keeps each of those to one Railway round trip. `cache` compares
+  arguments by identity, so an options object would miss on every call and ship as a wrapper
+  that only looks memoised; for the same reason a caller passes `undefined` through rather
+  than coercing an absent search param to `""`.
+
 - **Write** — `src/app/dashboard/actions.ts`, the only `"use server"` file in the repo, and
   the seven `action-*.ts` modules beside it. The directive file holds the ten exports and
   nothing else: each opens a request scope and hands off. What a verb does lives in

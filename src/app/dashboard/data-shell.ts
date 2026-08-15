@@ -9,6 +9,7 @@
 
 import "server-only";
 
+import { cache } from "react";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth/server";
 import { listProjects } from "@/lib/railway/projects";
@@ -32,24 +33,39 @@ import { describe, missingScopes } from "./describe-error";
  *
  * Returns null when there is no session, which the page turns into a redirect — the
  * redirect belongs to routing, not to data loading.
+ *
+ * Memoized for the render, for the reason data-containers.ts gives: three pages call this
+ * now — the container list, the spin-up form and the billing readout — and each of them is
+ * one `listProjects` if the memo misses.
+ *
+ * **The arguments are positional, and that is the whole reason the memo works.** `cache`
+ * compares arguments by identity, so the `{ projectId, environmentId }` object this used to
+ * take missed on every call: a fresh literal per call site is never the same object as the
+ * last one. It would have shipped as a wrapper that looks memoized and is not, which is
+ * invisible in review. For the same reason a caller must pass `undefined` straight through
+ * rather than coercing an absent param to `""` — that is a different key and a second
+ * Railway round trip.
  */
-export async function loadDashboardShell(params: {
-  projectId?: string;
-  environmentId?: string;
-}): Promise<DashboardShell | null> {
-  /*
-   * A Server Component render cannot be wrapped from outside, so the scope is entered at
-   * the loaders instead. That is the right granularity anyway: they are the only RSC code
-   * that logs, and loadContainers runs in its own Suspense subtree where `headers()`
-   * still resolves this same request.
-   */
-  return withRequestScope("/dashboard", { trustInboundId: true }, () => shell(params));
-}
+export const loadDashboardShell = cache(
+  async (projectId?: string, environmentId?: string): Promise<DashboardShell | null> =>
+    /*
+     * A Server Component render cannot be wrapped from outside, so the scope is entered at
+     * the loaders instead. That is the right granularity anyway: they are the only RSC code
+     * that logs, and loadContainers runs in its own Suspense subtree where `headers()`
+     * still resolves this same request.
+     *
+     * Inside the memo rather than around it, so the second caller reads a settled promise
+     * instead of re-entering the scope for a request that is not being made.
+     */
+    withRequestScope("/dashboard", { trustInboundId: true }, () =>
+      shell(projectId, environmentId),
+    ),
+);
 
-async function shell(params: {
-  projectId?: string;
-  environmentId?: string;
-}): Promise<DashboardShell | null> {
+async function shell(
+  projectId?: string,
+  environmentId?: string,
+): Promise<DashboardShell | null> {
   const session = await getSession();
   if (!session) return null;
 
@@ -81,20 +97,20 @@ async function shell(params: {
     };
   }
 
-  const requested = params.projectId
-    ? (projects.find((p) => p.id === params.projectId) ?? null)
+  const requested = projectId
+    ? (projects.find((p) => p.id === projectId) ?? null)
     : null;
   const project = requested ?? projects[0] ?? null;
   const environment =
-    project?.environments.find((e) => e.id === params.environmentId) ??
+    project?.environments.find((e) => e.id === environmentId) ??
     project?.environments[0] ??
     null;
 
-  if (Boolean(params.projectId) && !requested && projects.length > 0) {
+  if (Boolean(projectId) && !requested && projects.length > 0) {
     // debug: a genuine anomaly — the URL names a project this session can no longer see —
     // but it is per-render and the UI already says so.
     log.debug("dashboard.selection_dropped", {
-      requested_project_id: params.projectId,
+      requested_project_id: projectId,
     });
   }
 
@@ -111,6 +127,6 @@ async function shell(params: {
       : null,
     // Only a *replaced* selection is worth reporting. An unknown environment inside the
     // right project resolves to that project's own default, which is not a substitution.
-    droppedSelection: Boolean(params.projectId) && !requested && projects.length > 0,
+    droppedSelection: Boolean(projectId) && !requested && projects.length > 0,
   };
 }

@@ -97,7 +97,7 @@ beforeEach(() => {
 describe("loadDashboardShell", () => {
   it("returns null without a session, leaving the redirect to routing", async () => {
     getSession.mockResolvedValue(null);
-    expect(await loadDashboardShell({})).toBeNull();
+    expect(await loadDashboardShell()).toBeNull();
   });
 
   it("never reads containers", async () => {
@@ -106,19 +106,19 @@ describe("loadDashboardShell", () => {
      * before anything renders, so a second Railway round trip must not be in it. Fails
      * the moment someone re-inlines the container read for convenience.
      */
-    await loadDashboardShell({});
+    await loadDashboardShell();
     expect(getProjectContainers).not.toHaveBeenCalled();
   });
 
   it("defaults to the first project and its first environment", async () => {
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.project?.id).toBe("p1");
     expect(shell?.environment?.id).toBe("e1");
   });
 
   it("honours an explicit selection", async () => {
-    const shell = await loadDashboardShell({ projectId: "p2", environmentId: "e3" });
+    const shell = await loadDashboardShell("p2", "e3");
 
     expect(shell?.project?.id).toBe("p2");
     expect(shell?.environment?.id).toBe("e3");
@@ -126,10 +126,7 @@ describe("loadDashboardShell", () => {
 
   it("falls back when the selection names something that no longer exists", async () => {
     // A stale bookmark must not blank the dashboard.
-    const shell = await loadDashboardShell({
-      projectId: "gone",
-      environmentId: "gone",
-    });
+    const shell = await loadDashboardShell("gone", "gone");
     expect(shell?.project?.id).toBe("p1");
     expect(shell?.environment?.id).toBe("e1");
   });
@@ -137,13 +134,13 @@ describe("loadDashboardShell", () => {
   it("reports a substituted project rather than swapping it silently", async () => {
     // Showing another project's containers under a link that names a specific one is
     // the kind of quiet wrong answer a user cannot detect.
-    const shell = await loadDashboardShell({ projectId: "gone" });
+    const shell = await loadDashboardShell("gone");
     expect(shell?.droppedSelection).toBe(true);
   });
 
   it("does not call an unknown environment a substitution", async () => {
     // The project asked for is the one shown; its default environment is not a swap.
-    const shell = await loadDashboardShell({ projectId: "p1", environmentId: "gone" });
+    const shell = await loadDashboardShell("p1", "gone");
 
     expect(shell?.droppedSelection).toBe(false);
     expect(shell?.environment?.id).toBe("e1");
@@ -157,7 +154,7 @@ describe("loadDashboardShell", () => {
       failures: [],
     });
 
-    const shell = await loadDashboardShell({ projectId: "gone" });
+    const shell = await loadDashboardShell("gone");
 
     expect(shell?.droppedSelection).toBe(false);
   });
@@ -167,7 +164,7 @@ describe("loadDashboardShell", () => {
     // list that is simply empty — this is what lets the page tell them apart.
     getSession.mockResolvedValue({ ...session, scope: "openid email" });
 
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.missingScopes).toEqual([
       "project:admin",
@@ -182,7 +179,7 @@ describe("loadDashboardShell", () => {
       scope: "openid email profile offline_access project:admin workspace:viewer",
     });
 
-    expect((await loadDashboardShell({}))?.missingScopes).toEqual([]);
+    expect((await loadDashboardShell())?.missingScopes).toEqual([]);
   });
 
   it("degrades to an explanation when the project list fails", async () => {
@@ -191,7 +188,7 @@ describe("loadDashboardShell", () => {
       new RailwayApiError("Rate limited by Railway", { kind: "rate_limit" }),
     );
 
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.error).toContain("rate limit");
     expect(shell?.projects).toEqual([]);
@@ -202,13 +199,13 @@ describe("loadDashboardShell", () => {
 
   it("leaves the failure kind unset for a non-Railway error", async () => {
     listProjects.mockRejectedValue(new Error("socket hang up"));
-    expect((await loadDashboardShell({}))?.errorKind).toBeNull();
+    expect((await loadDashboardShell())?.errorKind).toBeNull();
   });
 
   it("uses a generic message for a non-Railway failure", async () => {
     listProjects.mockRejectedValue(new Error("socket hang up"));
 
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.error).toMatch(
       /^Could not load your Railway projects\. Reference \w+\.$/,
@@ -224,7 +221,7 @@ describe("loadDashboardShell", () => {
       failures: [],
     });
 
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.projects).toEqual([]);
     expect(shell?.project).toBeNull();
@@ -240,14 +237,14 @@ describe("loadDashboardShell", () => {
       failures: [],
     });
 
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
 
     expect(shell?.project?.id).toBe("p9");
     expect(shell?.environment).toBeNull();
   });
 
   it("carries the workspaces a project could be created in", async () => {
-    expect((await loadDashboardShell({}))?.workspaces).toEqual(workspaces);
+    expect((await loadDashboardShell())?.workspaces).toEqual(workspaces);
   });
 
   it("carries an empty workspace list when the project read failed", async () => {
@@ -255,11 +252,11 @@ describe("loadDashboardShell", () => {
     // says "nothing to choose", not one that says nothing at all.
     listProjects.mockRejectedValue(new Error("socket hang up"));
 
-    expect((await loadDashboardShell({}))?.workspaces).toEqual([]);
+    expect((await loadDashboardShell())?.workspaces).toEqual([]);
   });
 
   it("carries the signed-in identity for the header", async () => {
-    const shell = await loadDashboardShell({});
+    const shell = await loadDashboardShell();
     expect(shell?.user).toEqual({ name: "Ada", email: "ada@example.com" });
   });
 });

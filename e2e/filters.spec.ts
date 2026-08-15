@@ -3,8 +3,11 @@ import {
   containerList as list,
   containerRows as rows,
   expect,
+  openBillingTab,
+  openContainersTab,
   searchBox as search,
   seedServices,
+  selectStatus,
   settled,
   statusOptions,
   signIn,
@@ -218,5 +221,32 @@ test.describe("filtering and paging the container list", () => {
     // Focus follows, or the next Tab continues from a control that is now off screen.
     await expect(page.getByRole("heading", { name: "Containers" })).toBeFocused();
     await expect(backToTop).toHaveCount(0);
+  });
+});
+
+test.describe("the filters and the tab strip", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+    await settled(page);
+  });
+
+  test("carries the filters through a round trip to another tab", async ({ page }) => {
+    /*
+     * The direct test of what the tab strip is a client component for. The filters are
+     * client-side state kept in the query string, and the pages deliberately read only
+     * {project, environment} from searchParams — so hrefs built on the server would drop
+     * them. DashboardTabs reads the whole query in the browser instead.
+     */
+    await search(page).fill("postgres");
+    await selectStatus(page, "Running");
+    await expect(page).toHaveURL(/q=postgres/);
+
+    await openBillingTab(page);
+    await expect(page).toHaveURL(/q=postgres/);
+    await expect(page).toHaveURL(/status=running/);
+
+    await openContainersTab(page);
+    await expect(search(page)).toHaveValue("postgres");
+    await expect(button(page, "Remove the Running filter")).toBeVisible();
   });
 });

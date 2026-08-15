@@ -1,4 +1,4 @@
-import { expect, signIn, test } from "./support";
+import { expect, openBillingTab, openNewContainerTab, signIn, test } from "./support";
 import type { BrowserContext, Page } from "@playwright/test";
 
 /**
@@ -117,6 +117,26 @@ test.describe("the browser console", () => {
      * so the network never goes idle — signIn already waits for the content that matters,
      * and the fixed sleep underneath was masking a wait that could only ever time out.
      */
+    await consoleQuiet(page, () => entries.length);
+
+    expect(unexpected(entries, await preloads(page))).toEqual([]);
+  });
+
+  test("the other dashboard tabs log no warnings or errors", async ({
+    page,
+    context,
+  }) => {
+    /*
+     * Two more routes, and both are worth their own pass rather than being assumed covered
+     * by the one above: /dashboard/new is where the combobox, the disclosure and the
+     * key-value editor live, and /dashboard/billing is entirely new markup. A stray React
+     * a11y warning surfaces here and nowhere else in the suite.
+     */
+    const entries = await collect(page, context);
+
+    await signIn(page);
+    await openNewContainerTab(page);
+    await openBillingTab(page);
     await consoleQuiet(page, () => entries.length);
 
     expect(unexpected(entries, await preloads(page))).toEqual([]);

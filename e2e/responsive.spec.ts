@@ -3,6 +3,8 @@ import {
   button,
   containerRows as rows,
   expect,
+  openBillingTab,
+  openNewContainerTab,
   searchBox as search,
   seedServices,
   selectStatus,
@@ -50,6 +52,21 @@ test.describe("the dashboard at phone width", () => {
     await noSidewaysScroll(page);
 
     await button(page, /load more/i).click();
+    await noSidewaysScroll(page);
+  });
+
+  test("wraps the tab strip rather than scrolling it", async ({ page }) => {
+    /*
+     * The strip is the newest thing in the chrome and the only horizontal control row above
+     * the fold, so it is the most likely thing to push the document sideways at this width.
+     * It wraps for the same reason every other control row here does — the app declares
+     * essentially no breakpoints — rather than becoming a scroller.
+     */
+    const strip = page.getByRole("navigation", { name: "Dashboard sections" });
+    await expect(strip).toBeVisible();
+    await noSidewaysScroll(page);
+
+    await openBillingTab(page);
     await noSidewaysScroll(page);
   });
 
@@ -107,6 +124,8 @@ test.describe("the dashboard at phone width", () => {
      * on the cells is what stops it, and `min-w-0` is the load-bearing half — a flex
      * item's default minimum is its content.
      */
+    // The environment editor lives on the provisioning tab now.
+    await openNewContainerTab(page);
     await addVariable(page, "MY_FLAG", "on");
 
     const viewport = page.viewportSize()!;

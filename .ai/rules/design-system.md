@@ -84,8 +84,13 @@ from every heading. **Weight lives in the `Text` primitive for that reason.**
   "check before you build" instruction to fail: it sends a reader off to write a checkbox
   that exists. As of 2026-08-15: alert dialog, banner, button, card, checkbox, chip,
   combobox, dialog, disclosure, error block, field, input, key-value editor, live region,
-  misc, multi-select, page, scroll area, select, skeleton, text, theme toggle, toast and
-  tooltip.
+  misc, multi-select, page, scroll area, select, skeleton, tab nav, text, theme toggle,
+  toast and tooltip.
+
+  `tab-nav.tsx` is the one that wraps no Radix primitive, and its docblock is where the
+  reason lives: it is routed links carrying `aria-current`, deliberately not
+  `role="tablist"`, because the panel a dashboard tab names is a route rather than something
+  in the same document. Read that before reaching for Radix Tabs.
 
 ## Three themes, not two
 

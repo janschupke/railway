@@ -197,23 +197,32 @@ export function railwayLink(page: Page, name: string) {
  * count retries until exactly one remains — no fixed sleep, and it fails loudly if the
  * page genuinely renders two lists.
  *
- * The count alone was not enough. `spin-up-form` starts its refresh inside a
- * `useTransition`, and a transition commits the *whole* new tree at once — so the list
- * can read as settled while the refresh is still in flight, and the commit then
- * reconciles the rows out from under whatever the test does next. The form marks its own
- * button busy for exactly that window, so waiting on it closes the race at the signal
- * rather than by sleeping past it.
+ * **This used to wait on the spin-up button too, and no longer can.** That button is on
+ * /dashboard/new now, and this helper runs on /dashboard where it does not exist — so the
+ * wait would have been a locator that never resolves. `spinUp` below covers the half that
+ * was about a submission in flight: it waits for the navigation the form performs on
+ * success, which is a stronger signal than the button going idle, because the destination
+ * render is what the caller is about to assert on.
+ *
+ * The second line below covers the other half, and it is not optional — dropping it is
+ * what made two filter specs fail on strict-mode violations naming two identical elements.
+ * While React streams, finished content is parked in a container off to one side and
+ * relocated a moment later, so the document briefly holds two copies of everything, and any
+ * unqualified locator a caller then writes is ambiguous. The old spin-up-button wait had
+ * been closing that window by accident, which is why removing it surfaced this.
+ *
+ * A **CSS** locator, deliberately, and this is the part that is easy to get wrong: a
+ * `getByRole` or `getByLabel` count reports 1 through the whole window, because the parked
+ * copy is out of the accessibility tree — so the obvious spelling of this line waits for
+ * nothing while the duplicate the caller is about to trip over is still in the DOM.
+ * `ul[aria-label]` matches it regardless.
  *
  * This was also once blamed for a dialog swallowing an Escape. It was not the cause —
- * see dismissWithEscape below, which is — and both waits are kept because they close
- * different windows.
+ * see dismissWithEscape below, which is.
  */
 export async function settled(page: Page) {
   await expect(containerList(page)).toHaveCount(1);
-  await expect(button(page, /spin up container/i)).not.toHaveAttribute(
-    "aria-busy",
-    "true",
-  );
+  await expect(page.locator('ul[aria-label="Containers"]')).toHaveCount(1);
 }
 
 /** Completes the real OAuth round trip and lands on the dashboard. */
@@ -338,11 +347,113 @@ export async function rollBackTo(page: Page, name: string, index: number) {
 }
 
 /**
- * Picks a preset and submits.
+ * Opens the provisioning tab, keeping whatever selection the URL already carries.
  *
- * The image control is one editable combobox now, so this opens the list, picks, and
- * lets it close itself. It MUST leave the popup closed: the listbox is portalled and
- * overlaps the submit button, so a spec that leaves it open clicks the list instead.
+ * Clicked rather than `page.goto("/dashboard/new")`, and that is deliberate: the strip
+ * builds each href from the current query string, so clicking carries `?project=` and
+ * `?environment=` across — a goto would drop them and land the spec on whatever project
+ * the server defaults to. It also means every spec that creates a container exercises the
+ * strip, which is where a broken href would otherwise go unnoticed.
+ */
+export async function openNewContainerTab(page: Page) {
+  await onlyVisible(tabs(page).getByRole("link", { name: "New container" })).click();
+  await page.waitForURL(/\/dashboard\/new(\?|$)/);
+  await expect(button(page, /spin up container/i)).toBeVisible();
+  await tabArrived(page, "New container");
+}
+
+/**
+ * The dashboard's tab strip.
+ *
+ * Every tab helper goes through this rather than a page-wide `getByRole("link")`, because
+ * the page can hold a link with the same words: the empty-environment card offers its own
+ * way to the provisioning tab. Scoping to the landmark is what keeps these helpers from
+ * failing strict mode in exactly the state a spec is most likely to be checking.
+ */
+const tabs = (page: Page) =>
+  page.getByRole("navigation", { name: "Dashboard sections" });
+
+/**
+ * Waits until a tab navigation has actually finished, title and all.
+ *
+ * The heading each helper waits for proves the new route rendered; it does not prove the
+ * document is done changing. Next swaps `<head>` metadata separately from the tree, so for
+ * a moment after a client-side navigation the document has NO `<title>` — and axe reports
+ * that as a `document-title` violation, which is how e2e/a11y.spec.ts found this. It is
+ * transient and framework-level rather than anything these routes declare, but a scan that
+ * lands inside the window is a real failure with a confusing name.
+ *
+ * An assertion on real content with Playwright's own retry, not a sleep: it settles the
+ * instant the title lands.
+ */
+async function tabArrived(page: Page, heading: string) {
+  await expect(onlyVisible(page.getByRole("heading", { name: heading }))).toBeVisible();
+  await expect(page).toHaveTitle(/\S/);
+}
+
+/** Opens the billing tab, keeping the selection, for the reason openNewContainerTab gives. */
+export async function openBillingTab(page: Page) {
+  await onlyVisible(tabs(page).getByRole("link", { name: "Billing" })).click();
+  await page.waitForURL(/\/dashboard\/billing(\?|$)/);
+  await tabArrived(page, "Workspace spend");
+}
+
+/** Back to the container list, from wherever a spec has navigated to. */
+export async function openContainersTab(page: Page) {
+  await onlyVisible(tabs(page).getByRole("link", { name: "Containers" })).click();
+  await page.waitForURL(/\/dashboard(\?|$)/);
+  await settled(page);
+  await expect(page).toHaveTitle(/\S/);
+}
+
+/**
+ * Picks one image from the preset catalog and waits for the list to actually close.
+ *
+ * The wait is not tidiness: the listbox animates out, so reopening it while the previous
+ * one is still leaving resolves the option locator against a node that is detached a frame
+ * later — a stale element rather than a slow one, which no timeout makes deterministic. It
+ * is also portalled and overlaps the submit button, so leaving it open makes the next click
+ * land on the list.
+ */
+export async function pickPreset(page: Page, name: RegExp) {
+  await onlyVisible(page.getByRole("button", { name: /show preset images/i })).click();
+  await onlyVisible(page.getByRole("option", { name })).click();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+}
+
+/**
+ * Submits the form for a create that is expected NOT to succeed, and stays on the form.
+ *
+ * The counterpart to `spinUp`, and the split is forced by what the app does rather than by
+ * taste: a success hands over to the container tab, and a refusal stays here and renders
+ * the reason — inline beside the field that caused it, or as a toast. So a spec about a
+ * refusal cannot go through the helper that waits for the hop, and one that tried would
+ * fail on a navigation that is correctly not happening.
+ *
+ * Settles on the button coming back to its idle label, which is the form saying the
+ * submission is over. That is the same signal `settled` used to carry for the whole page,
+ * and it belongs here now that it only describes this one route.
+ */
+export async function submitFailing(page: Page, name: string, preset?: RegExp) {
+  await openNewContainerTab(page);
+  if (preset) await pickPreset(page, preset);
+  await field(page, "Name").fill(name);
+  await button(page, /spin up container/i).click();
+  await expect(button(page, /spin up container/i)).not.toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+}
+
+/**
+ * Opens the provisioning tab, picks a preset, submits, and follows the hop back.
+ *
+ * The tab hop at each end is what keeps ~60 call sites unchanged after the dashboard split:
+ * they all began on /dashboard and expect to be back there with the new row present, which
+ * is exactly what the form now does on success.
+ *
+ * **Only for a create that succeeds.** See `submitFailing` above for why the two cannot be
+ * one helper.
  */
 export async function spinUp(
   page: Page,
@@ -357,16 +468,25 @@ export async function spinUp(
    */
   variables: Record<string, string> = {},
 ) {
-  await onlyVisible(page.getByRole("button", { name: /show preset images/i })).click();
-  await onlyVisible(
-    page.getByRole("option", { name: new RegExp(`^${preset}`) }),
-  ).click();
-  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await openNewContainerTab(page);
+  await pickPreset(page, new RegExp(`^${preset}`));
   await field(page, "Name").fill(name);
   for (const [key, value] of Object.entries(variables)) {
     await addVariable(page, key, value);
   }
   await button(page, /spin up container/i).click();
+
+  /*
+   * The form pushes to /dashboard on success, so the caller is back where it started with
+   * the new row on screen. Waited on here rather than in every call site — and this is the
+   * signal that replaced `settled`'s old wait on the submit button, since the destination
+   * render is the thing the caller is about to assert against.
+   *
+   * A failed submission stays on this tab and renders its error inline, so a spec covering
+   * that path drives the form itself rather than calling this.
+   */
+  await page.waitForURL(/\/dashboard(\?|$)/);
+  await settled(page);
 }
 
 /**

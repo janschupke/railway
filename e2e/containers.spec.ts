@@ -11,9 +11,13 @@ import {
   fixtureStats,
   injectFaults,
   onlyVisible,
+  openBillingTab,
+  openContainersTab,
   openDestroyDialog,
   openDetailDialog,
   openEditDialog,
+  openNewContainerTab,
+  pickPreset,
   railwayLink,
   rollBackTo,
   row,
@@ -21,6 +25,7 @@ import {
   seedServices,
   setTabVisibility,
   settled,
+  submitFailing,
   signIn,
   spinUp,
   test,
@@ -215,12 +220,21 @@ test.describe("container lifecycle", () => {
      * The whole of T-491 in one pass: a database spun up here used to accept data and lose
      * it the next time the container moved, with nothing in the UI saying so.
      */
-    await spinUp(page, "db", "PostgreSQL");
-
-    // Said before it is created, on the form, rather than discovered afterwards.
+    /*
+     * Driven in two halves, because the two assertions are now on two routes. The note is
+     * said BEFORE the container is created, on the form — that is the whole point of it —
+     * and the form has its own tab, so it has to be read there rather than after the hop.
+     */
+    await openNewContainerTab(page);
+    await pickPreset(page, /^PostgreSQL/);
     await expect(
-      page.getByText(/\/var\/lib\/postgresql\/data is kept on a volume/),
+      onlyVisible(page.getByText(/\/var\/lib\/postgresql\/data is kept on a volume/)),
     ).toBeVisible();
+
+    await field(page, "Name").fill("db");
+    await button(page, /spin up container/i).click();
+    await page.waitForURL(/\/dashboard(\?|$)/);
+    await settled(page);
 
     await disclosure(page, "db").click();
     await expect(
@@ -282,10 +296,14 @@ test.describe("container lifecycle", () => {
      * shipping it on this path would reintroduce it knowingly.
      */
     await injectFaults(page, { volumeCreateFail: true });
-    await spinUp(page, "db", "PostgreSQL");
+    // Not spinUp: a refused create leaves the reader on the form with the reason, so the
+    // helper's wait for the hop to the container list would never resolve.
+    await submitFailing(page, "db", /^PostgreSQL/);
 
     await expect(toast(page, /refused the volume its data needs/)).toBeVisible();
-    // The service exists and is destroyable, which is the point of not throwing it away.
+    // The service exists and is destroyable, which is the point of not throwing it away —
+    // on the container tab, since a refusal keeps the reader on the form.
+    await openContainersTab(page);
     await expect(row(page, "db")).toBeVisible();
   });
 
@@ -653,7 +671,15 @@ test.describe("container lifecycle", () => {
     await spinUp(page, "cache");
     await expect(row(page, "cache")).toBeVisible();
 
-    await spinUp(page, "cache");
+    /*
+     * Driven directly rather than through `spinUp`, and the reason is the outcome rather
+     * than the keystrokes: the helper waits for the hop back to the container list, and a
+     * refused submission does not hop — it stays here and renders the reason beside the
+     * field that caused it, which is the whole subject of this test.
+     */
+    await openNewContainerTab(page);
+    await field(page, "Name").fill("cache");
+    await button(page, /spin up container/i).click();
 
     await expect(onlyVisible(page.getByText(/already exists here/))).toBeVisible();
     await expect(field(page, "Name")).toHaveAttribute("aria-invalid", "true");
@@ -670,9 +696,18 @@ test.describe("container lifecycle", () => {
      * without exercising anything.
      */
     const before = (await fixtureStats(page)).operations.ServiceCreate ?? 0;
+
+    /*
+     * Driven directly rather than through `spinUp`: the helper waits for the hop to the
+     * container list, and the second submission has to be posted while the form is still
+     * mounted and the first is still in flight. Waiting first would unmount the form the
+     * second submission is meant to come from.
+     */
+    await openNewContainerTab(page);
     await injectFaults(page, { slowMs: 1500 });
 
-    await spinUp(page, "cache");
+    await field(page, "Name").fill("cache");
+    await button(page, /spin up container/i).click();
     await page.evaluate(() => {
       document
         .querySelector<HTMLInputElement>('input[name="name"]')
@@ -692,6 +727,7 @@ test.describe("container lifecycle", () => {
   });
 
   test("rejects a malformed image reference before submitting", async ({ page }) => {
+    await openNewContainerTab(page);
     /*
      * Typed, not picked — the whole reason the image control stays free text. The value
      * has to reach the server so the server's own rule stays the single definition of
@@ -716,6 +752,7 @@ test.describe("container lifecycle", () => {
   test("warns that an image is not available, and spins it up anyway", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     /*
      * The whole point of the feature, and of its restraint. The reference is well-formed,
      * so nothing refuses it — the registry simply has no such repository, which on Docker
@@ -740,6 +777,7 @@ test.describe("container lifecycle", () => {
   });
 
   test("says nothing when the registry cannot answer", async ({ page }) => {
+    await openNewContainerTab(page);
     /*
      * The failure mode this feature was nearly not built to avoid: a registry having a bad
      * day must not put anything on the form, least of all something that reads as a
@@ -822,6 +860,7 @@ test.describe("container lifecycle", () => {
   test("lets the user supply a database password instead of a generated one", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     /*
      * The honest counterpart to the assertion above. The boundary this app holds is "it
      * does not reveal what it generated", not "a password never appears on screen" — a
@@ -847,6 +886,8 @@ test.describe("container lifecycle", () => {
     await expect(page.getByLabel("Variable value 1")).toHaveValue("hunter2hunter2");
 
     await button(page, /spin up container/i).click();
+    await page.waitForURL(/\/dashboard(\?|$)/);
+    await settled(page);
 
     await expect(row(page, "db")).toBeVisible();
     const services = await fixtureServices(page);
@@ -856,11 +897,20 @@ test.describe("container lifecycle", () => {
       POSTGRES_PASSWORD: "hunter2hunter2",
       PGDATA: "/var/lib/postgresql/data/pgdata",
     });
-    // And the row is back to the catalog's blank default, ready for the next container.
+
+    /*
+     * And a fresh form is back to the catalog's blank default, ready for the next
+     * container. Re-opened rather than read in place: a success hands over to this tab, so
+     * the form was unmounted with the route rather than reset in place — which is a
+     * stronger version of the same guarantee, since nothing typed can survive at all.
+     */
+    await openNewContainerTab(page);
+    await pickPreset(page, /^PostgreSQL/);
     await expect(page.getByLabel("Variable value 1")).toHaveValue("");
   });
 
   test("refuses a name Railway owns, at the row that caused it", async ({ page }) => {
+    await openNewContainerTab(page);
     await onlyVisible(
       page.getByRole("button", { name: /show preset images/i }),
     ).click();
@@ -891,7 +941,9 @@ test.describe("container lifecycle", () => {
      */
     await injectFaults(page, { variablesFail: true });
 
-    await spinUp(page, "db", "PostgreSQL");
+    // Not spinUp: the create is reported as a partial failure, so the form keeps the
+    // reader here rather than handing over to the container list.
+    await submitFailing(page, "db", /^PostgreSQL/);
 
     await expect(toast(page, /Created db/)).toBeVisible();
   });
@@ -1053,10 +1105,21 @@ test.describe("container lifecycle", () => {
      */
     await setTabVisibility(page, "hidden");
 
+    /*
+     * The tab is opened BEFORE the faults are queued, and that ordering is now part of what
+     * this test is about. Reaching /dashboard/new is a navigation, and its render reads the
+     * project list and this environment's containers — so faults queued first would be
+     * spent on the page rather than on the create, and the toast under test would never
+     * fire. Same class of problem as the hidden-tab line above, one layer out.
+     */
+    await openNewContainerTab(page);
+
     // Three attempts are made per request, so four queued 429s outlast the retries.
     await injectFaults(page, { rateLimit: 4 });
 
-    await spinUp(page, "cache");
+    // Driven directly rather than through spinUp: a refused create stays on the form.
+    await field(page, "Name").fill("cache");
+    await button(page, /spin up container/i).click();
 
     await expect(toast(page, /rate limit/i)).toBeVisible();
   });
@@ -1076,10 +1139,17 @@ test.describe("container lifecycle", () => {
      * would be asserting on machine speed.
      */
     await setTabVisibility(page, "hidden");
+    /*
+     * Before the faults, for the reason the test above spells out: the navigation's own
+     * Railway reads would otherwise spend them. It also keeps the tab switch out of the
+     * elapsed time this test measures, which is the second reason it cannot come later.
+     */
+    await openNewContainerTab(page);
     await injectFaults(page, { rateLimit: 4, rateLimitRetryAfter: 2 });
 
     const startedAt = Date.now();
-    await spinUp(page, "cache");
+    await field(page, "Name").fill("cache");
+    await button(page, /spin up container/i).click();
     await expect(toast(page, /rate limit/i)).toBeVisible();
 
     expect(Date.now() - startedAt).toBeGreaterThan(4_000);
@@ -1137,22 +1207,6 @@ test.describe("a container's public address", () => {
     await signIn(page);
   });
 
-  /**
-   * Opens the preset list, picks one, and waits for the list to actually close.
-   *
-   * The wait is what `spinUp` in support.ts already does, and for the reason it does it: the
-   * listbox animates out, so reopening it while the previous one is still leaving resolves
-   * the option locator against a node that is detached a frame later. That is a stale
-   * element rather than a slow one, and no timeout makes it deterministic.
-   */
-  const pickPreset = async (page: Page, name: RegExp) => {
-    await onlyVisible(
-      page.getByRole("button", { name: /show preset images/i }),
-    ).click();
-    await onlyVisible(page.getByRole("option", { name })).click();
-    await expect(page.getByRole("listbox")).toHaveCount(0);
-  };
-
   test("gives a web preset an address, and puts it in the sentence", async ({
     page,
   }) => {
@@ -1178,6 +1232,7 @@ test.describe("a container's public address", () => {
   test("seeds the port from the image, and leaves it blank for one that serves nothing", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     await pickPreset(page, /^Nginx/);
     await expect(field(page, "Public port")).toHaveValue("80");
 
@@ -1186,6 +1241,7 @@ test.describe("a container's public address", () => {
   });
 
   test("exposes nothing when the port is cleared", async ({ page }) => {
+    await openNewContainerTab(page);
     /*
      * Clearing the seeded 80 is the only way to say "do not expose this" for a web image,
      * so it has to be honoured — a form that helpfully put the port back would publish a
@@ -1350,6 +1406,7 @@ test.describe("refusals the user is told about", () => {
   });
 
   test("raises a toast when Railway refuses the create outright", async ({ page }) => {
+    await openNewContainerTab(page);
     /*
      * The non-field failure path in spin-up-form: a duplicate name and a malformed
      * image both attach to a field and are covered above, but a Railway refusal has no
@@ -1391,6 +1448,7 @@ test.describe("resource controls on a spin-up", () => {
     (await fixtureServices(page)).find((service) => service.name === `spun-${name}`);
 
   test("carries every advanced value through to the service", async ({ page }) => {
+    await openNewContainerTab(page);
     await onlyVisible(
       page.getByRole("button", { name: /show preset images/i }),
     ).click();
@@ -1430,6 +1488,7 @@ test.describe("resource controls on a spin-up", () => {
    * content, the jsdom test and this one fail together.
    */
   test("keeps a value that was set and then hidden again", async ({ page }) => {
+    await openNewContainerTab(page);
     await field(page, "Image reference").fill("nginx:1.27-alpine");
     await field(page, "Name").fill("folded");
     await fillAdvanced(page, { replicas: "3" });
@@ -1456,6 +1515,7 @@ test.describe("resource controls on a spin-up", () => {
   test("keeps the advanced choices when Railway refuses the create", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     await injectFaults(page, { rateLimit: 20 });
 
     await field(page, "Image reference").fill("redis:7-alpine");
@@ -1504,6 +1564,7 @@ test.describe("resource controls on a spin-up", () => {
   test("refuses an out-of-range replica count before anything is created", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     await field(page, "Image reference").fill("nginx:1.27-alpine");
     await field(page, "Name").fill("toobig");
     await fillAdvanced(page, { replicas: "99" });
@@ -1521,6 +1582,7 @@ test.describe("resource controls on a spin-up", () => {
   test("says the size was refused, and leaves the container un-deployed", async ({
     page,
   }) => {
+    await openNewContainerTab(page);
     await injectFaults(page, { limitsFail: true });
 
     await field(page, "Image reference").fill("nginx:1.27-alpine");
@@ -1529,11 +1591,18 @@ test.describe("resource controls on a spin-up", () => {
     await button(page, /spin up container/i).click();
 
     await expect(toast(page, /usually a limit of the plan/i)).toBeVisible();
-    // Created, and never deployed: the row is there to be destroyed.
+    /*
+     * Created, and never deployed: the row is there to be destroyed. On the container tab,
+     * which the reader has to go to — a partial failure keeps them here with the sentence
+     * that explains it rather than handing over, and that is the behaviour rather than an
+     * inconvenience of the test.
+     */
+    await openContainersTab(page);
     await expect(row(page, "toobig")).toBeVisible();
   });
 
   test("says the settings were refused, in its own sentence", async ({ page }) => {
+    await openNewContainerTab(page);
     await injectFaults(page, { settingsFail: true });
 
     await field(page, "Image reference").fill("nginx:1.27-alpine");
@@ -1542,6 +1611,8 @@ test.describe("resource controls on a spin-up", () => {
     await button(page, /spin up container/i).click();
 
     await expect(toast(page, /refused the settings you asked for/i)).toBeVisible();
+    // Same as above: the container exists, on the tab that lists them.
+    await openContainersTab(page);
     await expect(row(page, "unsettled")).toBeVisible();
   });
 
@@ -1551,6 +1622,7 @@ test.describe("resource controls on a spin-up", () => {
    * Railway is retiring, which is a container that stops working later.
    */
   test("offers only the regions worth choosing", async ({ page }) => {
+    await openNewContainerTab(page);
     await fillAdvanced(page, {});
 
     /*
@@ -1656,27 +1728,97 @@ test.describe("usage and spend", () => {
     await expect(cache.getByRole("log")).toBeVisible();
     await expect(cache.getByRole("button", { name: "Destroy" })).toBeVisible();
   });
+});
 
-  test("says whose spend it is showing, and points elsewhere when it has none", async ({
+/**
+ * The billing tab.
+ *
+ * The spend sentence used to be the last line of the container section, and these
+ * assertions used to live in "usage and spend" above alongside the per-row readouts. It is
+ * its own route now, with the figure broken out of the prose — so what has to be checked is
+ * both that the number is there and that the two scopes on the page stay told apart. That
+ * second half is the reason this tab was the risky part of the split: a workspace-wide
+ * dollar figure beside a managed-only vCPU figure reads as one number explaining the other.
+ */
+test.describe("billing", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("names the figure, the period, and the workspace it belongs to", async ({
     page,
   }) => {
+    await openBillingTab(page);
+
+    await expect(onlyVisible(page.getByText("Used this period"))).toBeVisible();
+    await expect(onlyVisible(page.getByText("Acme"))).toBeVisible();
     // The scope clause is the answer to "why does this not match my container list",
     // written into the copy once instead of asked repeatedly.
     await expect(
-      page.getByText(/The Acme workspace has used .* so far this billing period/),
+      onlyVisible(page.getByText(/including ones this app did not create/)),
+    ).toBeVisible();
+  });
+
+  test("keeps spend and this app's usage in cards that name their own scope", async ({
+    page,
+  }) => {
+    /*
+     * The invariant the ticket turned on. container-section.tsx used to keep these two
+     * figures on separate surfaces for exactly this reason; they share a page now, and two
+     * headings plus two scope sentences are what replaced that separation. If these ever
+     * merge into one panel of four figures, this is the test that says why not.
+     */
+    await spinUp(page, "cache");
+    await openBillingTab(page);
+
+    await expect(
+      onlyVisible(page.getByRole("heading", { name: "Workspace spend" })),
     ).toBeVisible();
     await expect(
-      page.getByText(/including ones this app did not create/),
+      onlyVisible(
+        page.getByRole("heading", { name: "Usage by containers created here" }),
+      ),
     ).toBeVisible();
+    await expect(
+      onlyVisible(page.getByText(/not the figure Railway bills/)),
+    ).toBeVisible();
+  });
 
+  test("adds up what this app's own containers are using", async ({ page }) => {
+    await spinUp(page, "cache");
+    // Running first: Railway reports no sample for a container that is still building, and
+    // the card says so rather than printing a zero — which is the other branch, asserted
+    // in billing-section.test.tsx where it costs milliseconds.
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    await openBillingTab(page);
+
+    /*
+     * Scoped to the card. "Containers" is also the first tab's label, so a page-wide text
+     * query resolves to two elements — which is the same collision the empty-state CTA was
+     * renamed to avoid, in the one place where the words genuinely have to be repeated.
+     */
+    const usage = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Usage by containers created here" }),
+    });
+    await expect(usage.getByText("vCPU", { exact: true })).toBeVisible();
+    await expect(usage.getByText("Containers", { exact: true })).toBeVisible();
+    await expect(usage.getByText(/no usage for these containers yet/)).toHaveCount(0);
+  });
+
+  test("points elsewhere when there is no workspace to read", async ({ page }) => {
     // A personal project has no workspace at all, which is not an error — the figure
     // simply lives on Railway.
     await injectFaults(page, { noWorkspace: true });
-    await page.reload();
+    await openBillingTab(page);
 
-    await expect(page.getByText(/Railway reports spend per workspace/)).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Open billing on Railway" }),
+      onlyVisible(page.getByText(/Railway reports spend per workspace/)),
+    ).toBeVisible();
+    await expect(
+      onlyVisible(page.getByRole("link", { name: /Open billing on Railway/ })),
     ).toBeVisible();
   });
 });

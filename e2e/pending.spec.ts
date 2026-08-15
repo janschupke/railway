@@ -4,6 +4,7 @@ import {
   field,
   injectFaults,
   onlyVisible,
+  openNewContainerTab,
   row,
   settled,
   signIn,
@@ -35,6 +36,7 @@ import {
 
 test("spin up marks the button busy and announces it", async ({ page }) => {
   await signIn(page);
+  await openNewContainerTab(page);
   await injectFaults(page, { slowMs: 1500 });
 
   await field(page, "Name").fill("busy-check");
@@ -54,14 +56,19 @@ test("spin up marks the button busy and announces it", async ({ page }) => {
   ).toContainText(/spinning up container/i);
 
   await injectFaults(page, { slowMs: 0 });
+  // The form hops to the container list on success; the fault removal above is what lets
+  // that land rather than hanging behind the slow fixture.
+  await page.waitForURL(/\/dashboard(\?|$)/);
   await settled(page);
 });
 
 test("destroy marks its button busy and locks cancel", async ({ page }) => {
   await signIn(page);
+  await openNewContainerTab(page);
 
   await field(page, "Name").fill("doomed");
   await button(page, /spin up container/i).click();
+  await page.waitForURL(/\/dashboard(\?|$)/);
   await settled(page);
   await expect(row(page, "doomed")).toBeVisible();
 

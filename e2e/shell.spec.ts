@@ -1,5 +1,14 @@
 import type { Locator } from "@playwright/test";
-import { button, expect, onlyVisible, signIn, statusOptions, test } from "./support";
+import {
+  button,
+  expect,
+  onlyVisible,
+  openBillingTab,
+  openNewContainerTab,
+  signIn,
+  statusOptions,
+  test,
+} from "./support";
 
 /**
  * The chrome, asserted as an invariant rather than page by page.
@@ -86,6 +95,46 @@ test.describe("the app shell", () => {
     await expect(onlyVisible(page.getByRole("banner"))).toHaveCount(1);
     await expect(onlyVisible(page.getByRole("banner"))).toContainText("Ada Lovelace");
     await expect(page.getByRole("button", { name: /sign out/i })).toHaveCount(1);
+  });
+
+  test("every dashboard tab has exactly one banner, main and contentinfo", async ({
+    page,
+  }) => {
+    /*
+     * The dashboard is three routes now, and each of them renders its own <main> through
+     * PageMain while the layout above them holds the tab strip. A page that grew a second
+     * <main> — most plausibly by wrapping the strip in one — would make e2e/auth.spec.ts's
+     * landmark locators ambiguous, which Playwright reports as a strict-mode error that
+     * reads like a flake.
+     */
+    await signIn(page);
+
+    for (const open of [openNewContainerTab, openBillingTab]) {
+      await open(page);
+      await expect(onlyVisible(page.getByRole("banner"))).toHaveCount(1);
+      await expect(onlyVisible(page.getByRole("main"))).toHaveCount(1);
+      await expect(onlyVisible(page.getByRole("contentinfo"))).toHaveCount(1);
+    }
+  });
+
+  test("the tab strip is one named landmark with one current tab", async ({ page }) => {
+    /*
+     * Named on the <nav> and NOWHERE else. The <ul> inside it must stay unnamed:
+     * e2e/support.ts finds the container list with getByRole("list", { name: "Containers" })
+     * and asserts exactly one match, so a labelled list here would break every container
+     * spec at once.
+     */
+    await signIn(page);
+
+    const strip = onlyVisible(
+      page.getByRole("navigation", { name: "Dashboard sections" }),
+    );
+    await expect(strip).toHaveCount(1);
+    await expect(strip.locator("[aria-current='page']")).toHaveCount(1);
+
+    await openBillingTab(page);
+    await expect(strip.locator("[aria-current='page']")).toHaveCount(1);
+    await expect(strip.locator("[aria-current='page']")).toHaveText("Billing");
   });
 
   test("the brand takes a signed-in visitor home from a 404", async ({ page }) => {

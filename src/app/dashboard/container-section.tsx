@@ -1,14 +1,17 @@
-import { getLocale, getTranslations } from "next-intl/server";
+import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { ContainerList } from "@/components/container-list";
 import { ContainerSectionHeader } from "@/components/container-section-header";
 import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/misc";
 import { Text } from "@/components/ui/text";
-import { LINKS } from "@/lib/constants";
 import { managedPrefix } from "@/lib/railway/managed";
-import type { WorkspaceSpend } from "@/lib/railway/types";
 import { loadContainers } from "./data-containers";
+
+/** The provisioning tab an empty environment sends people to. A route, not copy. */
+const NEW_CONTAINER = "/dashboard/new";
 
 /**
  * The container list and everything derived from it.
@@ -36,7 +39,6 @@ export async function ContainerSection({
   environmentId: string | null;
 }) {
   const t = await getTranslations("dashboard");
-  const locale = await getLocale();
 
   // A project with no environments has nothing to fetch; returning before the first
   // await keeps this off the suspending path entirely.
@@ -45,16 +47,35 @@ export async function ContainerSection({
       <section className="space-y-2">
         <ContainerSectionHeader heading={t("containersHeading")} />
         <Card>
+          {/*
+            No create CTA on this branch, unlike the empty-environment one below, and the
+            asymmetry is deliberate: there is no environment to spin a container up into,
+            so the form on the other tab would render disabled. A button that leads to a
+            dead control is the pattern the no-projects state already argues against.
+          */}
           <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
         </Card>
       </section>
     );
   }
 
-  const { containers, error, metrics, volumes, spend } = await loadContainers(
+  const { containers, error, metrics, volumes } = await loadContainers(
     projectId,
     environmentId,
   );
+
+  /*
+   * The selection travels; the list's own filters do not.
+   *
+   * Built here rather than in the client, because this branch has the two resolved ids
+   * already and nothing on it is interactive. Dropping q/status/owner is correct: a link
+   * out of an empty list has no filters worth carrying, and the server cannot see them
+   * anyway — see the searchParams note in page.tsx.
+   */
+  const newContainerHref = `${NEW_CONTAINER}?${new URLSearchParams({
+    project: projectId,
+    environment: environmentId,
+  }).toString()}`;
 
   /*
    * Two shapes, and only one of them can be filtered.
@@ -72,7 +93,22 @@ export async function ContainerSection({
         <>
           <ContainerSectionHeader heading={t("containersHeading")} />
           <Card>
-            <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
+            <EmptyState
+              title={t("emptyTitle")}
+              description={t("emptyDescription")}
+              /*
+                The form used to sit directly above this card, so "spin one up above" was
+                both the instruction and the pointer. It is a tab away now, and an empty
+                state that only describes the absence leaves the reader to find the way
+                out — so the way out is the card's own centred action. EmptyState centres
+                its `action` slot already.
+              */
+              action={
+                <Button asChild variant="primary" size="sm">
+                  <Link href={newContainerHref}>{t("emptyCta")}</Link>
+                </Button>
+              }
+            />
           </Card>
         </>
       ) : (
@@ -100,98 +136,18 @@ export async function ContainerSection({
       </Text>
 
       {/*
-        Directly under the prefix note, and that placement is the argument.
+        The spend caveat used to sit directly under the prefix note, and the argument for
+        that placement was the one this comment replaces: the two paragraphs make the same
+        kind of claim about the same boundary — what this app owns versus what it merely
+        shows — and putting a workspace-wide dollar figure beside the list's managed-only
+        vCPU total would have made the two numbers read as one.
 
-        That paragraph is already this section's statement of what this app owns and what it
-        merely shows; the spend caveat is the same kind of claim about the same boundary. Put
-        beside the list's own usage total instead, the two numbers would read as one — a
-        workspace-wide dollar figure sitting next to a managed-only vCPU figure is exactly
-        the misreading this ticket has to avoid.
+        The figure has its own tab now, which is the same separation by other means. It is
+        NOT that the objection was dropped: /dashboard/billing renders the two as separate
+        cards, each headed with its own scope and carrying its own scope sentence, and
+        billing-summary.tsx is where that is written down. If those ever merge into one
+        panel of four figures, this paragraph is the argument against it.
       */}
-      <WorkspaceSpendNote spend={spend} t={t} locale={locale} />
     </section>
-  );
-}
-
-/**
- * What the workspace has spent this period, or where to find out.
- *
- * The figure is workspace-wide and the copy says so in the same sentence, because there is
- * no honest way to narrow it: `estimatedUsage` returns GB and vCPU rather than money, and the
- * only monetary fields in Railway's schema hang off `Customer`, which hangs off a workspace.
- * A number presented as "what your containers cost" would be wrong by however much else lives
- * in that workspace.
- *
- * The two absent branches render the same thing on purpose. A personal project has no
- * workspace, and a token without `workspace:viewer` cannot read one — from the reader's side
- * those are the same situation: the figure is not available here, it is over there. Neither
- * is an error and neither gets a banner, because an absent cost figure is not something the
- * reader can act on in this app. Offering a re-consent prompt for a read-only nicety is the
- * button-that-never-works pattern the empty-project state already argues against.
- */
-function WorkspaceSpendNote({
-  spend,
-  t,
-  locale,
-}: {
-  spend: WorkspaceSpend | null;
-  /*
-   * Handed down rather than fetched here, and the reason is mechanical: an async component
-   * nested inside another one has no Suspense boundary of its own on this path, so it
-   * renders as an unresolved promise everywhere except a full RSC runtime. The section is
-   * already awaited and already holds both of these.
-   */
-  t: Awaited<ReturnType<typeof getTranslations<"dashboard">>>;
-  locale: string;
-}) {
-  if (!spend) {
-    return (
-      <Text asChild variant="caption" tone="subtle">
-        <p>
-          {t("workspaceSpendUnavailable")}{" "}
-          <a
-            href={LINKS.RAILWAY_BILLING}
-            target="_blank"
-            rel="noreferrer"
-            className="focus-ring link"
-          >
-            {t("openRailwayBilling")}
-          </a>
-        </p>
-      </Text>
-    );
-  }
-
-  /*
-   * USD, hardcoded, and that is a stated limitation rather than an assumption nobody
-   * noticed: `Customer.currentUsage` is a bare Float with no currency field anywhere beside
-   * it, and Railway bills in dollars. Formatted through Intl rather than concatenated so the
-   * symbol lands where the reader's locale puts it.
-   */
-  const amount = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "USD",
-  }).format(spend.currentUsage);
-
-  const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
-
-  return (
-    <Text asChild variant="caption" tone="subtle">
-      <p>
-        {t("workspaceSpend", {
-          /*
-           * A select rather than a placeholder with a fallback string. Substituting a
-           * phrase into "The {workspace} workspace" produced "The this project's workspace
-           * workspace" — the placeholder was doing two jobs, and a translator had no way to
-           * see that. The whole sentence stays one message so its clauses can be reordered.
-           */
-          named: spend.workspaceName ? "yes" : "no",
-          workspace: spend.workspaceName ?? "",
-          amount,
-          start: date.format(new Date(spend.periodStart)),
-          end: date.format(new Date(spend.periodEnd)),
-        })}
-      </p>
-    </Text>
   );
 }

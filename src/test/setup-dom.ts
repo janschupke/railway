@@ -151,12 +151,29 @@ export function setSearchParams(init = "") {
   searchParamsMock.current = new URLSearchParams(init);
 }
 
-afterEach(() => setSearchParams());
+/*
+ * The path is state too, now that the dashboard is three routes rather than one.
+ *
+ * This used to be a constant `"/dashboard"`, which was fine while nothing read it — and
+ * became untestable the moment `useDashboardSelection` started pushing to the *current*
+ * path instead of a literal one. A constant would have let that regress to the old
+ * behaviour with every test still green.
+ */
+const pathnameMock = { current: "/dashboard" };
+
+export function setPathname(path = "/dashboard") {
+  pathnameMock.current = path;
+}
+
+afterEach(() => {
+  setSearchParams();
+  setPathname();
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
   useSearchParams: () => searchParamsMock.current,
-  usePathname: () => "/dashboard",
+  usePathname: () => pathnameMock.current,
   redirect: vi.fn(),
 }));
 

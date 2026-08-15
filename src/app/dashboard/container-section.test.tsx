@@ -38,13 +38,6 @@ const container = (over: Partial<Container> = {}): Container => ({
   ...over,
 });
 
-const spend = {
-  currentUsage: 18.4,
-  periodStart: "2026-08-01T00:00:00Z",
-  periodEnd: "2026-08-31T00:00:00Z",
-  workspaceName: "Acme",
-};
-
 const renderSection = async (
   containers: Container[],
   over: Partial<Awaited<ReturnType<typeof loadContainers>>> = {},
@@ -126,50 +119,42 @@ describe("ContainerSection", () => {
     expect(screen.getByLabelText("Search containers")).toBeInTheDocument();
   });
 
-  describe("the workspace spend note", () => {
-    it("names the figure, the period, and what it actually covers", async () => {
+  describe("the empty environment", () => {
+    it("offers the way to the provisioning tab, selection intact", async () => {
       /*
-       * The scope clause is not padding. It is the answer to "why does this not match my
-       * container list", asked once in the copy instead of many times in an issue tracker:
-       * Railway has no per-project or per-container cost, so this number necessarily
-       * includes services this app did not create.
+       * The form used to sit directly above this card, so "spin one up above" was both the
+       * instruction and the pointer. It is a tab away now, and an empty state that only
+       * describes the absence leaves the reader to find the way out.
        */
-      await renderSection([container()], { spend });
+      await renderSection([]);
 
-      expect(
-        screen.getByText(/The Acme workspace has used \$18\.40/),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/including ones this app did not create/),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Create a container" })).toHaveAttribute(
+        "href",
+        "/dashboard/new?project=proj_1&environment=env_1",
+      );
     });
 
-    it("falls back to a generic name rather than dropping a real figure", async () => {
-      // The name is decoration; the number is the point.
-      await renderSection([container()], {
-        spend: { ...spend, workspaceName: null },
-      });
+    it("carries no filters onto that link", async () => {
+      // A link out of an empty list has no filters worth carrying, and the server cannot
+      // see them anyway.
+      await renderSection([]);
 
-      expect(
-        screen.getByText(/This project's workspace has used \$18\.40/),
-      ).toBeInTheDocument();
+      const href = screen
+        .getByRole("link", { name: "Create a container" })
+        .getAttribute("href");
+      expect(href).not.toMatch(/[?&](q|status|owner)=/);
     });
 
-    it("points at Railway when there is no figure to show", async () => {
+    it("offers nothing to create into when there is no environment at all", async () => {
       /*
-       * A personal project has no workspace, and a token without workspace:viewer cannot
-       * read one. Those render identically on purpose: from the reader's side they are the
-       * same situation, and neither is something they can act on in this app — so no
-       * banner and no re-consent prompt, just where the number lives.
+       * The asymmetry with the branch above. Without an environment the spin-up form
+       * renders disabled, so a button leading to it would be one that cannot work — the
+       * pattern the no-projects state already argues against.
        */
-      await renderSection([container()], { spend: null });
+      render(await ContainerSection({ projectId: null, environmentId: null }));
 
-      expect(
-        screen.getByText(/Railway reports spend per workspace/),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("link", { name: "Open billing on Railway" }),
-      ).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Create a container" })).toBeNull();
+      expect(screen.getByText(/nothing running in this environment/i)).toBeVisible();
     });
   });
 });

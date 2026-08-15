@@ -1,6 +1,7 @@
 import { ContainerSectionHeader } from "./container-section-header";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
+import { Heading } from "./ui/text";
 
 /*
  * Placeholder compositions for the dashboard.
@@ -92,6 +93,50 @@ export function SpinUpFormSkeleton() {
 
       <Skeleton shape="control" className="h-control-md w-40" />
     </Card>
+  );
+}
+
+/** One label/value pair, matching `Figure` in billing-summary.tsx. */
+function FigureSkeleton({ width }: { width: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Skeleton className="h-3 w-20" />
+      <Skeleton className={`h-5 ${width}`} />
+    </div>
+  );
+}
+
+/**
+ * Stands in for BillingSection: two cards, three figures each.
+ *
+ * The headings are real text for the same reason ContainerSectionSkeleton's is — they never
+ * depend on the fetch, so they stay put and stay in the a11y tree while the reads run. The
+ * figure rows are placeholders because their widths are the only thing that could shift, and
+ * a card whose height changes when the number lands is the CLS the LHCI gate measures.
+ */
+export function BillingSectionSkeleton({
+  spendHeading,
+  usageHeading,
+}: {
+  spendHeading: string;
+  usageHeading: string;
+}) {
+  return (
+    <section className="space-y-3" aria-busy="true" data-loading="billing">
+      {[spendHeading, usageHeading].map((heading) => (
+        <Card key={heading} className="space-y-3 p-4">
+          <Heading level={2}>{heading}</Heading>
+          {/* Not a <dl>: the real cards use one, but an empty definition list is a
+              structure a screen reader would announce as having no terms in it. */}
+          <div className="flex flex-wrap gap-x-8 gap-y-3">
+            <FigureSkeleton width="w-24" />
+            <FigureSkeleton width="w-32" />
+            <FigureSkeleton width="w-20" />
+          </div>
+          <Skeleton className="h-4 w-full max-w-lg" />
+        </Card>
+      ))}
+    </section>
   );
 }
 

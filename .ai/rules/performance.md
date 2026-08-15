@@ -9,11 +9,16 @@ meta:
 
 `bundle-budgets.json` holds first-load JS per route, gzipped, in kilobytes:
 
-| Route         | Budget |
-| ------------- | ------ |
-| `/`           | 179    |
-| `/dashboard`  | 229    |
-| `/_not-found` | 171    |
+| Route                | Budget |
+| -------------------- | ------ |
+| `/`                  | 179    |
+| `/dashboard`         | 237    |
+| `/dashboard/new`     | 225    |
+| `/dashboard/billing` | 214    |
+| `/_not-found`        | 171    |
+
+**Every route needs an entry**, or the gate silently stops covering new pages — the script
+fails on a route it has no number for, which is what makes that true rather than hoped.
 
 `scripts/check-bundle-budget.ts` (`pnpm size`) checks them against
 `.next/diagnostics/route-bundle-stats.json` after `pnpm build`, and the `build` job in CI
