@@ -311,6 +311,14 @@ Recorded because a review that reports only problems misrepresents the system.
   catches a force-push that rewrites a secret into a branch nobody reads, and it is what
   keeps this line a statement about the repository rather than about one afternoon.
 
+  One string is allowlisted, in `.gitleaks.toml`, and it is named here rather than left to
+  whoever opens that file: `0123456789abcdef0123456789abcdef`, the idempotency key three
+  test files post. It is 32 hex characters because the schema requires 32 hex characters,
+  which is also why `generic-api-key` reports it. An idempotency key is not a credential —
+  the browser mints it, it travels in a form field, and its only power is to make a repeated
+  submission a no-op. Every default rule stays on; the exception is one literal, not a path
+  and not a rule.
+
 ## Accepted risks
 
 **A user can set any environment variable on a service they create.** The form validates
