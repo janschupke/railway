@@ -39,10 +39,10 @@ variables (never their values), once per process rather than on every healthchec
 
 ## Getting to Grafana from here
 
-A deployment change and no code change: add the OTel packages, add `register()` to the
-[src/instrumentation.ts](../src/instrumentation.ts) this already created, and point Alloy at
-Railway's log drain (`stage.json` → labels on `level`/`service`/`env` → structured metadata for
-`request_id`/`incident`/`subject_id`).
+A deployment change and one file's worth of code: add the OTel packages and initialise the SDK
+inside the `register()` that [src/instrumentation.ts](../src/instrumentation.ts) already
+exports, then point Alloy at Railway's log drain (`stage.json` → labels on
+`level`/`service`/`env` → structured metadata for `request_id`/`incident`/`subject_id`).
 
 `trace_id`, `span_id` and `trace_flags` are left unwritten on purpose:
 `@opentelemetry/instrumentation-pino` injects exactly those, and hand-rolling them now would mean

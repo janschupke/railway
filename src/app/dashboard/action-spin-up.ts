@@ -190,7 +190,7 @@ async function attempt(
    * disabled input posts nothing, so this is unreachable from a browser — and it is a drop
    * rather than a refusal because a request carrying a retry count for a policy that ignores
    * it has said nothing wrong. Refusing it would be this app guessing stricter than the
-   * platform, which is the failure mode lib/validation.ts warns about twice.
+   * platform, which is the failure mode lib/validation/schemas.ts warns about twice.
    */
   const settings = {
     ...(region === undefined ? {} : { region }),

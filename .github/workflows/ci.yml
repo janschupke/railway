@@ -55,7 +55,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # `--prod` is deliberate, not a softening. The three advisories open today all sit
+      # `--prod` is deliberate, not a softening. Every advisory open today sits
       # under @lhci/cli, which never runs in a deployment — an unqualified
       # `--audit-level=high` would fail this build immediately on GHSA-ph9p-34f9-6g65
       # and train everyone to ignore the step. `--prod` re-evaluates reachability on

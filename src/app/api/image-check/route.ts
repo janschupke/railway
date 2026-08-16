@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * A fourth kind of route handler, and the first that is not a stream — so it is worth
  * saying why it is one at all rather than a Server Action or a data loader. Two reasons,
  * and either would be enough. The lane rule in `.ai/rules/architecture.md` reserves
- * `dashboard/data.ts` for Server Components and `dashboard/actions.ts` for writes, and this
+ * the `dashboard/data-*.ts` loaders for Server Components and `dashboard/actions.ts` for writes, and this
  * is a read a client component makes mid-interaction; putting it in the write lane would
  * make the only `"use server"` file in the repo something other than what it says it is.
  * And a route handler is the only lane with the inbound `AbortSignal`, which a check that

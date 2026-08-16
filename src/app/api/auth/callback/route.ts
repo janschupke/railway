@@ -131,15 +131,15 @@ async function complete(request: NextRequest) {
     /*
      * Without a refresh token the session dies in one hour, mid-use.
      *
-     * Railway mints one on the flow where consent is granted, so a silent authorization
-     * that skipped the consent screen can legitimately return none. That is worth one
-     * automatic retry with consent forced — this used to dead-end on an error page
-     * telling the user to sign in again and approve offline access, which sent them
-     * through the identical request and produced the identical result.
+     * The login route sends `prompt=consent` and `offline_access` on every request, which
+     * is Railway's stated condition for issuing one — so reaching here means the user
+     * declined offline access at the screen, or Railway withheld it for a reason of its
+     * own. Neither is fixed by asking again with the same parameters, but one retry is
+     * still worth it: it costs a redirect and it covers a provider that behaves
+     * differently from its documentation, which is the case this app cannot see.
      *
-     * The cookie set by that forced attempt is what stops this becoming a loop: if it
-     * is already here, consent has been shown and Railway still withheld the token, so
-     * there is nothing left to try.
+     * The cookie set by that retry is what stops this becoming a loop: if it is already
+     * here, the second attempt failed the same way and there is nothing left to try.
      */
     if (request.cookies.get(names.consent)?.value === "1") {
       return fail(origin, "no_refresh_token");

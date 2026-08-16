@@ -2,7 +2,7 @@
  * Docker image reference: `[registry/]name[:tag][@digest]`.
  * Deliberately permissive on registry hosts, strict on shell-unsafe characters.
  *
- * Lives here rather than in ./validation.ts, where it was born, because both sides of the
+ * Lives here rather than beside the zod schemas, where it was born, because both sides of the
  * app need it and only one of them can afford zod. `spinUpSchema` imports it from here; so
  * does the image-check hook, which runs in the browser — and a hook that reached into
  * `lib/validation` would pull zod into /dashboard's first load for the sake of one regex.

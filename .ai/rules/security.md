@@ -143,8 +143,9 @@ Two footguns in the CSP path, both load-bearing: the nonce must be set on
 `script-src` under a `startsWith` scan**, which is why there is no `script-src-elem`.
 
 `style-src 'unsafe-inline'` is an accepted risk with two independent causes documented in
-`SECURITY.md`. Removing it produces 12 `style-src-attr` violations on the dashboard alone.
-Do not try.
+`SECURITY.md`: a nonce cannot authorize a `style=` attribute, and `react-remove-scroll`
+injects a `<style>` element whose nonce hook Radix does not expose. Removing it produces a
+page full of `style-src-attr` violations. Do not try.
 
 ## The request id is minted, and adopted only from behind the proxy
 
@@ -155,8 +156,8 @@ The same reasoning applies to any new identifier you are tempted to read off a r
 
 **What a handler downstream reads is therefore the proxy's own value, and that is the whole
 of why `trustInboundId: true` is safe.** This section used to say "minted, never adopted",
-which reads as an absolute and is not one: sixteen call sites pass `trustInboundId: true` —
-every Server Action, both data loaders and the four non-auth route handlers — because the
+which reads as an absolute and is not one: every Server Action, both data loaders and all five
+non-auth route handlers pass `trustInboundId: true`, because the
 proxy has already overwritten the header before their handler runs. `resolveId` in
 `src/lib/log/request-scope.ts` still holds the value to `REQUEST_ID_PATTERN` before accepting
 it, so a bypass yields a fresh id rather than the caller's bytes.
@@ -203,7 +204,7 @@ Two consequences for the `Dockerfile`:
   — none of it upgradable from here, none of it ever invoked. Do not put a package manager
   back into that stage.
 - **The image ships a traced `node_modules`, not an installed one.** `output: "standalone"`
-  took the payload from 504 MB to 44 MB, and with it went TypeScript, Playwright, the Babel
+  took 480 MB of `node_modules` down to 38 MB, and with it went TypeScript, Playwright, the Babel
   closure and a native SWC compiler — none of which the server imports, all of which
   `pnpm install --prod` was obliged to keep because pnpm had written them into the identity
   of `next` and `next-intl`. Less code in the image is less code a scanner can find a CVE
@@ -217,10 +218,11 @@ added**, and adding one is a `SECURITY.md` change by the list below.
 
 Three rules hold that boundary, and all three are load-bearing:
 
-- **No host, port or scheme is derived from user input.** A reference naming anything else
-  parses fine and is then refused — `registryFor` returns null rather than resolving it.
-  That is what closes the SSRF docs/limitations.md spends a paragraph explaining could not
-  be closed.
+- **No host, port or scheme is derived from user input.** `IMAGE_PATTERN` admits a bare host
+  as the first component, so `169.254.169.254/foo/bar` is a well-formed reference naming a
+  registry. It parses fine and is then refused: `registryFor` returns null rather than
+  resolving it. Refusing rather than resolving is what closes that SSRF — see
+  [docs/limitations.md](../../docs/limitations.md#the-image-existence-check).
 - **No host is derived from a registry _response_ either.** The OCI spec says to find the
   token endpoint by reading `realm` off a `WWW-Authenticate` challenge. It is not read.
   Three registries, three constants, verified once.
@@ -244,11 +246,9 @@ Update the document when you add or alter:
   or a widening of what an existing one accepts
 - anything on an accepted-risk list — if you close one, move it out of that section
 
-A security claim that is no longer true is worse than no document.
-
-The input-surface line was added after T-487, which accepted user-supplied environment
-variables on the spin-up form. That was the largest change to the threat model in this
-repo's history, and nothing else on this list would have fired for it.
+Accepting user-supplied environment variables on the spin-up form is why the input-surface
+line is on that list: it changed the threat model and nothing else on the list would have
+fired for it.
 
 ## Before you call this done
 

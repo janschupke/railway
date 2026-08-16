@@ -102,8 +102,9 @@ describe("the request scope's label", () => {
      *
      * This read `data.ts` by hand, which is the trap the note above already describes for
      * the Server Action case: a check that names one file makes splitting that file
-     * impossible without deleting the check. `data.ts` is four loader modules now, and a
-     * fifth would have been invisible here.
+     * impossible without deleting the check. That file is `data-shell.ts`,
+     * `data-containers.ts` and `data-regions.ts` now, and a fourth would have been
+     * invisible here.
      *
      * Not a function name on any of them: these are Server Component loaders, and the thing
      * a log reader wants beside them is the page whose render they belong to.

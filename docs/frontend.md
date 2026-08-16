@@ -29,10 +29,21 @@ restore; action feedback moves to an announced toast region; the raw Railway sta
 out of a `title` attribute, where keyboard and screen-reader users never saw it.
 
 Appearance is enforced, not just documented. ESLint rejects raw palette utilities
-(`bg-emerald-500/10`), hex literals and `[var(--…)]` arbitrary values in any `className` outside
-`src/components/ui/**`, because each of those bypasses the semantic layer and with it the light
-theme and the contrast test. `src/features/**` is the other exemption, and
-[the walkthrough](../walkthrough.md#the-rail-yard-is-decoration) says why.
+(`bg-emerald-500/10`), hex literals and `[var(--…)]` arbitrary values, because each of those
+bypasses the semantic layer and with it the light theme and the contrast test. The three are
+scoped differently on purpose, and `eslint.config.mjs` is the source for it:
+
+- **Palette utilities and type steps: anywhere in the file**, not only inside a `className`. A
+  `cva` recipe or a class lookup table in a `.ts` file was the hole this closed, which is also
+  why the block covers `src/**/*.{ts,tsx}` rather than `.tsx` alone.
+- **Hex literals: inside `style={{…}}` only.** `#` plus hex digits is also an id selector, a URL
+  fragment and a git sha, so banning it everywhere would fire on all three — and `style` is the
+  one place a hex colour is actually spelled.
+- **`-[var(--…)]`: inside a `className`.**
+
+Four paths are exempt: `src/components/ui/**`, `src/features/**` (which
+[the walkthrough](../walkthrough.md#the-rail-yard-is-decoration) explains), and the two test
+trees `src/**/*.test.{ts,tsx}` and `src/test/**`.
 
 ## Typography
 
@@ -43,10 +54,9 @@ and are mapped into Tailwind as `text-<role>` utilities; the `Text` and `Heading
 [src/components/ui/text.tsx](../src/components/ui/text.tsx) are the only place a weight is
 chosen.
 
-Naming them by role rather than size is the point. `text-sm font-medium` says nothing about
-whether the next component should match it, and the app had accumulated four different
-spellings of "heading" across five files, two page-level `h1`s ten pixels and a weight apart,
-and a log pane whose rows carried a line-height its own skeleton did not.
+Naming them by role rather than size is the point: `text-sm font-medium` says nothing about
+whether the next component should match it, so the same heading gets spelled several ways and
+two page-level `h1`s end up a few pixels and a weight apart.
 
 Four files have to agree for a step to work, and three of the failures are silent:
 
@@ -57,20 +67,22 @@ Four files have to agree for a step to work, and three of the failures are silen
 | `ui/text.tsx`  | the variant and its weight           | the role is unreachable                        |
 | `lib/utils.ts` | `TYPE_SCALE` for tailwind-merge      | the class is read as a _colour_ and dropped    |
 
-That last one is the nastiest: out of the box tailwind-merge only knows Tailwind's own
-`text-xs … text-9xl`, so an unrecognised `text-caption` is classified as a text colour and
+The `lib/utils.ts` one fails most quietly: out of the box tailwind-merge only knows Tailwind's
+own `text-xs … text-9xl`, so an unrecognised `text-caption` is classified as a text colour and
 silently removed wherever it shares a `cn()` call with one.
 [src/app/type-scale.test.ts](../src/app/type-scale.test.ts) asserts all four agree, and
 `src/lib/utils.test.ts` pins the merge behaviour directly.
 
 Like the colour layer, this is enforced rather than documented: `no-restricted-syntax` in
-`eslint.config.mjs` rejects a raw `text-sm`, `font-medium`, `tracking-*` or `leading-*` in any
-component outside `src/components/ui/**`.
+`eslint.config.mjs` rejects a raw `text-sm`, `font-medium`, one of six `tracking-` steps or any
+`leading-*` outside the four exempt paths above.
 
 ## Busy state
 
 `Button` owns it: `pending` blocks activation, renders a spinner and sets `aria-busy`, and
-`pendingLabel` swaps the text. Two details are load-bearing:
+`pendingLabel` swaps the text — except under `asChild`, where the primitive renders through a
+Slot and the label belongs to the child, so a slotted control swaps its own (`SignInButton`
+does). Two more details are load-bearing:
 
 - **`disabled` does nothing to a link.** Under `asChild` the primitive renders through Radix
   `Slot`, and a slotted `<a>` ignores `disabled` entirely — it neither dims nor stops responding
@@ -103,12 +115,11 @@ is defined once. Two rules there are load-bearing and have tests:
 - **The container fallback renders no `<ul>`.** The e2e helpers find the list by
   `getByRole("list", { name: "Containers" })` and assert there is exactly one.
 
-**The top bar no longer needs one.** It used to have a skeleton, and keeping it pixel-identical
-to the real header was a standing obligation enforced by an exact `boundingBox` comparison.
-`AppHeader` now renders in the root layout, above every route's loading boundary, so the same
-element survives the transition and there is nothing to stand in for. That test is still there —
-it guards the placement decision instead, and passes by construction rather than by two class
-strings agreeing.
+**The top bar needs none.** `AppHeader` renders in the root layout, above every route's loading
+boundary, so the same element survives the transition and there is nothing to stand in for. The
+`boundingBox` test that once held a header skeleton pixel-identical to the real header still
+runs; it guards that placement now, and passes by construction rather than by two class strings
+agreeing.
 
 **The container list sits behind a keyed Suspense boundary.** `page.tsx` awaits only the shell —
 identity, projects, the resolved selection — and `ContainerSection` awaits the second Railway
@@ -128,10 +139,11 @@ that no longer existed. The settle-refresh in `container-row.tsx` deliberately h
 activated it, several rows can settle at once, and the badge has already updated from the stream.
 
 **The placeholder fill is a token, not an animation.** `globals.css` freezes every animation
-under `prefers-reduced-motion`, so `--rc-subtle` at ~1.05:1 was an invisible rectangle for those
-users. `--rc-skeleton` sits at ~1.5:1 dark / ~1.45:1 light, asserted in `contrast.test.ts`, and
-the pulse is `motion-safe:` — an enhancement, not the signal. The mid-load axe scan runs with
-reduced motion forced, which is exactly the state the token exists for.
+under `prefers-reduced-motion`, so a fill at `--rc-subtle`'s ~1.05:1 is an invisible rectangle
+for those users. `--rc-skeleton` measures ~1.54:1 dark and ~1.43:1 light against the surface it
+sits on; `contrast.test.ts` holds it to a floor of 1.4 rather than to those figures. The pulse
+is `motion-safe:` — an enhancement, not the signal. The mid-load axe scan runs with reduced
+motion forced, which is the state the token exists for.
 
 ## Internationalisation
 
@@ -164,13 +176,16 @@ assumed the marker was a suffix, which it is not in German.
 
 WCAG 2.1 AA, checked three ways because each misses what the others catch:
 
-1. **`@axe-core/playwright`** on every meaningful state — landing, dashboard populated and empty,
-   destroy dialog, log panel, form errors — **in both themes**.
+1. **`@axe-core/playwright`** on roughly twenty states — landing, dashboard populated and empty,
+   destroy dialog, log panel, form errors, the 404, the mid-load skeleton, an open dropdown, the
+   sign-out notice, and the rest — **each in both themes**.
 2. **[src/app/contrast.test.ts](../src/app/contrast.test.ts)** parses `tokens.css` and computes
    the contrast ratio of every declared pair in both themes. It runs in milliseconds without a
-   browser and covers colours no spec happens to visit; it is what makes promising two themes
-   safe. It has already caught four real failures, and it also reads the rail yard's own token
-   list, so a colour the canvas asks for that `tokens.css` does not declare fails here.
+   browser and covers colours no spec happens to visit, which is what makes promising two themes
+   safe. Two of the failures it names are recorded in the file itself — `--rc-raised` and
+   `--rc-subtle` identical on dark, so hover changed nothing, and an accent on `--rc-highlight`
+   for a selected-and-hovered Select row. It also reads the rail yard's own token list, so a
+   colour the canvas asks for that `tokens.css` does not declare fails here.
 3. **Keyboard specs** ([e2e/keyboard.spec.ts](../e2e/keyboard.spec.ts)) for focus traps, focus
    restore, roving tabindex, Escape and live-region politeness. Axe cannot see any of that — and
    they are what make replacing a native `<select>` with a Radix one defensible.

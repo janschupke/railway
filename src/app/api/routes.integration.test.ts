@@ -99,22 +99,25 @@ describe("GET /api/auth/login", () => {
     expect(target.searchParams.get("state")).toBeTruthy();
   });
 
-  it("leaves the consent decision to Railway by default", async () => {
-    // The whole point: once the grant exists Railway skips the screen. Forcing it here
-    // is what made choosing projects again the price of every single sign-in.
+  it("asks for consent on every sign-in, because that is what earns a refresh token", async () => {
+    // Railway issues one only for an authorization carrying both `offline_access` and
+    // `prompt=consent`. Omitting the prompt does not skip the screen — it returns a grant
+    // with no refresh token, and the callback retries into the same screen a redirect later.
     const response = await login(request("/api/auth/login"));
 
     const target = new URL(response.headers.get("location")!);
-    expect(target.searchParams.get("prompt")).toBeNull();
+    expect(target.searchParams.get("prompt")).toBe("consent");
+    expect(target.searchParams.get("scope")).toContain("offline_access");
+    // No marker: this is a first attempt, not the callback's retry.
     expect(response.cookies.get(CONSENT_COOKIE)?.value).toBeFalsy();
   });
 
-  it("forces consent when asked, and records that it did", async () => {
+  it("records a forced attempt, so the callback's retry cannot loop", async () => {
     const response = await login(request("/api/auth/login?consent=1"));
 
     const target = new URL(response.headers.get("location")!);
     expect(target.searchParams.get("prompt")).toBe("consent");
-    // The marker is what stops the callback's no-refresh-token retry from looping.
+    // The request is identical either way now; only this marker differs.
     expect(response.cookies.get(CONSENT_COOKIE)?.value).toBe("1");
   });
 

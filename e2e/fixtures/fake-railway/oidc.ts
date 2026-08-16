@@ -37,8 +37,20 @@ export async function getKeys(): Promise<Keys> {
   return keys;
 }
 
-/** code -> the PKCE challenge it was issued against. */
-const codes = new Map<string, { challenge: string; redirectUri: string }>();
+/**
+ * code -> the PKCE challenge it was issued against, and whether the authorization that
+ * produced it qualifies for a refresh token.
+ *
+ * Railway issues one only when the request carried both `offline_access` and
+ * `prompt=consent`, and the code is where that decision has to be remembered: the token
+ * endpoint sees neither the scope nor the prompt. A fixture that ignored this would issue
+ * a refresh token for every exchange and could not tell a working sign-in from one that
+ * dies an hour in — which is exactly how a flow that omitted `prompt` shipped green.
+ */
+const codes = new Map<
+  string,
+  { challenge: string; redirectUri: string; offline: boolean }
+>();
 /** Live refresh tokens. Rotation invalidates the previous one, as Railway does. */
 const refreshTokens = new Set<string>();
 
@@ -83,7 +95,8 @@ export function discoveryDocument(issuer: string) {
 
 /**
  * Consent is auto-approved and redirects straight back. A real consent screen would
- * add nothing the app's own code is responsible for.
+ * add nothing the app's own code is responsible for — but whether one *would have been
+ * shown* is recorded, because that is what decides the refresh token below.
  */
 export function authorize(url: URL): { location: string } | { error: string } {
   const redirectUri = url.searchParams.get("redirect_uri");
@@ -96,8 +109,13 @@ export function authorize(url: URL): { location: string } | { error: string } {
     return { error: "pkce_required" };
   }
 
+  // Railway's rule, modelled: both halves, or no refresh token at the exchange.
+  const offline =
+    url.searchParams.get("prompt") === "consent" &&
+    (url.searchParams.get("scope") ?? "").split(" ").includes("offline_access");
+
   const code = nextId("code");
-  codes.set(code, { challenge, redirectUri });
+  codes.set(code, { challenge, redirectUri, offline });
 
   const location = new URL(redirectUri);
   location.searchParams.set("code", code);
@@ -133,18 +151,28 @@ export async function token(
   const grantType = params.get("grant_type");
   const ttl = context.store.faults.accessTokenTtl;
 
-  const issue = async (): Promise<TokenResult> => {
-    const refresh = nextId("refresh");
-    refreshTokens.add(refresh);
+  /**
+   * `offline: false` omits `refresh_token` entirely rather than sending an empty one,
+   * which is the shape openid-client sees from a provider that declined offline access.
+   * The scope echoed back drops `offline_access` with it, for the same reason.
+   */
+  const issue = async (offline: boolean): Promise<TokenResult> => {
+    const scopes = ["openid", "email", "profile", "project:admin", "workspace:viewer"];
+    let refresh: string | undefined;
+    if (offline) {
+      refresh = nextId("refresh");
+      refreshTokens.add(refresh);
+      scopes.splice(3, 0, "offline_access");
+    }
     return {
       ok: true,
       body: {
         access_token: nextId("access"),
-        refresh_token: refresh,
+        ...(refresh ? { refresh_token: refresh } : {}),
         id_token: await idToken(context.issuer, context.clientId),
         token_type: "Bearer",
         expires_in: ttl,
-        scope: "openid email profile offline_access project:admin workspace:viewer",
+        scope: scopes.join(" "),
       },
     };
   };
@@ -161,7 +189,7 @@ export async function token(
       return { ok: false, status: 400, body: { error: "invalid_grant" } };
     }
     stats.authorizationCode += 1;
-    return issue();
+    return issue(record.offline);
   }
 
   if (grantType === "refresh_token") {
@@ -170,10 +198,11 @@ export async function token(
       stats.refreshRejected += 1;
       return { ok: false, status: 400, body: { error: "invalid_grant" } };
     }
-    // Rotation: the presented token is spent.
+    // Rotation: the presented token is spent. A refresh grant always yields another one —
+    // the offline decision was made at the authorization that minted the first.
     refreshTokens.delete(presented);
     stats.refreshToken += 1;
-    return issue();
+    return issue(true);
   }
 
   return { ok: false, status: 400, body: { error: "unsupported_grant_type" } };

@@ -128,8 +128,8 @@ describe("parseImageReference", () => {
 
 describe("IMAGE_PATTERN", () => {
   /*
-   * The pattern moved out of lib/validation.ts so the browser could hold it without zod.
-   * These cases are the ones validation.test.ts asserts through `spinUpSchema`, repeated
+   * The pattern moved out of the zod schemas so the browser could hold it without zod.
+   * These cases are the ones validation/schemas.test.ts asserts through `spinUpSchema`, repeated
    * here against the regex itself so a change to it fails at the source rather than three
    * modules away.
    */
@@ -145,7 +145,7 @@ describe("IMAGE_PATTERN", () => {
 
   /*
    * Linear, with no nested quantifier and disjoint atom classes — the claim SECURITY.md
-   * makes about this regex, and one nothing asserted while it lived in validation.ts.
+   * makes about this regex, and one nothing asserted while it lived beside them.
    * Generous ceiling: this is a catastrophic-backtracking check, not a benchmark.
    */
   it("does not backtrack catastrophically on adversarial input", () => {

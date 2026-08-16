@@ -34,18 +34,18 @@ the proxy is active. Shipping the database presets' reachability on a retiring m
 worse trade than leaving them on Railway's private network, which is where a database
 usually belongs anyway.
 
-**A port for an image the catalog does not know, from the row.** `Preset.httpPort` carries
-the port for every image on the spin-up form, and the form's own field carries it for
-everything else — but the row control posts three ids and no port, deliberately, so that a
-request cannot aim a domain at a port of its choosing. For an unrecognised image it therefore
-omits `targetPort` and lets Railway infer one from the running deployment. That inference is
-undocumented. If it picks wrong, the fix is to destroy the container and spin it up again
-with the port filled in.
+**A port for an image the catalog does not know, from the row.** `Preset.httpPort` carries the
+port for the five presets that serve HTTP — nginx, apache, caddy, whoami and rabbitmq's
+management UI — and the spin-up form's own field carries it for everything else. The row control
+posts three ids and no port, deliberately, so that a request cannot aim a domain at a port of its
+choosing. For an image with no `httpPort` it therefore omits `targetPort` and lets Railway infer
+one from the running deployment. That inference is undocumented. If it picks wrong, the fix is to
+destroy the container and spin it up again with the port filled in.
 
 ## Resource controls
 
 **They are set once, when the container is created.** Region, replicas, CPU, memory, restart
-policy and start command are on the spin-up form, behind an Advanced disclosure.
+policy, restart retries and start command are on the spin-up form, behind an Advanced disclosure.
 `ServiceCreateInput` accepts none of them, so they are two follow-up mutations —
 `serviceInstanceUpdate` for the settings and `serviceInstanceLimitsUpdate` for the size,
 which Railway splits because the second is gated by the plan behind the token. Both run
@@ -75,7 +75,7 @@ anywhere is the `REGION` tag on a service's metrics, which names the datacentre 
 actually ran in — a different request, on a different schedule, for a different purpose, and
 not one this app makes.
 
-Worth knowing if you are reading the mutation: `ServiceInstanceUpdateInput.region` is still on
+If you are reading the mutation: `ServiceInstanceUpdateInput.region` is still on
 the schema, still answers `true`, and does nothing at all. Containers were deployed with it
 set to an airport code, to a long region name and to a name on another continent, and every
 one of them ran in the workspace default. Placement lives in `multiRegionConfig`, a map of
@@ -99,11 +99,11 @@ the image's CMD and its ENTRYPOINT still runs. Changing that means rebuilding th
 ## Editing
 
 **Editing a container is a name, an image and its variables — nothing else.**
-`ServiceInstanceUpdateInput` carries twenty-odd other members. The six the spin-up form sets
+`ServiceInstanceUpdateInput` carries twenty-odd other members. The seven the spin-up form sets
 are create-time only; the rest — healthcheck, cron schedule, build and Nixpacks configuration,
 watch patterns, private-registry credentials — are untouched on both paths, and each is a
-feature with its own ticket rather than a field to pass through. Sending only `source` on an
-edit is what leaves every one of them alone.
+feature in its own right rather than a field to pass through. Sending only `source` on an edit
+is what leaves every one of them alone.
 
 Two things about that mutation are worth writing down, because both cost time to find. **The
 name is not on it.** Railway splits a service in two — `Service` holds the name,
@@ -118,16 +118,15 @@ later deployment is the one being watched either way, at the cost of possibly ca
 change are separate calls; the first can land and the second be refused. Neither is rolled
 back — this app has no transaction to roll back into — so the refreshed row shows what actually
 applied rather than what was asked for. The alternative was reporting the whole edit as failed
-while half of it had happened, which is worse in the only way that matters.
+while half of it had happened.
 
 ## Cost and readouts
 
 **Cost is a workspace figure, not this app's — and the form can multiply it.** Replicas times
 vCPU times memory is the first thing this app lets anyone set that changes the bill, and it
 still cannot say by how much. The dashboard shows what the workspace a project belongs to has
-spent this billing period, and says so in the same sentence, because that is the only monetary
-number Railway exposes: `Customer.currentUsage` and
-`CustomerSubscription.nextInvoiceCurrentTotal`, both workspace-wide. `estimatedUsage` sounds
+spent this billing period, and says so in the same sentence, because `Customer.currentUsage` —
+workspace-wide — is the only monetary number this app reads. `estimatedUsage` sounds
 like the answer and is not — asked against a real project it answered `CPU_USAGE: 1.27` and
 `MEMORY_USAGE_GB: 494.8`, magnitudes rather than money, and there is no dollar measurement
 anywhere in `MetricMeasurement`. So this app cannot tell you what the containers it created
@@ -159,9 +158,9 @@ the request budget rather than to what `Query.metrics` will return: a wider wind
 response, and the readout is deliberately the cheap half. Four measurements are asked for — two
 usage, two ceilings — which doubled the response and left the request count exactly where it
 was, because `measurements` is a variable on one document rather than a query per measurement.
-`Query.metrics` is in `DEGRADING_OPERATIONS`, so losing it costs the readouts and the usage
-total and nothing else — the row falls back to the same em dash it shows for a container with no
-samples yet.
+The `ProjectMetrics` document is in `DEGRADING_OPERATIONS`, so losing it costs the readouts and
+the usage total and nothing else — the row falls back to the same em dash it shows for a
+container with no samples yet.
 
 ## Projects, environments and volumes
 
@@ -206,7 +205,7 @@ And the fifth, measured live: **`volumeDelete` schedules a deletion rather than 
 The volume answers immediately afterwards with `isPendingDeletion: true` and a `deletedAt` about
 two days out, and it is gone from `environment.volumeInstances` at once — so the app's own view is
 correct and the destroy toast's "and its stored data" is true eventually rather than at the
-moment it is read. What that costs is narrow and worth stating: the data is recoverable through
+moment it is read. What that costs is narrow: the data is recoverable through
 Railway for those two days, which is a safety net rather than a defect, and the storage remains
 provisioned until it is not. Nothing in this app can shorten it or read the pending state.
 
@@ -224,7 +223,7 @@ filtered out server-side and reaches no browser, so blank is what an untouched r
 and the server reads it as "leave this one alone". Retyping a cell replaces that variable;
 removing the row deletes it, one key at a time rather than by replacing the collection. Shared
 variables the environment sets for every service are not listed, because they are not this
-service's to change. The consequence worth stating: there is no way to read a value back here,
+service's to change. The consequence: there is no way to read a value back here,
 and Railway's own Variables page is still where you go for that.
 
 ## The image-existence check
@@ -240,11 +239,13 @@ first was an SSRF that did not exist yet: `IMAGE_PATTERN` admits a bare host as 
 component, and Docker's own rules make a first component containing a dot a registry, so
 `169.254.169.254/foo/bar` is a valid reference and dereferencing user input would reach cloud
 metadata. What closes it is refusing rather than resolving — three registries with their base
-_and_ token URLs as compile-time constants in
+_and_ token URLs as module constants in
 [src/lib/registry/registries.ts](../src/lib/registry/registries.ts), no `WWW-Authenticate` realm
 ever followed, and `redirect: "manual"` so a registry cannot choose a URL either. Nothing derived
 from user input is ever a host, a port or a scheme; a reference naming anything else is parsed,
-reported as unsupported, and never dereferenced.
+reported as unsupported, and never dereferenced. `REGISTRY_PROBE_URL` can relocate all three to
+one origin, which is how the E2E fixture stands in for them, but it is operator configuration and
+it cannot add a fourth: the allowlist lookup runs before the override applies.
 
 The second was shared egress, and that one turns out to have been about the wrong verb. A
 manifest `HEAD` does **not** consume Docker Hub's anonymous pull budget and a `GET` does —
@@ -260,7 +261,7 @@ three. A registry that is rate-limiting, timing out or down produces `unknown`, 
 nothing — a check that could stop a spin-up would be worse than the failed deployment it is
 warning about. And on all three registries, "no such repository" and "private repository" are
 the same 401 or 403 with no way to tell them apart anonymously, so one sentence covers both.
-That is honest rather than vague: this app collects no registry credentials, so a private image
+This app collects no registry credentials, so a private image
 fails to deploy exactly as an absent one does.
 
 ## Failure reasons
@@ -303,7 +304,7 @@ no longer offers.
 is `serviceInstanceDeployV2` rather than the obvious `deploymentRedeploy`: that one takes a
 deployment id, and a service whose first deploy Railway refused has none — which is exactly the
 row most in need of the control. The four reversible verbs confirm with a sentence and two
-buttons rather than the destroy dialog's typed name — friction is priced in what it protects.
+buttons rather than the destroy dialog's typed name, since none of them loses anything.
 What "spin up" does to a stopped service is nothing: it creates, the duplicate-name check
 refuses a second container by that name, and the row's own **Redeploy** is the way back.
 
@@ -320,7 +321,7 @@ running now, and offers a rollback on each entry Railway itself says it would ac
 says no to is shown without a control rather than left out, because the deployment that broke
 things is usually beside the one someone is looking for.
 
-Three things worth knowing about how it is wired:
+Three things about how it is wired:
 
 **The list comes from `Query.deployments`,** not `service.deployments` or `project.deployments` —
 both are `@deprecated` in favour of `environment.deployments`, which takes pagination only and
@@ -388,15 +389,22 @@ deployment versus a finished one.
 - **Sign-out is local only, because Railway offers nothing else.** It deletes the session cookie,
   and the grant stays live at Railway until it expires or the user removes the app. That is not a
   call this app declined to make: the discovery document publishes no `revocation_endpoint` and no
-  `end_session_endpoint`, and the paths a provider of this shape would put them on —
+  `end_session_endpoint`, the paths a provider of this shape would put them on —
   `/oauth/token/revocation`, `/oauth/revoke`, `/oauth/revocation`, `/oauth/session/end`,
-  `/oauth/logout` — all answer 404 to a POST that `/oauth/token` answers with `invalid_request`.
+  `/oauth/logout` — all answer 404 to a POST that `/oauth/token` answers with `invalid_request`,
+  and the public GraphQL schema carries no grant-revocation mutation either (`sessionDelete` is a
+  Railway login session; `apiTokenDelete` and `projectTokenDelete` are API tokens).
   So the sign-out notice on the landing page says both halves of what happened and points at
-  Railway's account settings, which is where the authorization is actually removed, and
-  `verify:schema` asserts both endpoints are still absent on every push — when one appears, CI goes
-  red and this entry is wrong. The standing cost is in
-  [src/lib/auth/refresh.ts](../src/lib/auth/refresh.ts): a refresh token is abandoned rather than
-  revoked on each sign-out, against a cap of 100 live tokens per authorization.
+  Railway's account settings, where **Apps → Revoke Access** ends it, and `verify:schema` asserts
+  both endpoints are still absent on every push — when one appears, CI goes red and this entry is
+  wrong. The residual cost is bounded: each sign-out abandons a live refresh token rather than
+  revoking it ([src/lib/auth/refresh.ts](../src/lib/auth/refresh.ts)), and an authorization holds
+  at most 100, past which Railway revokes the oldest automatically.
+- **The consent screen appears on every sign-in.** Railway issues a refresh token only for an
+  authorization carrying both `offline_access` and `prompt=consent`, and a session with no
+  refresh token dies an hour in, so the login route sends the parameter every time. Skipping it
+  does not skip the screen — it produces a grant with nothing to renew, which the callback
+  answers by retrying with consent forced.
 
 ## Announcements
 
@@ -413,23 +421,25 @@ deployment versus a finished one.
   subscription per deployment and fanning out to N viewers, instead of one upstream connection per
   viewer per replica. That is what SSE's replica affinity forces once there is more than one
   instance.
-- **An audit log** of spin-up/spin-down per user — now half done. The events are recorded
-  (`container.created`, `container.create_failed`, `container.create_replayed`,
-  `container.destroyed`, `container.stopped`, `container.restarted`, `container.redeployed` and a
-  `…_refused` per verb, with the subject and the ids), and the field set is deliberately the shape
-  a table would take, so the remaining work is a parse rather than a re-instrumentation. What a
-  database adds is retention beyond the log window and a query the user can run themselves.
+- **An audit log** of spin-up/spin-down per user — now half done. The events are recorded in
+  [src/lib/log/events.ts](../src/lib/log/events.ts): eight verbs — create, destroy, stop,
+  restart, redeploy, rollback, edit and domain — each with a refused, a skipped and a done line,
+  plus create's `container.create_failed` and `container.create_replayed` and destroy's per-item
+  `container.destroy_failed`. Every line carries the subject and the ids, and the field set is
+  deliberately the shape a table would take, so the remaining work is a parse rather than a
+  re-instrumentation. What a database adds is retention beyond the log window and a query the
+  user can run themselves.
 - **A sparkline per row, and a per-container cost estimate.** The first is a wider `startDate` and
   a faster sample rate on a query the app already sends — a response-size decision rather than a
   request-budget one. The second is arithmetic over `Query.usage` and Railway's published unit
   prices, which would make it _this app's_ estimate of a number Railway does not publish per
   project, and it would have to be labelled as such everywhere it appeared. Both are wanted;
   neither should arrive quietly.
-- **Ship the logs somewhere.** [ADR-9](adr/0009-structured-logs-on-stdout.md) cut the seam and left
-  it unused: add the OTel packages, add `register()` to
-  [src/instrumentation.ts](../src/instrumentation.ts), point Grafana Alloy at Railway's log drain.
-  Nothing in `src/**` outside that one file should need to change — that is the test of whether the
-  seam was cut in the right place.
+- **Ship the logs somewhere.** [ADR-9](adr/0009-structured-logs-on-stdout.md) cut the seam and
+  left it unused: add the OTel packages, initialise the SDK inside the `register()` that
+  [src/instrumentation.ts](../src/instrumentation.ts) already exports for the boot line, and
+  point Grafana Alloy at Railway's log drain. Nothing in `src/**` outside that one file should
+  need to change — that is the test of whether the seam was cut in the right place.
 - **Move off the two deprecated reads**, which the deprecation report in `pnpm verify:schema` named
   as soon as it existed. `User.projects` is marked _"This field will not return anything anymore,
   go through the workspace's projects"_ and `Service.serviceInstances` is marked _"Use

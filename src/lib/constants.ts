@@ -503,7 +503,7 @@ export const LIMITS = {
    * airport code — three characters, `ams` — so the bound is loose by design rather than by
    * measurement: it is the same field Railway also accepts long region names on, and a
    * ceiling tight enough to be exactly right today is one that rejects the list changing.
-   * Paired with REGION_PATTERN in lib/validation.ts; see SECURITY.md on why membership of
+   * Paired with REGION_PATTERN in lib/validation/schemas.ts; see SECURITY.md on why membership of
    * the fetched list is not what is checked.
    */
   REGION_MAX: 32,
@@ -631,7 +631,7 @@ export const REGIONS = {
  * layout, so an import of this module from there put all of the above into the shared
  * client graph of every route — measured at +1.5 kB gzip on / and /_not-found, and
  * /dashboard 0.1 kB over its budget. Same reason IMAGE_PATTERN lives in
- * lib/registry/reference.ts rather than in lib/validation.ts.
+ * lib/registry/reference.ts rather than in lib/validation/.
  */
 
 /** Presentation thresholds that are not styling. */

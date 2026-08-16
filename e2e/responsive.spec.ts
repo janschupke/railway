@@ -20,7 +20,7 @@ import {
  * Runs only under the `mobile` Playwright project — see playwright.config.ts for why the
  * whole suite is not run twice.
  *
- * The app declares essentially no breakpoints on purpose (one `sm:` in all of src/): rows
+ * The app declares essentially no breakpoints on purpose (two `sm:` utilities in all of src/): rows
  * and control strips adapt by wrapping. So the honest thing to assert is not that some
  * layout switched, but that nothing clips, nothing overflows sideways, and every control
  * is still reachable and tappable with the list filtered and paged.

@@ -19,7 +19,7 @@ destroy them — with live build and deploy logs streamed while it happens.
 - Six lifecycle verbs, every one gated by an ownership marker re-derived on the server
 - Live logs over SSE, with search, filtering, copy and download
 - A server-side watcher that notices changes made in Railway's own dashboard
-- No database, no client store, and the access token never leaves the server
+- No database, no client store, and the access token never leaves the server in plaintext
 
 ---
 
@@ -92,7 +92,7 @@ consequences to work with:
   the `.env` that `next build` otherwise copies next to the server. Without it every page answers
   200 while every chunk, stylesheet and font 404s.
 
-Why standalone, and what it costs, is argued in
+Why standalone, and what it costs, is in
 [.ai/rules/workflow.md](.ai/rules/workflow.md).
 
 ---
@@ -115,20 +115,26 @@ docker build -t rw .   # then boot it and curl /api/health; hadolint and Trivy o
 gitleaks git --log-opts=--all   # the whole history, every run, redacted
 ```
 
-CI runs all of these on every push and pull request to `master`, plus a Monday cron, as six
-parallel jobs behind a single `All checks` gate. CodeQL runs alongside them on the same events, in
-its own workflow because it needs a wider permission than the rest.
+CI runs these on every push and pull request to `master`, plus a Monday cron, as six parallel
+jobs behind a single `All checks` gate. CodeQL runs alongside them on the same events, in its
+own workflow because it needs a wider permission than the rest.
 `.github/pull_request_template.md` names the same commands, so a pull request states which of them
 ran locally rather than leaving the split to prose.
 
+One step of `pnpm check` has no CI equivalent: `cursor:check`, which regenerates
+`.cursor/rules/main.mdc` from `AGENTS.md` and compares. Editing `AGENTS.md` without running
+`pnpm cursor:generate` leaves that file stale and CI stays green, so it is a local gate only.
+
 The image job builds the image cold, boots it, waits for `/api/health`, and scans the result.
-Cold deliberately: a cached build here could go green while the build Railway runs does not.
+The build is uncached on purpose, because a cached one here can go green while the build Railway
+runs does not.
 
 Enabling branch protection is a GitHub repo setting, not a file — Settings → Branches → Add branch
 protection rule, pattern `master`, _Require status checks to pass before merging_ with **All
-checks** selected. That one name is the whole contract: `required` is an aggregator that fails
-unless every job it needs reported success, so the list never has to be re-edited when a job is
-added. It is the one manual step.
+checks** selected. Selecting that one name is enough: `required` is an aggregator that fails
+unless every job in its `needs` list reported success, so the protection rule never has to be
+re-edited when a job is added — only `needs` does, and `src/toolchain.test.ts` fails when the two
+disagree. It is the one manual step.
 
 To check it by hand against a real account, work through [docs/verifying.md](docs/verifying.md).
 

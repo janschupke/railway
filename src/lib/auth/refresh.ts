@@ -65,15 +65,15 @@ export function __resetRefreshCache(): void {
  * Exchange the refresh token for a new access token.
  *
  * Railway rotates refresh tokens on every use, so the returned session carries the
- * NEW refresh token and the caller must persist it. Dropping it strands the session:
- * the old token is already spent, and a user is capped at 100 live refresh tokens
- * per authorization.
+ * NEW refresh token and the caller must persist it. Dropping it strands that session:
+ * the old token is already spent.
  *
- * That cap is also why sign-out is a slow leak rather than a clean end. Clearing the
- * cookie abandons the live refresh token instead of revoking it — Railway offers no
- * revocation endpoint, so there is nothing to revoke it with — and each sign-in/sign-out
- * cycle leaves one more behind, walking toward the hundred. Only the user can reclaim
- * them, by removing the app in their Railway account settings. See SECURITY.md.
+ * Sign-out abandons a live refresh token rather than revoking it, because Railway offers
+ * no revocation endpoint to revoke it with. That is bounded rather than unbounded: an
+ * authorization holds at most 100 live refresh tokens, and Railway revokes the oldest
+ * automatically once that is exceeded, so the abandoned ones age out on their own. What
+ * does not age out is the authorization itself — only the user can end that, by removing
+ * the app in their Railway account settings. See SECURITY.md.
  *
  * Callers holding the same refresh token share one grant, whether they arrive together
  * or seconds apart — see `grants`.

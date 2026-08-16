@@ -11,23 +11,31 @@ the way it is. Start here; [README.md](README.md) is for running and deploying i
 
 A browser tool for spinning Docker-image containers up and down inside **your own** Railway
 projects. You sign in with a Railway account over OIDC, Railway's own consent screen decides
-which projects are shared, and every mutation afterwards carries your token — the app owns no
-credential of its own and acts on nothing you have not granted.
+which projects are shared, and every mutation afterwards carries your token. The app holds no
+Railway API credential of its own — only its OAuth client secret, which authenticates it to
+Railway's token endpoint and reaches no project — so it acts on nothing you have not granted.
 
 One Next.js 16 App Router process, single package, no database, no client store. The access
-token never leaves the server.
+token never leaves the server in plaintext — it rides to the browser only as ciphertext inside
+the encrypted session cookie.
 
 ---
 
 ## What it does
 
-**Signing in.** OIDC with PKCE `S256` straight against Railway — no auth vendor in between.
-"Authorize again" and "Choose projects" force the consent screen back up. Sign-out is local, and
-the notice says so and links to where the grant is actually removed.
+**Signing in.** OIDC with PKCE `S256` straight against Railway, with no auth vendor in between.
+Railway's consent screen appears on every sign-in, because Railway issues a refresh token only
+for a request carrying both `offline_access` and `prompt=consent`, and a session without one
+dies an hour in. **Authorize again** and **Re-authorize** are the two controls that send you
+back to it deliberately, when Railway withheld a scope. Sign-out clears the session here and
+nothing at Railway; the notice says so and links to the account settings page where the
+authorization is removed.
 
 **Projects and environments.** Pick either; both live in the URL, so the view is linkable and
 survives a reload. You can create a project and create an environment. Neither can be deleted
-here, deliberately.
+here — deleting a project takes every service, environment and volume inside it, including the
+ones this app did not create, so no request shape reaches those mutations
+([Limitations](docs/limitations.md#projects-environments-and-volumes)).
 
 **Spinning up.** Choose from a twelve-image preset catalog — redis, memcached, nginx, apache,
 caddy, whoami, postgres, mysql, mariadb, mongo, rabbitmq, nats — or type any image reference.
@@ -49,7 +57,8 @@ or open it on Railway — and no checkbox.
 **Watching it happen.** Live build and deploy logs stream into an expandable row panel — SSE
 downstream, GraphQL-ws upstream — with search and match highlighting, next/previous, a wrap
 toggle, copy, download and a severity filter. The status badge advances Queued → Building →
-Deploying → Running / Failed / Removed. Each row reads CPU and memory against the plan ceiling
+Deploying → Running, or settles at Failed or Removed; Sleeping, Removing and Unknown are the
+three further states it can carry. Each row reads CPU and memory against the plan ceiling
 ("0.25 of 2 vCPU") and a derived uptime. The count above the list carries a tooltip with two
 totals — what the containers created here are using, and what everything in the environment is —
 and the **Billing** tab, one of the dashboard's three, holds the workspace spend beside them. A
@@ -74,8 +83,8 @@ freezes to a deterministic still frame under `prefers-reduced-motion` —
 ## How a request flows
 
 ```
-Browser ──── SSE ────► Next.js (single Railway service)
-   ▲                        │
+Browser ──── SSE ─────► Next.js (single Railway service)
+   ▲     └── fetch ────►    │
    │                        ├── HTTPS  ─► backboard.railway.com/graphql/v2   (mutations, queries)
    │                        └── WSS    ─► backboard.railway.com/graphql/v2   (log subscriptions)
    │
@@ -89,9 +98,10 @@ One process, one deployment, and four lanes that do not cross:
    token when it is close to expiring and writes the new cookie onto the request as well as the
    response, so the render that triggered the refresh already sees the fresh token
    ([ADR-2](docs/adr/0002-token-refresh-runs-in-the-proxy-layer.md)).
-2. **Server Components read.** [src/app/dashboard/page.tsx](src/app/dashboard/page.tsx) is
-   `force-dynamic`, awaits only the shell, and hands the container list to a keyed Suspense
-   boundary that awaits its own Railway round trip.
+2. **Server Components read.** The dashboard route is `force-dynamic`, declared once on
+   [src/app/dashboard/layout.tsx](src/app/dashboard/layout.tsx) so all three views agree.
+   [page.tsx](src/app/dashboard/page.tsx) awaits only the shell and hands the container list to
+   a keyed Suspense boundary that awaits its own Railway round trip.
 3. **Server Actions write.** [src/app/dashboard/actions.ts](src/app/dashboard/actions.ts) is the
    only `"use server"` file in the repo; it is a thin surface of eleven exports over sibling
    `action-*.ts` implementations.
@@ -99,8 +109,12 @@ One process, one deployment, and four lanes that do not cross:
    output into an open tab; `/api/watch/[projectId]` pushes a single bit when the project has
    moved ([ADR-10](docs/adr/0010-the-dashboard-watches.md)).
 
-There is no client fetch of application data, which is why there is no client cache to reconcile
-and no store to hold one ([ADR-7](docs/adr/0007-the-url-is-the-state.md)).
+Three route handlers answer a browser `fetch` as well — `/api/service-variables`,
+`/api/service-deployments` and `/api/image-check` — each for a read a client component performs
+mid-interaction, where a route handler is the only lane that gets the inbound `AbortSignal`.
+None of them holds state afterwards: the answer is rendered and discarded. That is why there is
+no client cache to reconcile and no store to hold one
+([ADR-7](docs/adr/0007-the-url-is-the-state.md)).
 
 ---
 
@@ -112,12 +126,15 @@ and no store to hold one ([ADR-7](docs/adr/0007-the-url-is-the-state.md)).
 | [src/env.ts](src/env.ts)                                                       | Every environment variable, validated once, with `LOG_LEVEL` the exception   |
 | [src/app/page.tsx](src/app/page.tsx)                                           | Landing and sign-in; redirects to `/dashboard` when a session exists         |
 | [src/app/dashboard/page.tsx](src/app/dashboard/page.tsx)                       | The dashboard route: shell, then a keyed Suspense over the container list    |
-| [src/app/dashboard/data.ts](src/app/dashboard/data.ts)                         | The read path — projects, environments, containers, metrics                  |
+| [src/app/dashboard/data-shell.ts](src/app/dashboard/data-shell.ts)             | The read path, part one — identity, projects, the resolved selection         |
+| [src/app/dashboard/data-containers.ts](src/app/dashboard/data-containers.ts)   | The read path, part two — containers, metrics, volumes                       |
 | [src/app/dashboard/actions.ts](src/app/dashboard/actions.ts)                   | The only `"use server"` file; eleven exports over the `action-*.ts` files    |
 | [src/app/dashboard/action-spin-up.ts](src/app/dashboard/action-spin-up.ts)     | Create: idempotency key, variables, volume, size, region, domain             |
 | [src/app/dashboard/action-destroy.ts](src/app/dashboard/action-destroy.ts)     | Destroy, single and batch, and the volume decision                           |
-| [src/app/dashboard/action-managed.ts](src/app/dashboard/action-managed.ts)     | Stop, restart, redeploy, rollback — behind one shared ownership guard        |
-| [src/lib/auth/](src/lib/auth/)                                                 | OIDC flow, encrypted session cookie, refresh rotation, origin derivation     |
+| [src/app/dashboard/action-managed.ts](src/app/dashboard/action-managed.ts)     | The ownership guard every mutating verb runs inside, and its log records     |
+| [src/app/dashboard/action-deploy.ts](src/app/dashboard/action-deploy.ts)       | Stop, restart, redeploy, rollback and the public address, inside that guard  |
+| [src/lib/auth/](src/lib/auth/)                                                 | OIDC flow, encrypted session cookie, refresh rotation                        |
+| [src/lib/origin.ts](src/lib/origin.ts)                                         | The served origin, derived per request from the forwarded host and validated |
 | [src/lib/railway/](src/lib/railway/)                                           | GraphQL client, documents, mappers, status model, ownership marker           |
 | [src/lib/railway/operations.ts](src/lib/railway/operations.ts)                 | Every GraphQL document, each annotated `TypedDocument<Result, Variables>`    |
 | [src/lib/railway/deployment-monitor.ts](src/lib/railway/deployment-monitor.ts) | Merges the status poll and the log subscription into one stream              |
@@ -171,34 +188,36 @@ open it.
 facts define it, each of them checkable:
 
 - **One consumer.** [src/app/page.tsx](src/app/page.tsx) imports `RailYard` and renders it.
-  Nothing under `src/app`, `src/components`, `src/hooks` or `src/lib` imports anything from the
-  directory — the one exception is a test, `src/app/contrast.test.ts`, which reads its token list
-  so a colour the canvas asks for and `tokens.css` does not declare fails the contrast gate.
+  Nothing else under `src/app`, `src/components`, `src/hooks` or `src/lib` imports from the
+  directory. Two test-only readers do: `src/app/contrast.test.ts`, which reads its token list so
+  a colour the canvas asks for and `tokens.css` does not declare fails the contrast gate, and
+  `src/test/rail-yard.ts`, a helper the feature's own tests share.
 - **Nothing beneath it imports `lib/railway/**`, `lib/auth/**`, `lib/logger`, `fetch` or
   `EventSource`.** No Railway data reaches it, no session touches it, it reads no application
   state, and it renders nothing a user acts on.
 - **Its whole public surface is one small file** —
   [rail-yard.tsx](src/features/rail-yard/rail-yard.tsx), an `aria-hidden` `<canvas>` plus a hook.
   Everything else is simulation, geometry and 2D drawing behind it.
-- **Deleting it would change the landing page and nothing else.**
+- **At runtime, deleting it would change the landing page and nothing else.** In the repo it
+  would also take `src/test/rail-yard.ts`, break `src/app/contrast.test.ts`, and need edits in
+  `eslint.config.mjs`, `vitest.config.mts`, `src/lib/constants.ts` and `bundle-budgets.json`.
 
-Three consequences follow, and each is worth knowing because it looks like an inconsistency from
-outside:
+Three consequences follow, each of which looks like an inconsistency from outside:
 
-- **It owns its own tuned numbers**, in [config.ts](src/features/rail-yard/config.ts). That is the
-  one exception to "every tuned number goes in `src/lib/constants.ts`", and the constants file
-  names it.
+- **It owns its own tuned numbers**, in [config.ts](src/features/rail-yard/config.ts), with its
+  sprite geometry beside them in `sprites.ts`. That is one of the two exceptions to "every tuned
+  number goes in `src/lib/constants.ts`" — the other is the poll intervals in `src/env.ts` — and
+  the constants file names both.
 - **It is exempt from the appearance bans and from `no-non-null-assertion`** in
   `eslint.config.mjs`. A canvas has no CSS to inherit colours from, so it is the only place in
   `src/` that legitimately names one — and it reads them back out of the `--rc-*` tokens at
   runtime rather than inventing any.
 - **It is not exempt from coverage.** It carries a directory floor in `vitest.config.mts` like
-  `lib` and `hooks` do. Decorative is not the same as untested, and a large isolated module is
-  exactly the kind that decays unobserved.
+  `lib` and `hooks` do, because a large isolated module is the kind that decays unobserved.
 
-It also has a budget consequence worth stating out loud: it moved `/` by about 7 kB gzip and
-must never move `/dashboard` or `/_not-found`, because it is its own client boundary. If those
-two ever change for it, that is a defect and not a budget question —
+It also has a budget consequence: it moved `/` by about 7 kB gzip and must never move
+`/dashboard` or `/_not-found`, because it is its own client boundary. If those two ever change
+for it, that is a defect and not a budget question —
 [`bundle-budgets.json`](bundle-budgets.json) records the measurement.
 
 The rules-level version of all this is
