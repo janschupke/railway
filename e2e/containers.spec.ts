@@ -1527,10 +1527,11 @@ test.describe("resource controls on a spin-up", () => {
     /*
      * Labels going in, values coming out — the assertion below is what proves the row a
      * person clicked still reaches Railway as the identifier it stands for. Load-bearing
-     * for the region in particular: the app sent Railway's airport code for as long as the
-     * control existed, Railway answered `true` and stored `null`, and the only way to see
-     * it was to open Railway's own dashboard. Reading the stored settings back out of the
-     * fixture is what makes that visible from inside the suite.
+     * for the region in particular, which shipped broken twice: first as a value Railway
+     * ignores, then through `region`, an input member Railway accepts and never acts on.
+     * Only `multiRegionConfig` places a container, so the fixture records what arrived in
+     * it — and `regionReplicas` is the second half of that: the count Railway will actually
+     * run the placed service at, which has to be the same 2 the form asked for.
      */
     await fillAdvanced(page, {
       region: "US West (Oregon)",
@@ -1545,7 +1546,8 @@ test.describe("resource controls on a spin-up", () => {
 
     await expect(row(page, "tuned")).toBeVisible();
     expect((await created(page, "tuned"))?.settings).toEqual({
-      region: "us-west2-xrhvwla",
+      region: "sfo",
+      regionReplicas: 2,
       replicas: 2,
       restartPolicy: "ON_FAILURE",
       restartRetries: 4,
@@ -1626,6 +1628,7 @@ test.describe("resource controls on a spin-up", () => {
     await expect(row(page, "plain")).toBeVisible();
     expect((await created(page, "plain"))?.settings).toEqual({
       region: null,
+      regionReplicas: null,
       replicas: null,
       restartPolicy: null,
       restartRetries: null,
@@ -1691,9 +1694,10 @@ test.describe("resource controls on a spin-up", () => {
   });
 
   /*
-   * `toRegionOptions` end to end. The fixture lists four regions in the live API's own
-   * shape: two Amsterdam datacentres sharing one airport code, one row Railway left with no
-   * code at all, and one it is retiring — which is a container that stops working later.
+   * `toRegionOptions` end to end. The fixture lists five regions in the live API's own
+   * shape: two US West datacentres sharing one airport code, one Amsterdam row, one row
+   * Railway left with no code at all, and one it is retiring — which is a container that
+   * stops working later.
    */
   test("offers only the regions worth choosing", async ({ page }) => {
     await openNewContainerTab(page);
@@ -1708,22 +1712,25 @@ test.describe("resource controls on a spin-up", () => {
     const list = onlyVisible(page.getByRole("listbox"));
 
     /*
-     * Four listed regions, one deprecated, plus the blank row — so four options.
+     * Five listed regions reduced to two, plus the blank row — so three options.
      *
-     * Two of them are the two Amsterdam datacentres, which is the assertion that would have
-     * caught the defect this fixture used to hide: Railway's `id` is an airport code shared
-     * by several rows, so an app keyed on it would show one Amsterdam here and post a value
-     * Railway stores as null. Keyed on `name`, they are two distinct choices.
+     * Every one of the three drops is a decision a person would notice. The second US West
+     * row is the same airport code as the first, so it is the same placement wearing a
+     * second name; the Amsterdam 2 row has no code to post at all; the retiring one has an
+     * end date. Portland is the one that would have caught the defect this fixture used to
+     * hide, and asserting it is *absent* is the assertion — a list keyed on Railway's unique
+     * `name` shows it, and choosing it would place a container exactly where Oregon does.
      */
-    await expect(list.getByRole("option")).toHaveCount(4);
+    await expect(list.getByRole("option")).toHaveCount(3);
     await expect(list.getByRole("option", { name: "Railway chooses" })).toBeVisible();
     await expect(list.getByRole("option", { name: "US West (Oregon)" })).toBeVisible();
     await expect(
       list.getByRole("option", { name: /Europe West \(Amsterdam\)/ }),
     ).toBeVisible();
+    await expect(list.getByRole("option", { name: /Portland/ })).toHaveCount(0);
     await expect(
       list.getByRole("option", { name: /Europe West \(Amsterdam 2\)/ }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(list.getByRole("option", { name: /retiring/i })).toHaveCount(0);
 
     // The panel behind it is unreachable while this layer holds pointer-events on body.

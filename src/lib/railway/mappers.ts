@@ -407,40 +407,63 @@ export type RegionNode = {
 /**
  * The regions worth offering, in the order a select should show them.
  *
- * **`name` is the value, and `id` is not.** This read `region.id` for a long time, and it
- * was wrong in a way nothing could catch from inside the app. Railway documents `id` as
- * "Region ID (airport code)", and on the live API it is exactly that — a *location* code
- * shared by every datacentre at that airport: three rows come back as `ams` and three more
- * as `sfo`. The identifier `serviceInstanceUpdate` accepts is `name`, which is unique per
- * row — `europe-west4-drams3a`. Sending `ams` produced `true` from the mutation and `null`
- * in the stored setting: a control that appeared to work and did nothing, on a field that
- * has no read-back in the UI to contradict it. `constants.ts` measures `REGION_MAX`
- * against `europe-west4-drams3a` already, so only this line was ever wrong.
+ * **`id` is the value, and it is one option per airport code.** This went round twice, and
+ * the second answer is the measured one. Railway documents `id` as "Region ID (airport
+ * code)" and that is literally what it is — a code shared by every datacentre at that
+ * airport, `ams` three times over — so an earlier revision switched to `name`, which is
+ * unique per row, on the theory that `name` was what the mutation accepted. It is not:
  *
- * One filter now, where there were two. Dropping a row with no `id` was right when `id`
- * was the submitted value — it is nullable on Railway's own type, so an option posting the
- * empty string would read as "let Railway choose" rather than as the choice the person
- * made. `name` is `String!`, so that row no longer exists and a guard for it would be a
- * branch nothing can reach.
+ *   - `serviceInstanceUpdate` accepts both spellings and applies neither, and its refusal
+ *     for an unknown one names the set it does know: *"Available regions are: [pdx, ams,
+ *     sfo, iad, sin]"*. Those are `id` values. The airport code is Railway's own unit of
+ *     placement, and the extra rows sharing one are spellings rather than choices.
+ *   - Asking for `ams` and asking for `europe-west4-drams3a` were measured against real
+ *     deployments and both landed in `europe-west4-drams11a` — the same pool, and neither
+ *     the datacentre the long name asks for. There is no precision to buy by sending it.
  *
- * What is left drops a row that would still be a worse choice than no choice:
+ * So the duplicates collapse, which is the part a person sees: three rows reading
+ * "Amsterdam" that all place a container the same way are three ways to make one choice.
+ * The tie is broken on `location` first — the string on screen, so the surviving option is
+ * the one a reader can predict — and on `name` after it, because Railway documents no
+ * ordering for this list and an unordered tiebreak reshuffles the picker between reads.
  *
+ * Two rows are dropped rather than collapsed:
+ *
+ *   - **No `id`.** It is nullable on Railway's own type, and an option posting the empty
+ *     string reads as "let Railway choose" rather than as the choice the person made. The
+ *     blank row at the top of the select already says that, honestly.
  *   - **Deprecated.** Railway carries a replacement region beside the flag, so these are
  *     datacentres with an end date. Offering one is offering a container that stops working
  *     later, at a moment nothing in this app will explain.
  *
- * `location` rather than `name` as the label, which is what makes the two fields a value
- * and a caption rather than two spellings of one thing: `location` is the sentence a person
- * reads. Sorted by country then label, because the country is the `<optgroup>` heading and
- * an unsorted list would repeat headings.
+ * `location` rather than either identifier as the label, which is what makes these fields a
+ * value and a caption rather than two spellings of one thing: `location` is the sentence a
+ * person reads. Sorted by country then label, because the country is the `<optgroup>`
+ * heading and an unsorted list would repeat headings.
  */
 export function toRegionOptions(regions: RegionNode[]): RegionOption[] {
-  return regions
-    .flatMap((region) =>
-      region.deploymentConstraints?.deprecationInfo?.isDeprecated
-        ? []
-        : [{ value: region.name, label: region.location, country: region.country }],
-    )
+  const byCode = new Map<string, { option: RegionOption; name: string }>();
+
+  for (const region of regions) {
+    if (region.deploymentConstraints?.deprecationInfo?.isDeprecated) continue;
+    const value = region.id;
+    if (!value) continue;
+
+    const held = byCode.get(value);
+    const beaten =
+      held &&
+      (held.option.label.localeCompare(region.location) ||
+        held.name.localeCompare(region.name)) <= 0;
+    if (beaten) continue;
+
+    byCode.set(value, {
+      option: { value, label: region.location, country: region.country },
+      name: region.name,
+    });
+  }
+
+  return [...byCode.values()]
+    .map((held) => held.option)
     .sort(
       (left, right) =>
         left.country.localeCompare(right.country) ||

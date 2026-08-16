@@ -515,16 +515,20 @@ export const SERVICE_INSTANCE_UPDATE_MUTATION: TypedDocument<
 /**
  * What Railway actually stored for a service instance, read once after a create.
  *
- * **These controls are write-only, and that is the problem this closes.** `region`,
- * `numReplicas`, `restartPolicyType`, `restartPolicyMaxRetries` and `startCommand` are all
- * sent by the spin-up form and none of them is rendered anywhere afterwards, so a value
- * Railway drops can only be found by opening Railway's own dashboard and comparing by eye.
- * Two live measurements say that is not theoretical: a region sent as an airport code was
- * answered with `true` and stored as `null`, and a retry count of 3 came back as 10 once.
+ * **These controls are write-only, and that is the problem this closes.** `numReplicas`,
+ * `restartPolicyType`, `restartPolicyMaxRetries` and `startCommand` are all sent by the
+ * spin-up form and none of them is rendered anywhere afterwards, so a value Railway drops
+ * can only be found by opening Railway's own dashboard and comparing by eye. A live
+ * measurement says that is not theoretical: a retry count of 3 came back as 10 once.
  *
  * So the create reads its own work back and logs what Railway holds beside what was asked
  * for. One extra request, on the create path only — not on the dashboard read, which runs
  * on every render and every watcher poll.
+ *
+ * **`region` is deliberately not selected**, although it is on the type and would look like
+ * the fifth member of the same set. It reads `null` for every service, including ones that
+ * have demonstrably run in a region for months, so selecting it would report a dropped
+ * setting on every correct spin-up. See `StoredSettings` in service-create.ts.
  *
  * In DEGRADING_OPERATIONS, read through `gqlPartial`: this exists to enrich an audit line
  * and must never be the reason a container the user is looking at fails to appear.
@@ -536,7 +540,6 @@ export const SERVICE_INSTANCE_QUERY: TypedDocument<
   query ServiceInstance($serviceId: String!, $environmentId: String!) {
     serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
       id
-      region
       numReplicas
       restartPolicyType
       restartPolicyMaxRetries

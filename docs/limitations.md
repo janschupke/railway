@@ -63,7 +63,24 @@ service.** Each expanded row reads "0.25 of 2 vCPU", and the denominator is
 Railway is _enforcing_, which is not always what the form asked for: the size mutation is
 gated by the plan behind the token, so a clamped request shows the clamped figure here — the
 more useful of the two numbers, and the only one with a bearing on the bill. The other five
-controls have no such route back and remain write-only.
+controls have no such route back and remain write-only. The create path reads four of them
+back once into the `container.created` log line, which is not the same thing as rendering
+them — it is a record for whoever investigates later, not a readout.
+
+**Region is the fifth, and it is write-only in both directions.** `ServiceInstance.region`
+answers `null` for every service, including ones that have demonstrably run in a region for
+months, so there is nothing to read back and nothing on the audit line either. Live
+introspection of `ServiceInstance` finds no other field that carries it. The only signal
+anywhere is the `REGION` tag on a service's metrics, which names the datacentre a container
+actually ran in — a different request, on a different schedule, for a different purpose, and
+not one this app makes.
+
+Worth knowing if you are reading the mutation: `ServiceInstanceUpdateInput.region` is still on
+the schema, still answers `true`, and does nothing at all. Containers were deployed with it
+set to an airport code, to a long region name and to a name on another continent, and every
+one of them ran in the workspace default. Placement lives in `multiRegionConfig`, a map of
+region to `{ numReplicas }`, which is what this app sends — see `createContainer`. Railway
+names it only in the error text for an unknown region.
 
 **Ports, healthchecks and app sleep are not on that panel.** The target port is on the form
 already, because it belongs to the public address rather than to sizing. The healthcheck path

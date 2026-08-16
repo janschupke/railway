@@ -483,7 +483,6 @@ describe("createContainer, applying the advanced resource controls", () => {
         data: {
           serviceInstance: {
             id: "si_1",
-            region: null,
             numReplicas: null,
             restartPolicyType: "ON_FAILURE",
             restartPolicyMaxRetries: 10,
@@ -546,7 +545,7 @@ describe("createContainer, applying the advanced resource controls", () => {
     await create({
       image: "postgres:16-alpine",
       variables: { POSTGRES_PASSWORD: "x" },
-      settings: { region: "europe-west4-drams3a" },
+      settings: { region: "ams" },
       limits: { cpu: 0.5 },
     });
 
@@ -568,32 +567,77 @@ describe("createContainer, applying the advanced resource controls", () => {
     /*
      * The whole reason this request exists. Every control on the Advanced panel is
      * write-only — none is rendered anywhere after the create — so a value Railway drops
-     * could only be found by opening Railway's own dashboard and comparing by eye, and two
-     * were: a region sent as an airport code was answered `true` and stored as `null`, and
-     * a retry count of 3 came back as 10.
+     * could only be found by opening Railway's own dashboard and comparing by eye, and one
+     * was: a retry count of 3 came back as 10.
      *
-     * The stub reproduces both. The point is not that the app corrects them — it cannot —
-     * but that the record says so, so the next occurrence is a log query rather than a
-     * manual comparison against somebody else's dashboard.
+     * The stub reproduces it. The point is not that the app corrects it — it cannot — but
+     * that the record says so, so the next occurrence is a log query rather than a manual
+     * comparison against somebody else's dashboard.
      */
     const calls: string[] = [];
     server.use(...stubs(calls));
 
     const result = await create({
-      settings: {
-        region: "europe-west4-drams3a",
-        replicas: 2,
-        restartRetries: 3,
-      },
+      settings: { region: "ams", replicas: 2, restartRetries: 3 },
     });
 
     expect(result.stored).toEqual({
-      region: null,
       replicas: null,
       restartPolicy: "ON_FAILURE",
       restartRetries: 10,
       startCommand: null,
     });
+  });
+
+  /*
+   * The field that actually places a container, and the one that only looks like it does.
+   *
+   * `ServiceInstanceUpdateInput.region` is on the schema and answers `true`. It is inert:
+   * containers deployed for real with it set — to an airport code, to a long region name,
+   * to a name on another continent — all ran in the workspace default. Railway names the
+   * replacement itself, in its refusal for an unknown region: `multiRegionConfig`.
+   *
+   * The replica count is asserted inside the entry as well as beside it. A placed service
+   * takes its count from the entry, so the two disagreeing is a container running at a
+   * number nobody asked for.
+   */
+  it("places the container through multiRegionConfig, never through region", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...stubs(calls, {
+        onSettings: (variables) =>
+          (input = (variables as { input: Record<string, unknown> }).input),
+      }),
+    );
+
+    await create({ settings: { region: "ams", replicas: 3 } });
+
+    expect(input).not.toHaveProperty("region");
+    expect(input).toEqual({
+      multiRegionConfig: { ams: { numReplicas: 3 } },
+      numReplicas: 3,
+    });
+  });
+
+  /*
+   * A region with no replica count is still a placement request, so the entry cannot be
+   * empty — `{ ams: {} }` names a region and asks for nothing to run in it. One is what
+   * Railway runs a service at when nobody says otherwise, so one is what the entry states.
+   */
+  it("states one replica in the entry when the form asked for a region alone", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...stubs(calls, {
+        onSettings: (variables) =>
+          (input = (variables as { input: Record<string, unknown> }).input),
+      }),
+    );
+
+    await create({ settings: { region: "ams" } });
+
+    expect(input).toEqual({ multiRegionConfig: { ams: { numReplicas: 1 } } });
   });
 
   it("does not fail a created container over a refused read-back", async () => {
@@ -664,7 +708,7 @@ describe("createContainer, applying the advanced resource controls", () => {
 
     await create({
       settings: {
-        region: "us-west2",
+        region: "sfo",
         replicas: 2,
         restartPolicy: "ON_FAILURE",
         restartRetries: 4,
@@ -673,7 +717,7 @@ describe("createContainer, applying the advanced resource controls", () => {
     });
 
     expect(input).toEqual({
-      region: "us-west2",
+      multiRegionConfig: { sfo: { numReplicas: 2 } },
       numReplicas: 2,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 4,
@@ -739,7 +783,7 @@ describe("createContainer, applying the advanced resource controls", () => {
 
     await create({
       settings: {
-        region: "us-west2",
+        region: "sfo",
         replicas: 3,
         restartPolicy: "ALWAYS",
         startCommand: "serve --secret hunter2",
@@ -749,7 +793,7 @@ describe("createContainer, applying the advanced resource controls", () => {
     const record = logRecords().find((line) => line.msg === "railway.settings_failed");
     expect(record).toMatchObject({
       service_id: "svc_1",
-      region: "us-west2",
+      region: "sfo",
       replicas: 3,
       restart_policy: "ALWAYS",
       start_command_length: "serve --secret hunter2".length,

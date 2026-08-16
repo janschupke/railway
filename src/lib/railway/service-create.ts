@@ -60,13 +60,22 @@ const asked = (values: object): boolean =>
 /**
  * What Railway holds for a service instance, as distinct from what it was told.
  *
- * The same five members `ContainerSettings` carries, so the audit line can put the two
+ * Four members where `ContainerSettings` carries five, so the audit line can put the two
  * side by side. Every one is nullable here and optional there, and the difference matters:
  * `undefined` in a request means "do not set this", `null` in a response means "Railway is
- * storing nothing", and the pair `{ asked: "ams", stored: null }` is the whole finding.
+ * storing nothing", and the pair `{ asked: 3, stored: 10 }` is the whole finding.
+ *
+ * **Region is the missing fifth, and its absence is a measurement rather than an
+ * oversight.** `ServiceInstance.region` reads `null` on every service Railway has ever
+ * answered about here, including this app's own deployment, which has run in `us-west2` for
+ * months — it is not a read-back of placement, and live introspection of `ServiceInstance`
+ * finds no other field that is. Reporting it would put `stored_region: ""` on the audit
+ * line of every correct spin-up, which is a permanently-failing instrument: the one reading
+ * it would be trained to ignore. Where a container actually ran is readable only through the
+ * `REGION` tag on its metrics, which is a different request, on a different schedule, for a
+ * different purpose.
  */
 export type StoredSettings = {
-  region: string | null;
   replicas: number | null;
   restartPolicy: string | null;
   restartRetries: number | null;
@@ -78,9 +87,9 @@ export type StoredSettings = {
  *
  * **Why this request exists.** Every member of the Advanced panel is write-only: the app
  * sends it and never renders it again, so Railway silently dropping one can only be found
- * by opening Railway's own dashboard and comparing by eye. Two live measurements say that
- * is not hypothetical — a region sent as an airport code was answered `true` and stored as
- * `null`, and a retry count of 3 came back as 10 on one occasion out of many.
+ * by opening Railway's own dashboard and comparing by eye. A live measurement says that is
+ * not hypothetical — a retry count of 3 came back as 10 on one occasion out of many, and a
+ * fresh service defaults to exactly 10, which is what that looks like from here.
  *
  * **Why it cannot fail the create.** By the time this runs the service exists, is deployed,
  * and is on screen. `gqlPartial` and the DEGRADING_OPERATIONS entry are what stop a refused
@@ -102,7 +111,6 @@ async function readStoredSettings(
   if (!instance) return null;
 
   return {
-    region: instance.region ?? null,
     replicas: instance.numReplicas ?? null,
     /*
      * `restartPolicyType` and `restartPolicyMaxRetries` are non-null on the schema, which is
@@ -260,7 +268,36 @@ export async function createContainer(
            */
           environmentId: params.environmentId,
           input: {
-            ...(settings.region === undefined ? {} : { region: settings.region }),
+            /*
+             * `multiRegionConfig`, not `region`, and this is the difference between a
+             * control that works and one that does not.
+             *
+             * `ServiceInstanceUpdateInput.region` is still on the schema and still answers
+             * `true`. It is inert: three containers were deployed for real with it set —
+             * to an airport code, to a long region name, to a name for a different
+             * continent — and every one of them ran in the workspace's default region.
+             * Railway says so itself in the only place it says anything, the refusal for
+             * an unknown region: *"clear it by setting its key to null in
+             * multiRegionConfig … or pass `multiRegionConfig: null` to reset to the
+             * workspace default region"*. The map is where placement lives now.
+             *
+             * The shape is `{ [region]: { numReplicas } }`, so the replica count is stated
+             * inside the entry as well as beside it. Both are sent, and they must agree:
+             * `numReplicas` on its own is the count for a service with no region entry, and
+             * a service that has one takes the count from the entry. Sending three replicas
+             * beside a region entry saying one is how a container quietly runs at a third of
+             * what the form asked for.
+             *
+             * `?? 1` rather than omitting the member, because the entry is what creates the
+             * region: an entry with nothing in it is not a placement request.
+             */
+            ...(settings.region === undefined
+              ? {}
+              : {
+                  multiRegionConfig: {
+                    [settings.region]: { numReplicas: settings.replicas ?? 1 },
+                  },
+                }),
             ...(settings.replicas === undefined
               ? {}
               : { numReplicas: settings.replicas }),

@@ -95,7 +95,17 @@ export type Service = {
    * rather than merely reached the form.
    */
   settings: {
+    /** The airport code out of `multiRegionConfig`, which is the only key Railway places by. */
     region: string | null;
+    /**
+     * The replica count stated *inside* that region entry.
+     *
+     * Separate from `replicas` below, which is the one beside it on the same input. Railway
+     * takes a placed service's count from the entry and everything else's from the bare
+     * member, so the two disagreeing is a container running at a number nobody asked for —
+     * and one field could not show that.
+     */
+    regionReplicas: number | null;
     replicas: number | null;
     restartPolicy: string | null;
     restartRetries: number | null;
@@ -505,6 +515,7 @@ export class Store {
       domains: input.domains ?? [],
       settings: {
         region: null,
+        regionReplicas: null,
         replicas: null,
         restartPolicy: null,
         restartRetries: null,

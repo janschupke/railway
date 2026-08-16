@@ -986,8 +986,8 @@ describe("spinUp, with the advanced resource controls", () => {
      * block's stubs rather than in the file's defaults, where it would be answering for
      * the uncustomised spin-ups too.
      *
-     * It answers something OTHER than what it was sent, deliberately: `region: null` is
-     * what Railway really returned for a region it had just accepted, and it is the value
+     * It answers something OTHER than what it was sent, deliberately: a retry count of 10
+     * where the form asked for 4 is what Railway really returned once, and it is the value
      * that proves the `stored_` fields in the audit line are Railway's word rather than an
      * echo of the form's.
      */
@@ -998,7 +998,6 @@ describe("spinUp, with the advanced resource controls", () => {
             data: {
               serviceInstance: {
                 id: "si_new",
-                region: null,
                 numReplicas: 2,
                 restartPolicyType: "ON_FAILURE",
                 restartPolicyMaxRetries: 10,
@@ -1019,7 +1018,7 @@ describe("spinUp, with the advanced resource controls", () => {
     const result = await spinUp(
       null,
       spinUpForm({
-        region: "us-west2",
+        region: "sfo",
         replicas: "2",
         cpu: "0.5",
         memory: "1",
@@ -1031,7 +1030,7 @@ describe("spinUp, with the advanced resource controls", () => {
 
     expect(result).toEqual({ ok: true, message: "Spinning up cache" });
     expect(sent.settings).toEqual({
-      region: "us-west2",
+      multiRegionConfig: { sfo: { numReplicas: 2 } },
       numReplicas: 2,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 4,
@@ -1116,7 +1115,7 @@ describe("spinUp, with the advanced resource controls", () => {
     await spinUp(
       null,
       spinUpForm({
-        region: "us-west2",
+        region: "sfo",
         replicas: "2",
         cpu: "0.5",
         memory: "1",
@@ -1127,7 +1126,7 @@ describe("spinUp, with the advanced resource controls", () => {
     );
 
     expect(record("container.created")).toMatchObject({
-      region: "us-west2",
+      region: "sfo",
       replicas: 2,
       vcpus: 0.5,
       memory_gb: 1,
@@ -1143,12 +1142,17 @@ describe("spinUp, with the advanced resource controls", () => {
      * The half of the record that is Railway's word rather than the form's, and the reason
      * it exists: every one of these controls is write-only — none is rendered anywhere
      * after the create — so a value Railway drops could previously only be found by opening
-     * Railway's own dashboard and comparing by eye. Two were found that way, and this stub
-     * reproduces both: a region accepted and stored as `null`, and a retry count that came
-     * back as something other than what was sent.
+     * Railway's own dashboard and comparing by eye. One was found that way, and this stub
+     * reproduces it: a retry count that came back as something other than what was sent.
      *
-     * The app cannot correct either. What it can do is say so in the one line that outlives
-     * the container, so the next occurrence is a log query rather than a manual comparison.
+     * There is deliberately no `stored_region` beside the `region`. Railway answers null for
+     * a service instance's region whatever it was told and wherever the container is really
+     * running, so the field would report a dropped setting on every correct spin-up — and a
+     * permanently-failing instrument teaches whoever reads it to ignore the whole block.
+     *
+     * The app cannot correct what it does find. What it can do is say so in the one line
+     * that outlives the container, so the next occurrence is a log query rather than a
+     * manual comparison.
      */
     const sent = {};
     server.use(...stubs(sent));
@@ -1156,20 +1160,21 @@ describe("spinUp, with the advanced resource controls", () => {
     await spinUp(
       null,
       spinUpForm({
-        region: "europe-west4-drams3a",
+        region: "ams",
         replicas: "2",
         restartPolicy: "ON_FAILURE",
         restartRetries: "4",
       }),
     );
 
-    expect(record("container.created")).toMatchObject({
-      region: "europe-west4-drams3a",
+    const created = record("container.created");
+    expect(created).toMatchObject({
+      region: "ams",
       restart_retries: 4,
-      stored_region: "",
       stored_replicas: 2,
       stored_restart_retries: 10,
     });
+    expect(created).not.toHaveProperty("stored_region");
   });
 
   it("claims nothing about what Railway stored when it would not say", async () => {

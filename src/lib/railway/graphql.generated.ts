@@ -370,7 +370,6 @@ export type ServiceInstanceQueryVariables = Exact<{
 export type ServiceInstanceQuery = {
   serviceInstance: {
     id: string;
-    region: string | null;
     numReplicas: number | null;
     restartPolicyType: RestartPolicyType;
     restartPolicyMaxRetries: number;

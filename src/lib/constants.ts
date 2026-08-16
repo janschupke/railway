@@ -499,10 +499,12 @@ export const LIMITS = {
    * Region identifier length.
    *
    * The value comes out of Railway's own `regions` list, so this bounds what a hand-crafted
-   * request can post rather than what the form can produce. Measured against the longest
-   * identifier Railway issues today — `europe-west4-drams3a`, twenty characters — with room
-   * for a longer one appearing. Paired with REGION_PATTERN in lib/validation.ts; see
-   * SECURITY.md on why membership of the fetched list is not what is checked.
+   * request can post rather than what the form can produce. What the form produces is an
+   * airport code — three characters, `ams` — so the bound is loose by design rather than by
+   * measurement: it is the same field Railway also accepts long region names on, and a
+   * ceiling tight enough to be exactly right today is one that rejects the list changing.
+   * Paired with REGION_PATTERN in lib/validation.ts; see SECURITY.md on why membership of
+   * the fetched list is not what is checked.
    */
   REGION_MAX: 32,
 } as const;

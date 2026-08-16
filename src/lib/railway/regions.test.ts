@@ -19,7 +19,7 @@ vi.mock("./client", () => ({ gql: () => gql() }));
 const { cachedRegions, __resetRegionCache } = await import("./regions");
 
 const OREGON: RegionOption = {
-  value: "us-west2-xrhvwla",
+  value: "sfo",
   label: "US West (Oregon)",
   country: "United States",
 };

@@ -6,6 +6,16 @@ The automated equivalents are in [Tests](testing.md); this is what a reviewer ru
 1. **Sign in.** Railway's consent screen should list your projects — select at least one.
 2. **Spin up `redis:7-alpine`.** The row should move Queued → Building → Deploying → Running,
    with build output streaming in the expanded log pane.
+
+   Do one of these with a **Region** chosen that is not your workspace default, and check it
+   on Railway's own dashboard — this app cannot tell you. `ServiceInstance.region` answers
+   `null` for every service whatever it was told, so there is nothing to read back and nothing
+   in the `container.created` log line either; see
+   [Resource controls](limitations.md#resource-controls). The list offers one option per
+   airport code, so several Railway rows collapse into one choice, and the container is placed
+   through `multiRegionConfig` rather than through the `region` input member, which Railway
+   accepts and ignores.
+
 3. **Stop it**, from the row's **…** menu. The badge should settle at **Removed** while the row
    stays on the dashboard — the service, its variables and its history are all still on Railway.
    Reopen the menu and the commands have changed with it: Stop and Restart give way to Redeploy.

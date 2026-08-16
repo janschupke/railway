@@ -288,15 +288,13 @@ export type ContainerVolume = {
  * already did. What is left is what a select needs — the value it posts, the sentence it
  * shows, and the heading it sits under.
  *
- * **`value` carries Railway's `name`, and deliberately not its `id`.** The field was called
- * `id` and read `Region.id`, which Railway documents as "Region ID (airport code)" — and on
- * the live API that is literally what it is: a location code shared by several rows, `ams`
- * three times over. The identifier the mutation accepts is `name`. Named `value` rather than
- * `id` so the next reader is not invited to make the same substitution: this is the string a
- * select posts, and nothing about it is a primary key.
+ * **`value` carries Railway's `id`, the airport code, and there is one option per code.**
+ * The field is named `value` rather than `id` because it is not a primary key and several
+ * of Railway's rows share it: it is the string a select posts, and `toRegionOptions` is
+ * where the argument for that lives, measured against real deployments.
  */
 export type RegionOption = {
-  /** The identifier `serviceInstanceUpdate` accepts, e.g. `europe-west4-drams3a`. */
+  /** Railway's own unit of placement — an airport code, e.g. `ams`. */
   value: string;
   /** Railway's own human string, e.g. "US West (Oregon)". */
   label: string;

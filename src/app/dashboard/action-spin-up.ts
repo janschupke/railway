@@ -324,9 +324,13 @@ async function attempt(
      *
      * Every field above this block is what the form sent. None of these controls is
      * rendered anywhere afterwards, so until this read existed a value Railway dropped
-     * could only be found by opening Railway's own dashboard and comparing by eye — and two
-     * were found exactly that way: a region sent as an airport code was answered `true` and
-     * stored as `null`, and a retry count of 3 came back as 10 once.
+     * could only be found by opening Railway's own dashboard and comparing by eye — and one
+     * was found exactly that way: a retry count of 3 came back as 10 once.
+     *
+     * There is no `stored_region` beside the `region` above, and that gap is deliberate.
+     * Railway answers `null` for a service instance's region whatever it was told and
+     * wherever the container is really running, so the field would report a dropped setting
+     * on every correct spin-up — see `StoredSettings` in lib/railway/service-create.ts.
      *
      * Absent, not zero, when nothing was customised or the read was refused: a `stored_`
      * field that defaulted to the same sentinel as the field above it would read as
@@ -335,7 +339,6 @@ async function attempt(
      */
     ...(created.stored
       ? {
-          stored_region: created.stored.region ?? "",
           stored_replicas: created.stored.replicas ?? 0,
           stored_restart_policy: created.stored.restartPolicy ?? "",
           stored_restart_retries: created.stored.restartRetries ?? -1,
