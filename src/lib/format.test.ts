@@ -229,14 +229,33 @@ describe("formatUptime", () => {
 
   it("abbreviates in the reader's locale rather than in English letters", () => {
     /*
-     * "3d 4h" is not universal — German abbreviates the same duration as "3 T 4 Std." and
-     * puts a space in that English does not — which is why this goes through Intl rather
-     * than a template string, and why the units need no catalog entry per locale.
+     * "3d 4h" is not universal — German writes the day unit as "T" and puts a space in
+     * that English does not — which is why this goes through Intl rather than a template
+     * string, and why the units need no catalog entry per locale.
      *
      * German rather than a non-Latin locale on purpose: CLDR's narrow forms for Japanese
      * are the English letters, so `ja` would pass this test against a hardcoded suffix too
      * and prove nothing.
+     *
+     * **Asserted against Intl rather than against a literal, and that is the fix for a real
+     * failure.** This used to read `toBe("3 T 4 Std.")`, which passed on ICU 76 / CLDR 46
+     * and failed on CI, where a newer Node abbreviates the German hour as "h". Nothing was
+     * wrong with the code — narrow forms are exactly the category CLDR revises, so a literal
+     * here pins a data release rather than a behaviour, and pins it to whichever Node the
+     * person who wrote it happened to have.
+     *
+     * What survives that is the property the function exists for: the locale reaches Intl,
+     * and the answer is not the English one. A version of `formatUptime` that ignored the
+     * locale fails the first assertion; one that hardcoded English letters fails the second.
      */
-    expect(ago(3 * DAY + 4 * HOUR, "de")).toBe("3 T 4 Std.");
+    const elapsed = 3 * DAY + 4 * HOUR;
+    const germanDays = new Intl.NumberFormat("de", {
+      style: "unit",
+      unit: "day",
+      unitDisplay: "narrow",
+    }).format(3);
+
+    expect(ago(elapsed, "de")).toContain(germanDays);
+    expect(ago(elapsed, "de")).not.toBe(ago(elapsed, "en"));
   });
 });

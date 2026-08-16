@@ -65,6 +65,23 @@ describe("visibleFaces", () => {
     // on it — it is a single point — so it takes naming to reach at all.
     expect(visibleFaces(Math.atan(VIEW.SHEAR))).toEqual(["right"]);
   });
+
+  it("drops it from either side, rather than on the last bit of a sine", () => {
+    /*
+     * The regression this is here for. At an edge-on heading the visibility dot product is
+     * zero in exact arithmetic and a rounding step either side of it in floating point, and
+     * `Math.sin`/`Math.cos` are implementation-defined — so a bare `< 0` decided whether to
+     * draw a zero-area quad on the last bit of a library call. It landed on +0 on one Node
+     * build and just below zero on another, and the suite went green locally and red in CI
+     * on a file nobody had touched.
+     *
+     * A tenth of the tolerance, both ways: whatever the arithmetic does within that band,
+     * the answer has to be the same one.
+     */
+    const edge = Math.atan(VIEW.SHEAR);
+    expect(visibleFaces(edge - 1e-10)).toEqual(["right"]);
+    expect(visibleFaces(edge + 1e-10)).toEqual(["right"]);
+  });
 });
 
 describe("drawBox", () => {

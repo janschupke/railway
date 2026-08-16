@@ -120,6 +120,25 @@ test.describe("keyboard operation", () => {
     await signIn(page);
     await spinUp(page, "cache");
 
+    /*
+     * Settled first, and this is not politeness about timing.
+     *
+     * `availableActions` returns nothing while a container is queued or building, so the
+     * menu at that moment holds Details and Open in Railway and nothing else — and it grows
+     * the lifecycle verbs the instant the row reaches Running. Opening it mid-deploy tests a
+     * list that changes underneath the assertion: it failed exactly that way, with the item
+     * at index 1 resolving to the Railway link on a menu that had two commands in it.
+     *
+     * Worth stating as behaviour rather than only as a wait: a menu left open across that
+     * transition has its items replaced, and focus goes with them. A person is unlikely to
+     * hold one open through a deploy, and the alternative — freezing the commands at the
+     * state they were opened at — would offer Stop on a container that had since crashed.
+     * The wait is here because this test is about the keyboard model, not about that.
+     */
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
     const trigger = onlyVisible(
       row(page, "cache").getByRole("button", { name: /^Actions for / }),
     );
