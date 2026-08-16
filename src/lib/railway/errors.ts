@@ -92,11 +92,17 @@ const PLAN_LIMIT_MESSAGE =
 /**
  * Whether one `errors[]` entry is Railway refusing on the account's plan.
  *
- * Checked before the auth classifier at the one call site below, which is safe in both
+ * Checked after the auth classifier at the one call site below, which is safe in both
  * directions: `AUTH_MESSAGE` matches neither "limit exceeded" nor "upgrade", and the
  * spec-conformant auth codes short-circuit before any wording is read.
+ *
+ * Not exported, unlike `isAuthEntry` beside it — and the asymmetry is the point rather than
+ * an oversight. `client.ts` needs the auth predicate directly, because it picks which of
+ * several `errors[]` entries to report and prefers an authorization failure over whatever
+ * came first. Nothing needs to ask that question about a plan ceiling: it reaches every
+ * caller as `kind`, through `toApiError`.
  */
-export function isPlanLimitEntry(entry: GraphQLErrorEntry): boolean {
+function isPlanLimitEntry(entry: GraphQLErrorEntry): boolean {
   if (entry.extensions?.code === "GRAPHQL_VALIDATION_FAILED") return false;
   if (/\brate\s+limit\b/i.test(entry.message)) return false;
   return PLAN_LIMIT_MESSAGE.test(entry.message);
