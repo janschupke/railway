@@ -37,7 +37,7 @@ jobs:
       # No build step and no autobuild: this is a TypeScript codebase, so CodeQL reads
       # the source directly. `pnpm build` here would cost three minutes and tell it
       # nothing it cannot already see.
-      - uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           languages: javascript-typescript
           # Adds the query pack aimed at exactly this app's shape — a server handling
