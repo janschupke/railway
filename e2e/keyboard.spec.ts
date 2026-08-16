@@ -154,15 +154,23 @@ test.describe("keyboard operation", () => {
      *
      * Asserted through `toBeFocused` on the item rather than through `data-highlighted`,
      * because focus is the thing a screen reader follows and the attribute is Radix's own
-     * bookkeeping. Moving down twice reaches the second command rather than the third:
-     * the first ArrowDown is consumed settling the already-focused item, which is Radix's
-     * behaviour and not this app's to correct — it is recorded here rather than papered
-     * over so a future upgrade that changes it fails loudly.
+     * bookkeeping.
+     *
+     * **One press, one item, and the previous version of this was wrong about why.** It
+     * pressed ArrowDown twice to reach the second command and recorded the extra press as
+     * Radix "consuming the first one settling the already-focused item". That is not
+     * Radix's behaviour — it is what a keypress does when it lands while the row is still
+     * re-rendering behind the menu, which is where this test used to send it, straight off
+     * a spin-up. Given a settled row the arrows step one command each, and the doubled
+     * press overshoots: the assertion started failing every run once the wait above made
+     * the page quiet, which is the shape of a test that had been passing on a race.
      */
-    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    const items = menu.getByRole("menuitem");
+    await expect(items.first()).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    await expect(items.nth(1)).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
+    await expect(items.nth(2)).toBeFocused();
 
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
