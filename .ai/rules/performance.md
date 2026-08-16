@@ -7,15 +7,8 @@ meta:
 
 ## The bundle budget is a hard gate, not a report
 
-`bundle-budgets.json` holds first-load JS per route, gzipped, in kilobytes:
-
-| Route                | Budget |
-| -------------------- | ------ |
-| `/`                  | 179    |
-| `/dashboard`         | 237    |
-| `/dashboard/new`     | 225    |
-| `/dashboard/billing` | 214    |
-| `/_not-found`        | 171    |
+`bundle-budgets.json` holds first-load JS per route, gzipped, in kilobytes. Read the numbers
+there; a copy here is a copy that goes stale.
 
 **Every route needs an entry**, or the gate silently stops covering new pages — the script
 fails on a route it has no number for, which is what makes that true rather than hoped.
@@ -30,22 +23,17 @@ fails, loose enough that a dependency patch does not.
 
 ## Raising a number is a decision with a written reason
 
-Append to the `$comment` array in `bundle-budgets.json`. The existing entries are the model
-for what a reason looks like: the measured before and after, what pulled the weight in, and
-why it was worth paying. For example, `/dashboard 209 → 215` records that the image field
-became a Radix Popover combobox, that replacing the preset chips was expected to pay for it
-and did not (because `ThemeToggle` imports `ToggleGroup` from `radix-ui` directly, keeping
-that dependency in the graph on every route), and that the measurement was 209.1 kB set at
-actual + ~3%.
+Append to the `$comment` array in `bundle-budgets.json`, and match the existing entries:
+the measured before and after, what pulled the weight in, and why it was worth paying. Seed
+the new number at the measured figure plus ~3%, as that file's own rule asks.
 
 **"CI failed so I raised the budget" is not a reason.** Find out what grew first.
 
 ## A client component in the root layout costs every route
 
-The `/_not-found 146 → 167` entry is the worked example: moving the top bar into the root
-layout meant every route carries Radix ToggleGroup and the shared Slot core (~20 kB gzip)
-that only `/` and `/dashboard` used to. It was deliberate — a 404 that cannot say which app
-it belongs to was the thing being fixed — but it was paid for knowingly.
+Anything under `"use client"` in the root layout lands in the shared graph of every route,
+including the 404 and the landing page. The `$comment` array has the worked example, where
+moving the top bar up cost ~20 kB gzip on routes that had never carried it.
 
 Before adding `"use client"`, ask whether the interactivity can live lower in the tree.
 Prefer a Server Component; see [architecture.md](architecture.md).
@@ -64,9 +52,9 @@ never a pool.**
   round trip against the fake Railway with Playwright. Its absence is **fatal, not a degraded
   mode**: without it the dashboard redirects to the landing page and the run would silently
   measure the same page twice. `pnpm lighthouse` runs `pnpm lh:auth` for you.
-- Resource budgets are errors: script 234 kB, stylesheet 12 kB, font 100 kB, total 389 kB.
-  They apply to every URL, so they track the worst case, and they cover what `pnpm size`
-  cannot — fonts, CSS and the document itself.
+- Resource budgets for script, stylesheet, font and total are errors. The ceilings are in
+  `lighthouserc.cjs`; they apply to every URL, so they track the worst case, and they cover
+  what `pnpm size` cannot — fonts, CSS and the document itself.
 - `categories:accessibility` is gated at `minScore: 1` — a perfect score, nothing less.
   `categories:best-practices` and `categories:seo` are **errors** at 0.9. Both are
   deterministic on a fixed page, unlike the performance score, so gating them costs no

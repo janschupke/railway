@@ -66,7 +66,7 @@ describe("readServiceVariableNames", () => {
   });
 
   it("drops the namespace Railway sets itself", async () => {
-    // validation.ts refuses these on the way in, so a row for one could never be submitted.
+    // The schemas refuse these on the way in, so a row for one could never be submitted.
     server.use(variables({ RAILWAY_PRIVATE_DOMAIN: "x", KEEP: "y" }));
 
     expect(await read()).toEqual(["KEEP"]);

@@ -24,10 +24,6 @@ Two more have no local script at all, because what they check is not the source 
 image job (`docker build`, a boot against `/api/health`, hadolint, Trivy) and the secret
 scan (`gitleaks` over the whole history). Their commands are below.
 
-So the counts in the other documents are counting different sets, and each says which:
-the pull-request template lists five, because it folds the image job in beside the four
-with scripts; the README says two, because it is naming only the pair with no script.
-
 ## Knip findings fail; dead code is an error
 
 `pnpm knip` reports unused files, dependencies and exports, and CI gates on it. Next's App
@@ -42,8 +38,11 @@ dead. That is why `src/test/log-capture.ts` imports nothing from `src/lib`.
 
 ## CI
 
-`.github/workflows/ci.yml`, on push and PR to `master` plus a Monday cron, six jobs plus an
-aggregator:
+CI is two workflows. `.github/workflows/ci.yml`, on push and PR to `master` plus a Monday
+cron, holds six jobs plus an aggregator. `.github/workflows/codeql.yml` runs on the same
+events in its own file, because it needs `security-events: write` and nothing else should.
+`src/toolchain.test.ts` only reads `ci.yml`, so a job added to a _new_ workflow gates nothing
+and no test will say so.
 
 | Job        | What it runs                                                                                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -120,7 +119,7 @@ once.
 
 ## Git
 
-- **Never create a branch.** Work on `master`.
+- **Never create a branch.** Commit to the branch you are already on.
 - **Commit subjects are sentence-case prose naming the outcome**, not Conventional Commits.
   Real examples: `One shell for every route, a real 404, and a brand mark on disk`,
   `Promote the variables mutation from probed to required`,
@@ -143,7 +142,7 @@ build cleanly and then fail to boot. `CMD` runs `node server.js` directly.
 ## `output: "standalone"`, and what it costs
 
 The runtime image copies `.next/standalone` — a traced server — rather than installing
-production dependencies. Measured: **504 MB of app payload became 44 MB**, and the
+production dependencies. Measured: **480 MB of `node_modules` became 38 MB**, and the
 `prod-deps` stage is gone.
 
 The gap was not fat. pnpm resolves optional peer dependencies at lockfile time and writes
@@ -214,32 +213,18 @@ enforced rather than restated.
 
 ### Why not NIXPACKS
 
-It resolved `pnpm` to the corepack shim in its Node derivation. corepack read
-`packageManager`, downloaded pnpm 11.9.0, and compiled its entry point — a three-line CJS
-shim whose only statement is `import('./pnpm.mjs')` — without a dynamic-import callback:
-
-```
-TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]
-    at .../corepack/pnpm/11.9.0/bin/pnpm.cjs:3:1
-    at Module2._compile (.../corepack/dist/lib/corepack.cjs)
-```
-
-Reproduced by version: corepack 0.20.0 and 0.24.1 fail exactly this way and cache to
-`corepack/pnpm/11.9.0`, which is the path the deploy log printed; 0.31.0 and later succeed
-and cache to `corepack/v1/pnpm/11.9.0`, which it did not. **The cause was the builder's
-corepack**, which no file in this repository can pin — which is why declaring
-`engines.node` moved the Node in the trace from 18.20.5 to 22.14.0 and changed nothing
-else.
+It resolves `pnpm` through the corepack shim in its Node derivation, and the builder's
+corepack version decides whether that works. No file in this repository pins it, so the
+build is not reproducible from here — which is the disqualifying property, not the failure
+itself. **Nothing in the deployment path may consult `packageManager`.**
 
 The Dockerfile is not chosen for control alone. It can be built and run on a laptop, so a
 deployment change is testable before it is a deployment: `docker build -t rw . && docker
 run --rm -p 3000:3000 -e SESSION_SECRET=… -e RAILWAY_CLIENT_ID=… -e
 RAILWAY_CLIENT_SECRET=… rw`. It needs no origin variable, and a `curl -H 'Host: …' -H
 'X-Forwarded-Proto: https'` against `/api/auth/login` reads the origin it derived straight
-out of the `redirect_uri`. Two guesses at builder
-configuration went out untested before this one did not. That property is why the CI
-scanners are `docker run` commands rather than actions — every gate on this file can be
-reproduced locally, byte for byte.
+out of the `redirect_uri`. That property is why the CI scanners are `docker run` commands
+rather than actions — every gate on this file can be reproduced locally, byte for byte.
 
 Single replica by design — the SSE stream slot counter is in-memory and per replica, and SSE
 pins a client to one replica anyway.

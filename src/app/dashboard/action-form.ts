@@ -137,7 +137,7 @@ export function issueToResult(
  * Any thrown value, as the result the caller returns.
  *
  * The five catch blocks that used to hold these two lines were byte-identical, and
- * `data.ts` has a sixth against `reportError`. Both casts go with them: `describeActionError`
+ * `data-containers.ts` has a sixth against `reportError`. Both casts go with them: `describeActionError`
  * already returns a `MessageDescriptor` whose key is a `MessageKey`, so `key as MessageKey`
  * was re-asserting a type the value already had, and `asTranslate` exists precisely to make
  * the second one unnecessary.

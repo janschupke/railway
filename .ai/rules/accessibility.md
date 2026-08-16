@@ -32,11 +32,8 @@ JSX files for the same reason.
 | `src/app/contrast.test.ts`                       | `pnpm test`       | every declared token pair, in milliseconds, before a browser starts |
 | LHCI `categories:accessibility` at `minScore: 1` | `pnpm lighthouse` | the audits axe does not run, on a production build                  |
 
-They do not overlap by accident. The axe scans only see colours that happen to be on screen
-in the states the suite visits; the contrast test reads `tokens.css` directly and covers
-every declared pair, in both theme blocks. Light and dark are independent value sets, so a
-change legible in one can be unreadable in the other and nobody notices until a reviewer
-opens the page on the wrong OS setting.
+Each covers what the others cannot; [docs/frontend.md](../../docs/frontend.md#accessibility)
+argues why, with the failures each has caught.
 
 ## A new colour token needs a contrast pass in every theme
 

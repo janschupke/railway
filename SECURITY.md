@@ -26,20 +26,29 @@ upstream call.
 
 ### Input surfaces
 
-Seven things cross from a browser into a Railway mutation. None is trusted; each is
+Eleven things cross from a browser into a Railway mutation. None is trusted; each is
 bounded.
 
-| Input                 | Bound                                                                                                                                                                                     | Where                                                    |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Image reference       | `IMAGE_PATTERN`, 255 characters                                                                                                                                                           | `src/lib/registry/reference.ts`, `src/lib/validation.ts` |
-| Container name        | 40 characters, and prefixed before it is sent — on a rename as well as on create                                                                                                          | `src/lib/validation.ts`, `src/lib/railway/managed.ts`    |
-| Environment variables | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix                                                        | `src/lib/validation.ts`                                  |
-| Project name          | 64 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation.ts`                                  |
-| Environment name      | 32 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation.ts`                                  |
-| Public port           | decimal digits only, 1–65 535; blank means no domain is minted at all                                                                                                                     | `src/lib/validation.ts`                                  |
-| Resource controls     | region `[a-z0-9-]`, 32 characters; 1–5 replicas; over 0 and up to 8 vCPU; over 0 and up to 8 GB; one of three restart policies; 0–10 retries; 512 characters of single-line start command | `src/lib/validation.ts`                                  |
+| Input                               | Bound                                                                                                                                                                                     | Where                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Image reference                     | `IMAGE_PATTERN`, 255 characters                                                                                                                                                           | `src/lib/registry/reference.ts`, `src/lib/validation/schemas.ts`      |
+| Container name                      | 40 characters, and prefixed before it is sent — on a rename as well as on create                                                                                                          | `src/lib/validation/schemas.ts`, `src/lib/railway/managed.ts`         |
+| Environment variables               | POSIX name charset, 64 / 2048 characters, 25 rows, 16 000 characters in total, no duplicates, no line breaks, no `RAILWAY_` prefix                                                        | `src/lib/validation/schemas.ts`, `src/lib/validation/patterns.ts`     |
+| Project name                        | 64 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation/schemas.ts`                                       |
+| Environment name                    | 32 characters, trimmed; not prefixed and not slugged                                                                                                                                      | `src/lib/validation/schemas.ts`                                       |
+| Public port                         | decimal digits only, 1–65 535; blank means no domain is minted at all                                                                                                                     | `src/lib/validation/schemas.ts`                                       |
+| Resource controls                   | region `[a-z0-9-]`, 32 characters; 1–5 replicas; over 0 and up to 8 vCPU; over 0 and up to 8 GB; one of three restart policies; 0–10 retries; 512 characters of single-line start command | `src/lib/validation/schemas.ts`                                       |
+| Project / environment / service ids | `RAILWAY_ID_PATTERN` — `[A-Za-z0-9_-]{1,64}` — on every lifecycle verb                                                                                                                    | `src/lib/validation/patterns.ts`                                      |
+| Bulk-destroy id list                | 50 ids, each to the same pattern                                                                                                                                                          | `src/lib/validation/schemas.ts`                                       |
+| Rollback deployment id              | the same pattern, and re-checked for membership of the service's own list before the mutation                                                                                             | `src/lib/validation/schemas.ts`, `src/app/dashboard/action-deploy.ts` |
+| Workspace id                        | blank, or the same pattern; reaches `projectCreate`                                                                                                                                       | `src/lib/validation/schemas.ts`                                       |
 
-The port is the newest of these and the narrowest. It reaches exactly one place —
+**The bulk-destroy list is the one bound here that protects a quota rather than a value.** One
+submission becomes N `serviceDelete` mutations, so the cap is on the count, and every id in it
+goes through the same server-side ownership re-derivation as a single destroy — a forged id in a
+batch is refused on its own while the rest go through.
+
+The port is the narrowest of these. It reaches exactly one place —
 `ServiceDomainCreateInput.targetPort` — on a service the requester's own grant already
 covers, and it can do nothing but decide which port inside that container a Railway
 hostname routes to. It is refused unless it is plainly decimal, which is stricter than
@@ -65,24 +74,23 @@ filename or a command on this server.
 user's own Railway account.** Nothing on this server interprets it — it is a string in a
 mutation input carried by the requester's own token, into a service they asked this app to
 create in a project their grant already reaches. That is the same blast-radius argument the
-environment-variables row rests on, and it is worth stating rather than leaving to be
-inferred, because "a form field that becomes a shell command" reads alarming until the two
-accounts involved are the same one. What is bounded is shape: 512 characters, and no line
-breaks, for the reason `VARIABLE_VALUE_PATTERN` exists.
+environment-variables row rests on: the account that supplies the command and the account it
+runs under are the same one. What is bounded is shape — 512 characters, and no line breaks,
+for the reason `VARIABLE_VALUE_PATTERN` exists.
 
 Both are recorded the way their cardinality allows. `container.created` and
 `railway.settings_failed` carry the region, the replica count, the size and the policy —
 all closed or tightly bounded — and `start_command_length` rather than the command, which
 is the same split that names preset variables and counts the user's.
 
-An eighth input crosses from the browser and reaches no mutation at all: the spin-up form's
-idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation.ts`. Both ends of
+A twelfth input crosses from the browser and reaches no mutation at all: the spin-up form's
+idempotency key, bounded to `[A-Za-z0-9_-]{16,64}` in `src/lib/validation/patterns.ts`. Both ends of
 that are deliberate. The floor is unguessability — a guessed key is answered with somebody
 else's result instead of the container they asked for — and the ceiling is memory, since
 the value becomes half of a key in a map that lives as long as the process. The charset is
 the one every Railway identifier here uses, which keeps it greppable in a log line.
 
-**A ninth reaches no Railway mutation either, and is the first that reaches anything
+**A thirteenth reaches no Railway mutation either, and is the first that reaches anything
 outside this app at all**: `?ref=` on `/api/image-check`, the reference the spin-up form
 asks a registry about. It is bounded five ways before a byte leaves — a session is
 required, `IMAGE_PATTERN` and 255 characters apply as they do on submit, the host must
@@ -90,10 +98,17 @@ resolve to one of three allowlisted registries, the user holds at most two probe
 and a shared answer cache with a per-registry cool-off bounds the rate. See the outbound
 hosts section below for why the allowlist is the control that matters.
 
-**A tenth is the first that reads a secret rather than writing one**: the three ids on
-`/api/service-variables`, which the edit dialog sends to find out which variables a service
-already has. All three are held to `RAILWAY_ID_PATTERN` before the session is read, and none
-of them is logged at any level.
+**Three more are reads a client component performs mid-interaction**, each taking ids off a
+query string: `/api/service-variables` (project, environment, service — what the edit dialog
+sends to find out which variables a service already has), `/api/service-deployments` (the same
+three, for the rollback control in an expanded row), and `/api/watch/[projectId]` (a path id
+plus `?environment=`). All are held to `RAILWAY_ID_PATTERN` **before the session is read**, and
+none of the ids is logged at any level — the same call the stream route makes about a rejected
+`deploymentId`. None re-derives ownership, for the reason given at the end of this section, and
+none decides anything: `/api/service-deployments` answers with a menu, and the Server Action
+behind the rollback re-reads the same list inside the ownership guard before sending anything.
+
+The first of the three is also the only one that reads a secret rather than writing one.
 
 The property that matters here is on the way _out_, not the way in. Railway answers that
 query with a name-to-value map, values included; `readServiceVariableNames` reduces it to
@@ -103,7 +118,7 @@ on any path**, which is what lets the edit form show an existing variable as a n
 empty cell, and what keeps the e2e assertion that a minted credential never appears in page
 content true after this feature as it was before it.
 
-**An eleventh reaches no Railway call at all and decides what this app says about itself**: the
+**One last input reaches no Railway call at all and decides what this app says about itself**: the
 `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` headers, from which `src/lib/origin.ts`
 derives the origin this request is served at. It is bounded three ways before anything reads
 it — the parse must round-trip to exactly the host it was given, with no path, credentials
@@ -121,8 +136,8 @@ own Railway token, which already reads those variables in Railway's own dashboar
 
 ### Outbound hosts
 
-Until the image existence check, every outbound request went to Railway. There are now
-four more, and all four are compile-time constants in `src/lib/registry/registries.ts`:
+Every outbound request goes to Railway or to one of four registry hosts, and all four are
+module constants in `src/lib/registry/registries.ts`:
 
 | Host                   | What is sent                                            |
 | ---------------------- | ------------------------------------------------------- |
@@ -134,6 +149,11 @@ four more, and all four are compile-time constants in `src/lib/registry/registri
 The claim this rests on is absolute rather than conditional: **no host, port or scheme in
 that subsystem is derived from user input, or from a registry response.** User input only
 ever becomes a path segment and a query value against one of those four constants.
+
+One operator-controlled exception exists and does not weaken it: `REGISTRY_PROBE_URL`
+relocates all three registries to a single origin, which is how the E2E fixture stands in for
+them. It cannot add a host — `registryFor` runs the allowlist lookup before applying the
+override — and `src/env.ts` refuses a value that is not https or loopback.
 
 Both halves of that matter, and the second is easy to lose. `IMAGE_PATTERN` admits a bare
 host as the first component, and Docker's own rules make a first component containing a dot
@@ -162,12 +182,10 @@ Four further properties keep the shape narrow:
   budget is per source IP and every user of a deployed instance shares one, so a `GET` here
   would spend someone else's quota per keystroke.
 
-**Environment variables are user-supplied, and were not always.** Until T-487 the client
-sent neither a preset id nor a variable: the environment was derived server-side from the
-submitted image alone, which made "a caller cannot inject environment into a service" true
-for free. That was a real property, and it is gone deliberately — a spin-up form that
-cannot set a variable is a form that cannot start most images. It is replaced, not deleted,
-by three bounds that do not overlap:
+**Environment variables are user-supplied.** Deriving the environment server-side from the
+submitted image made "a caller cannot inject environment into a service" true for free, and
+that property is gone deliberately: a spin-up form that cannot set a variable is a form that
+cannot start most images. Three bounds that do not overlap replace it:
 
 - **Shape.** The table above. A refused row produces a form error attributed to that row,
   and no mutation is attempted.
@@ -198,7 +216,7 @@ project would take every service, environment and volume in it — including one
 did not create — which is a different blast radius from deleting one service, and not one a
 single mis-aimed click should be able to reach.
 
-**The blast radius did not change**, and that is what makes the trade defensible. Every
+**The blast radius did not change.** Every
 mutation carries the requester's own token, so injecting environment means injecting it
 into a service they asked this app to create, in a project their own Railway grant already
 reaches. Railway is still the gate.
@@ -219,43 +237,44 @@ linear, with no nested quantifier and disjoint atom classes.
 | 3   | Railway's raw GraphQL error text was rendered to the browser through `errors.api.graphqlDetail`                                                | `src/lib/railway/errors.ts:79`                                                | `src/lib/report-error.ts`, `src/lib/railway/errors.ts`                                | Medium   |
 | 4   | `errors.streamInterruptedDetail` interpolated a `ws` failure, which carries the upstream's resolved address                                    | `src/lib/railway/deployment-monitor.ts:172`                                   | `src/lib/railway/deployment-monitor.ts`                                               | Medium   |
 | 5   | `/api/health` returned the full zod issue list, unauthenticated, naming every misconfigured variable                                           | `src/app/api/health/route.ts:16`                                              | `src/app/api/health/route.ts`                                                         | Medium   |
-| 6   | `/api/streams/[deploymentId]` took the id unvalidated, had no per-user cap, and polled a nonexistent deployment for the full 15-minute ceiling | `src/app/api/streams/[deploymentId]/route.ts:25`, `deployment-monitor.ts:123` | `src/lib/stream-slots.ts`, `src/lib/sse.ts`, `src/lib/validation.ts`                  | Medium   |
+| 6   | `/api/streams/[deploymentId]` took the id unvalidated, had no per-user cap, and polled a nonexistent deployment for the full 15-minute ceiling | `src/app/api/streams/[deploymentId]/route.ts:25`, `deployment-monitor.ts:123` | `src/lib/stream-slots.ts`, `src/lib/sse.ts`, `src/lib/validation/patterns.ts`         | Medium   |
 | 7   | Session cookie had no `__Host-` prefix, and `APP_URL` could be `http://` on a real host                                                        | `src/lib/auth/session.ts:87`, `src/env.ts`                                    | `src/lib/auth/session.ts`, `src/env.ts`                                               | Medium   |
 | 8   | Logout POST had no origin check, so a cross-site form could sign a user out                                                                    | `src/app/api/auth/logout/route.ts`                                            | `src/app/api/auth/logout/route.ts`                                                    | Low      |
 | 9   | No dependency audit in CI                                                                                                                      | `.github/workflows/ci.yml`                                                    | `.github/workflows/ci.yml`                                                            | Medium   |
 | 10  | Adopting pino would have re-opened finding 2: its stock `err` serializer walks `Error.cause`, and both error classes here assign it            | pino's `pino-std-serializers` default                                         | `src/lib/log/serialize-error.ts`, `src/lib/logger.ts`, `eslint.config.mjs`            | Medium   |
 
-### Notes on the two worth explaining
+The "Found at" line numbers are where each was found, not where that code sits now; the code
+has moved since. The "Fixed in" paths are current.
 
-**Finding 2** is the one that mattered most despite its narrow trigger.
-`oauth4webapi@3.8.6` (`build/index.js:1276`) throws
-`UnsupportedOperationError("unsupported \`token_type\` value", { cause: { body: json } })`where`json`is the parsed token response — a live access token and refresh token. Other
+### Notes on two of them
+
+**Finding 2 has a narrow trigger and a large payload.** `oauth4webapi@3.8.6`
+(`build/index.js:1276`) throws
+`UnsupportedOperationError("unsupported \`token_type\` value", { cause: { body: json } })`,
+where `json`is the parsed token response — a live access token and refresh token. Other
 branches put the decoded id_token claims there. The handler logged`cause`verbatim, and
-Railway retains stdout, so one such line would have outlived the request that produced
-it.`src/lib/auth/redact.ts`reads an allow-list and never touches`cause`.
+Railway retains stdout, so one such line would have outlived the request that produced it.`src/lib/auth/redact.ts`reads an allow-list and never touches`cause`.
 
-**Finding 3 and 4** removed detail the app genuinely needed, so it moved rather than
-disappeared. `reportError` writes the verbatim failure to the deployment log against an
-8-character incident id and returns only a catalog key plus that id. A screenshot now
-points at a log line; before, the screenshot _was_ the only evidence, and it was also
-the leak.
+**Findings 3 and 4** removed detail the app needed, so it moved rather than disappeared.
+`reportError` writes the verbatim failure to the deployment log against an 8-character
+incident id and returns only a catalog key plus that id, so a screenshot points at a log
+line instead of carrying the leak itself.
 
-**Redaction is not the same as silence, and the first pass conflated them.** Every
-GraphQL failure resolved to one sentence — "Railway rejected the operation. Reference
-…" — which is a redaction so complete that the user cannot tell a missing permission
-from an outage, and so cannot tell whether to retry, re-authorize, or stop. The upstream
-text is still never rendered; what changed is that the _cause_ is now classified
-server-side and mapped to its own sentence: a rejected credential, a scope Railway
-withheld (named, from the refused field's `path`), a rate limit, an outage. The incident
-id rides along with all of them rather than only the two GraphQL keys, so the log join
-works for every failure a user can screenshot.
+**Redaction is bounded, not total.** Resolving every GraphQL failure to one sentence —
+"Railway rejected the operation. Reference …" — leaves the user unable to tell a missing
+permission from an outage, and so unable to tell whether to retry, re-authorize, or stop.
+The upstream text is never rendered. What reaches the browser is a cause classified
+server-side and mapped to its own sentence: a rejected credential, a scope Railway withheld
+(named, from the refused field's `path`), a rate limit, an outage. The incident id rides
+along with all of them rather than only the two GraphQL keys, so the log join works for
+every failure a user can screenshot.
 
-**Finding 10 is finding 2 arriving through a different door**, and it is worth stating
-because it is what a routine "add structured logging" change would have shipped. pino's
-default `err` serializer walks `Error.cause` recursively; `RailwayApiError` and
-`SessionExpiredError` both assign `this.cause`, and it is an enumerable own property, so
-anything that stringifies an error wholesale emits it. `describeOidcFailure` guards one
-call site; the logger is reachable from every one.
+**Finding 10 is finding 2 reached by a different route**, and it is what a routine "add
+structured logging" change would otherwise ship. pino's default `err` serializer walks
+`Error.cause` recursively; `RailwayApiError` and `SessionExpiredError` both assign
+`this.cause`, and it is an enumerable own property, so anything that stringifies an error
+wholesale emits it. `describeOidcFailure` guards one call site; the logger is reachable from
+every one.
 
 The rule from finding 2 — read an allow-list, never stringify an object you did not take
 apart field by field — now has four enforcers, in the order they fire:
@@ -281,7 +300,7 @@ this class of leak gets in.
 
 ## What was already sound
 
-Recorded because a review that reports only problems misrepresents the system.
+The properties the review checked and found holding.
 
 - **Authorization does not depend on the proxy.** Every protected path re-checks:
   `loadDashboardShell`/`loadContainers` return null without a session, both Server
@@ -298,18 +317,19 @@ Recorded because a review that reports only problems misrepresents the system.
 - **No XSS.** The single `dangerouslySetInnerHTML` is a module constant with no
   interpolation; all upstream text renders as React text children.
 - **The image-reference regex is not ReDoS-able.** Its separator and atom classes are
-  disjoint, so the partition of any input is unique. Measured: 192 kB of adversarial
-  input in 0.99 ms.
+  disjoint, so the partition of any input is unique. `src/lib/registry/reference.test.ts`
+  holds 100 000 characters of adversarial input to a 500 ms ceiling — a
+  catastrophic-backtracking check rather than a benchmark.
 - **The OIDC flow is correct.** State is verified and fails closed, PKCE is bound to the
   browser through httpOnly cookies, there is no open redirect, and the transient cookies
   are deleted on every exit path including success.
 - **No secret has ever been committed**, no `NEXT_PUBLIC_` anywhere, and no server module
   reaches a client bundle. The first of those was verified by hand against full history and
   is now gated: the `secrets` job in `.github/workflows/ci.yml` runs gitleaks over
-  `--log-opts=--all` on every push, pull request and weekly cron. 72 commits, no findings,
-  when the gate was added. Scanning the whole history rather than the pushed range is what
-  catches a force-push that rewrites a secret into a branch nobody reads, and it is what
-  keeps this line a statement about the repository rather than about one afternoon.
+  `--log-opts=--all` on every push, pull request and weekly cron, and has reported nothing on
+  any of them. Scanning the whole history rather than the pushed range is what catches a
+  force-push that rewrites a secret into a branch nobody reads, and it is what keeps this line
+  a statement about the repository rather than about one afternoon.
 
   One string is allowlisted, in `.gitleaks.toml`, and it is named here rather than left to
   whoever opens that file: `0123456789abcdef0123456789abcdef`, the idempotency key three
@@ -396,16 +416,25 @@ documents `openssl rand -base64 32`; that guidance is the actual control.
 so the tokens inside it become unreachable, but the authorization at Railway survives
 until it expires or the user removes the app. This is the one accepted risk with no
 mitigation available at all: Railway's discovery document publishes no
-`revocation_endpoint` and no `end_session_endpoint`, and the paths a provider of this
+`revocation_endpoint` and no `end_session_endpoint`, the paths a provider of this
 shape would put them on — `/oauth/token/revocation`, `/oauth/revoke`,
 `/oauth/revocation`, `/oauth/session/end`, `/oauth/logout` — answer 404 to a POST that
-`/oauth/token` answers with `invalid_request`, so a client-side revoke has nothing to
-call. What is done instead is to stop the gap being invisible: the landing page states
-both halves of what sign-out did and links to Railway's account settings, and
-`ABSENT_ENDPOINTS` in `scripts/verify-schema.ts` fails CI the day either endpoint
-appears. The residual cost is an abandoned refresh token per sign-out against Railway's
-cap of 100 live tokens per authorization (`src/lib/auth/refresh.ts`), which only the user
-can reclaim.
+`/oauth/token` answers with `invalid_request`, and the public GraphQL schema carries no
+grant-revocation mutation either. `sessionDelete` there is a Railway login session and
+`apiTokenDelete`/`projectTokenDelete` are API tokens; none of the three is an OAuth grant.
+So a client-side revoke has nothing to call. What is done instead is to stop the gap being
+invisible: the landing page states both halves of what sign-out did and links to Railway's
+account settings, where **Apps → Revoke Access** ends it, and `ABSENT_ENDPOINTS` in
+`scripts/verify-schema.ts` fails CI the day either endpoint appears. The residual cost is an
+abandoned refresh token per sign-out (`src/lib/auth/refresh.ts`), bounded by Railway's cap of
+100 live tokens per authorization: past that the oldest are revoked automatically, so the
+abandoned ones age out without the user doing anything. The authorization itself does not.
+
+**The consent screen is shown on every sign-in, and that is the design.** Railway issues a
+refresh token only for an authorization carrying both `offline_access` and `prompt=consent`,
+so the login route sends the parameter every time. The alternative — omit it and hope for a
+silent re-grant — yields a session that dies an hour in, which the callback then repairs by
+retrying with consent forced, reaching the same screen one redirect later.
 
 **The image existence check is advisory, and every failure is silent.** A registry that
 rate-limits, times out or is down produces `unknown`, which renders nothing — so an outage
@@ -418,9 +447,8 @@ registries refuse an anonymous read of a repository that does not exist with 401
 not 404 — Docker Hub issues a token with an empty `access` claim and then refuses with
 `insufficient_scope`, ghcr.io refuses at the token endpoint with `DENIED`. There is no
 registry-API way to tell the two apart without authenticating as someone who can see the
-private one, which this app never does. The warning covers both, which is honest: this app
-collects no registry credentials, so a private image fails to deploy exactly as an absent
-one does. `hub.docker.com/v2/repositories/…` would distinguish them on Docker Hub and was
+private one, which this app never does. The warning covers both, and this app collects no
+registry credentials, so a private image fails to deploy exactly as an absent one does. `hub.docker.com/v2/repositories/…` would distinguish them on Docker Hub and was
 rejected — a fourth outbound host on a proprietary non-OCI API with no compatibility
 promise, answering a question whose two answers are treated identically here.
 
@@ -432,15 +460,14 @@ reads no body, so the disclosure is that this server exists and somebody typed a
 reference.
 
 A `dns.lookup` pre-flight refusing private and link-local addresses was considered and
-**rejected as theatre**. `fetch` resolves independently of any such check, so the address
-validated is never the address connected to — it is TOCTOU by construction, and caching the
-result to make it affordable widens the window rather than narrowing it. Closing it
-properly means a custom `undici.Agent` filtering the real peer address, which is a runtime
-dependency this repo avoids on principle, to defend a threat that requires hostile DNS for
-GitHub's own registry. **TLS is the control that actually applies here**: a rebound A
-record cannot present a valid certificate for the name, and cloud metadata services serve
-plain HTTP with no CA-issued certificate at all. The allowlist is what stops user input
-choosing a host; TLS is what stops the host being someone else. Neither is a lookup.
+**rejected because it does not hold**. `fetch` resolves independently of any such check, so
+the address validated is never the address connected to, and caching the result to make it
+affordable widens that window rather than narrowing it. Closing it properly means a custom
+`undici.Agent` filtering the real peer address — a runtime dependency, to defend a threat
+that requires hostile DNS for GitHub's own registry. **TLS is the control that applies
+here**: a rebound A record cannot present a valid certificate for the name, and cloud
+metadata services serve plain HTTP with no CA-issued certificate at all. The allowlist stops
+user input choosing a host; TLS stops the host being someone else.
 
 **The answer cache is shared across every user of an instance.** That is deliberate and
 leaks nothing: each entry is an anonymous answer about a public repository, with no
@@ -463,10 +490,13 @@ lands either side of a deploy. The form only re-mints its key on success, which 
 makes a retry after a failure a retry rather than a second container, and both windows are
 far narrower than the name check they replaced — which was not a lock at all. See ADR-12.
 
-**Three dev-only advisories** under `@lhci/cli` — `tmp` (GHSA-ph9p-34f9-6g65, high),
-`uuid` (GHSA-w5hq-g745-h8pq, moderate), `tmp` (GHSA-52f5-9888-hmc6, low). None is
-reachable at runtime: `@lhci/cli` is a devDependency invoked only by `pnpm lighthouse`.
-`pnpm audit --prod` is clean, and that is what CI gates on. Reviewed 2026-08-12.
+**Four dev-only advisories**, every one of them under `@lhci/cli` — `tmp`
+(GHSA-ph9p-34f9-6g65, high), `extract-zip` (GHSA-jmr9-qjv8-65gv, high, through
+`lighthouse > puppeteer-core`), `uuid` (GHSA-w5hq-g745-h8pq, moderate) and `tmp`
+(GHSA-52f5-9888-hmc6, low). None is reachable at runtime: `@lhci/cli` is a devDependency
+invoked only by `pnpm lighthouse`. `pnpm audit --prod` is clean, and that is what CI gates
+on; the full-tree run beside it is `continue-on-error` so these surface without blocking a
+merge. Reviewed 2026-08-16.
 
 **The app trusts the host its proxy reports.** The origin it serves — the OIDC
 `redirect_uri`, every redirect, the cookie name and `secure` flag, the logout CSRF
@@ -524,12 +554,15 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
   access, refresh or id tokens, `Error.cause`, the sealed cookie, container stdout,
   environment variable **values** of either origin, or user-supplied variable **names**.
   Auth events
-  (sign-in, sign-out, refresh, refresh failure, CSRF rejection) and state-changing
-  actions (`container.created`, `container.create_failed`, `container.destroyed`,
-  `container.destroy_refused`) are logged at `info` or `warn` — this is the audit trail
-  Railway does not keep once a service is deleted. A create is recorded whether or not the
-  deploy that follows it succeeds: an orphaned service is the case the record is most
-  needed for, and `outcome` on `container.created` says which one it was.
+  (sign-in, sign-out, refresh, refresh failure, CSRF rejection) and every state-changing
+  action are logged at `info` or `warn` — this is the audit trail Railway does not keep once a
+  service is deleted. `src/lib/log/events.ts` is the list: eight verbs (create, destroy, stop,
+  restart, redeploy, rollback, edit, domain), each with a refused, a skipped and a done line,
+  plus `container.create_failed`, `container.create_replayed` and destroy's per-item
+  `container.destroy_failed`. `container.updated` is the only record anywhere of what a
+  container used to be. A create is recorded whether or not the deploy that follows it
+  succeeds: an orphaned service is the case the record is most needed for, and `outcome` on
+  `container.created` says which one it was.
 - **The image reference is not logged either**, for the same reason and more sharply:
   `/api/image-check` fires on every settled keystroke of every signed-in visitor, so the
   reference is both unbounded and high-volume. `image.checked` carries the registry id, the
@@ -554,7 +587,8 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
   fixture, and any variable the harness does not set explicitly would have fallen through to
   a real Railway account. `scripts/pack-standalone.ts` removes it. Three places now exclude
   this one file, which is proportionate to the number of ways it has found out.
-- **The image ships a traced `node_modules`, not an installed one** — 504 MB to 44 MB. What
+- **The image ships a traced `node_modules`, not an installed one** — 480 MB of `node_modules`
+  becomes 38 MB, measured and recorded in the `Dockerfile` beside the stage that does it. What
   left with it: TypeScript, Playwright, the Babel closure and a native SWC compiler, none
   imported by the server, all of which `pnpm install --prod` was obliged to keep because
   pnpm had welded them into the identity of `next` and `next-intl` while resolving optional
@@ -568,9 +602,10 @@ HIGH/CRITICAL count is zero, including the app's own production tree.
   from. That removal writes whiteouts rather than reclaiming space — the bytes stay in the
   base layer — so it is a surface change, not a size one.
 - **The image carries OCI labels**, including `org.opencontainers.image.revision` from
-  `RAILWAY_GIT_COMMIT_SHA`, the same value the logger emits as `version`. A running process
-  reporting its own commit and an artefact stating which commit produced it are different
-  claims; the second is the one that survives the process.
+  `RAILWAY_GIT_COMMIT_SHA` — the full sha, where the logger emits the first seven of it as
+  `version`. Same commit, so the two join. A running process reporting its own commit and an
+  artefact stating which commit produced it are different claims; the second is the one that
+  survives the process.
 - **`LOG_LEVEL` is read straight from the environment**, not through `src/env.ts`, and an
   unrecognised value clamps rather than throwing. `/api/health` exists in order to log
   `env()` failing, so a logger that depended on `env()` succeeding could not report the

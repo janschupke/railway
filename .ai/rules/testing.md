@@ -5,16 +5,21 @@ meta:
 
 # Testing
 
-## Four tiers, and a change belongs in one of them
+## Five tiers, and a change belongs in one of them
 
-`vitest.config.mts` defines three Vitest projects; Playwright is the fourth tier.
+`vitest.config.mts` defines four Vitest projects; Playwright is the fifth tier.
 
 | Tier          | Files                          | Environment | Use it for                                                         |
 | ------------- | ------------------------------ | ----------- | ------------------------------------------------------------------ |
 | `unit`        | `src/**/*.test.ts`             | node        | `src/lib/**`, pure logic, serializers, the session layer           |
 | `component`   | `src/**/*.test.tsx`            | jsdom       | anything in `src/components` and `src/hooks`, including async RSCs |
 | `integration` | `src/**/*.integration.test.ts` | node        | route handlers and Server Actions against MSW-backed HTTP          |
+| `lint-rules`  | `eslint-rules/**/*.test.mjs`   | node        | the custom ESLint rules, through `RuleTester`                      |
 | `e2e`         | `e2e/*.spec.ts`                | chromium    | the real browser: navigation, streaming, keyboard, a11y, CSP       |
+
+`unit` excludes `*.integration.test.ts` so the two projects do not both claim it.
+`lint-rules` loads **no** setup files, deliberately: a `RuleTester` case runs before any of
+this app's mocks exist and must not depend on them.
 
 **Tests are colocated** next to the source they cover — `src/lib/sse.ts` ↔
 `src/lib/sse.test.ts`. There is no `__tests__` directory and no mirrored tree.
@@ -114,30 +119,33 @@ also keeps a browser pool off developer machines.
 
 Two projects, and the split is deliberate: `chromium` runs everything except
 `responsive.spec.ts`, and `mobile` (Pixel 7) runs only that one. A second full project would
-roughly double CI wall-clock at `workers: 1` and buy very little — the app reaches for `sm:` four times
-in all of `src/` and adapts by wrapping everywhere else, so there is no viewport-conditional
-code for a second pass to regress. Put a phone-width assertion in `e2e/responsive.spec.ts`
-rather than adding a project.
+roughly double CI wall-clock at `workers: 1` and buy very little, because the app declares
+almost no breakpoints and adapts by wrapping instead. Put a phone-width assertion in
+`e2e/responsive.spec.ts` rather than adding a project.
 
 Run the suite as one invocation — `pnpm test:e2e`. Do not add workers, do not add browsers,
 do not shard.
 
 ## The fake Railway is the test double, and it can fail on demand
 
-`e2e/fixtures/fake-railway/` signs real RS256 OIDC with a JWKS endpoint, serves GraphQL over
-an in-memory store, and speaks hand-rolled `graphql-transport-ws`. The app runs unmodified
-against it, so PKCE, token exchange and refresh rotation are all genuinely exercised.
+`e2e/fixtures/fake-railway/` signs real **ES256** OIDC with a JWKS endpoint, serves GraphQL
+over an in-memory store, and speaks hand-rolled `graphql-transport-ws`. The app runs
+unmodified against it, so PKCE, token exchange and refresh rotation are all genuinely
+exercised.
+
+Two of its behaviours match production because a mismatch would pass while real sign-ins
+fail, and neither may be relaxed:
+
+- **ES256, not RS256.** oauth4webapi defaults to requiring RS256, so an RS256 fixture agrees
+  with that default and goes green while Railway's real tokens are rejected.
+- **A refresh token only for `offline_access` **and** `prompt=consent`.** Issuing one
+  unconditionally hides a login flow whose sessions die an hour in.
 
 - Every spec resets it: the `test` fixture in `e2e/support.ts` posts to `/__test/reset`
   before the page is used.
-- Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`
-  and supports twenty-seven knobs — `rateLimit`, `unauthorized`, `refreshFails`,
-  `accessTokenTtl`, `deploymentsFail`, `logPhase`, `failureField`, `deploymentEventsFail`,
-  `deploymentListFail`,
-  `variablesFail`, `domainFails`, `settingsFail`, `limitsFail`, `volumeCreateFail`,
-  `volumesFail`, `metricsFail`, `workspaceFail`, `noWorkspace`, `projectsSource`,
-  `rejectWorkspaces`, `rejectPersonal`, `projectsEmpty`, `slowMs` and `registryStatus`.
-  `Faults` in `store.ts` is the list; this one is a summary and will drift again.
+- Failures are injected, not waited for: `injectFaults(page, {…})` posts to `/__test/faults`.
+  `DEFAULT_FAULTS` in `store.ts` is the list of knobs — read it there rather than a copy
+  here.
 - `fixtureStats(page)` exposes grant counters, because refresh happens server-side and
   Playwright cannot observe it with `waitForRequest`.
 

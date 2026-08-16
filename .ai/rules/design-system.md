@@ -28,16 +28,23 @@ the element renders whatever it inherited. That failure is invisible in review.
 
 ## Feature components may not write appearance
 
-`eslint.config.mjs` bans four things in `src/**/*.tsx`, with `src/components/ui/**` as the
-only exemption. Each is an error, not a warning, and `pnpm lint` runs with
-`--max-warnings=0`.
+`eslint.config.mjs` bans four things in `src/**/*.{ts,tsx}` — `.ts` included, because a `cva`
+recipe or a class lookup table there was the hole. Each is an error, not a warning, and
+`pnpm lint` runs with `--max-warnings=0`. Four paths are exempt: `src/components/ui/**`,
+`src/features/**`, `src/**/*.test.{ts,tsx}` and `src/test/**`.
 
-| Banned in a `className`                                                 | What to do instead                                                           |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Raw type step — `text-sm`, `font-medium`, `tracking-tight`, `leading-6` | `<Text variant=…>` or `<Heading>` from `src/components/ui/text.tsx`          |
-| Raw palette colour — `bg-emerald-500/10`, `text-gray-400`               | A semantic token: `bg-surface`, `text-text-muted`, `border-danger-border`    |
-| Hex literal — `#6c3fe7`                                                 | Add a semantic token in `tokens.css`, map it in `globals.css`                |
-| `-[var(--…)]` — `fill-[var(--rc-raised)]`                               | Map the token in `globals.css` and use the generated utility (`fill-raised`) |
+The scope differs per ban, and it is not "in a `className`" for three of the four:
+
+| Banned                                                                  | Where it is matched  | What to do instead                                                           |
+| ----------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| Raw type step — `text-sm`, `font-medium`, `tracking-tight`, `leading-6` | anywhere in the file | `<Text variant=…>` or `<Heading>` from `src/components/ui/text.tsx`          |
+| Raw palette colour — `bg-emerald-500/10`, `text-gray-400`               | anywhere in the file | A semantic token: `bg-surface`, `text-text-muted`, `border-danger-border`    |
+| Hex literal — `#6c3fe7`                                                 | inside `style={{…}}` | Add a semantic token in `tokens.css`, map it in `globals.css`                |
+| `-[var(--…)]` — `fill-[var(--rc-raised)]`                               | inside a `className` | Map the token in `globals.css` and use the generated utility (`fill-raised`) |
+
+Hex is scoped to `style` on purpose: `#` plus hex digits is also an id selector, a URL
+fragment and a git sha, and `style={{ color: "#6c3fe7" }}` is the one place a hex colour is
+actually spelled.
 
 The scale roles (`text-body`, `text-caption`, …) are deliberately _not_ matched by the type
 rule — those come from the tokens and are what to reach for on the rare element no primitive
@@ -47,9 +54,7 @@ wraps.
 feature component genuinely needs a new appearance, the appearance belongs in a primitive
 under `src/components/ui/` or in a new token.
 
-This is a ratchet: nothing violates it today. It exists because the drift has already
-happened once — before the `Text` primitive there were four spellings of "heading" across
-five files, and the two page-level `h1`s were ten pixels and a weight apart.
+This is a ratchet, and nothing in scope violates it today.
 
 ## The type scale is defined in four files that must agree
 
@@ -79,13 +84,9 @@ from every heading. **Weight lives in the `Text` primitive for that reason.**
   instance extended with `TYPE_SCALE`, never bare `clsx` or string concatenation.
 - Control geometry (`h-control-*`, `px-control-*`) is tokenised too, and asserted by
   `src/app/control-scale.test.ts`. Do not hand-size a button.
-- Check `src/components/ui/` before writing a component. **Read the directory rather than
-  this list** — it went stale by ten entries once already, which is the worst way for a
-  "check before you build" instruction to fail: it sends a reader off to write a checkbox
-  that exists. As of 2026-08-15: alert dialog, banner, button, card, checkbox, chip,
-  combobox, dialog, disclosure, error block, field, input, key-value editor, live region,
-  misc, multi-select, page, scroll area, select, skeleton, tab nav, text, theme toggle,
-  toast and tooltip.
+- **Read `src/components/ui/` before writing a component.** No inventory is kept here: an
+  inventory that goes stale sends a reader off to write a checkbox that already exists, which
+  is the worst way for a "check before you build" instruction to fail.
 
   `tab-nav.tsx` is the one that wraps no Radix primitive, and its docblock is where the
   reason lives: it is routed links carrying `aria-current`, deliberately not

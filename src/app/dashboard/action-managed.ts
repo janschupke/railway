@@ -175,7 +175,7 @@ export async function withManagedContainer(
      * here even though the user's own token would happily perform it.
      *
      * Uncancellable for the same reason as the read in `create` above — see
-     * `containerList` in ./data.ts. It is also the read this app would least want to give
+     * `containerList` in ./data-containers.ts. It is also the read this app would least want to give
      * a deadline to: a signal that fired here would have to refuse the action, never
      * fall through to one, so it buys a new failure mode for a check that must not fail
      * open.

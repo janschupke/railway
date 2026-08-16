@@ -155,7 +155,7 @@ export async function createContainer(
      *
      * Absent is what every database preset sends and what a person who cleared the form's
      * port field sends, and the two are the same request: do not put this container on the
-     * public internet. See `port` in lib/validation.ts on why one field carries both.
+     * public internet. See `port` in lib/validation/schemas.ts on why one field carries both.
      */
     targetPort?: number;
     /**

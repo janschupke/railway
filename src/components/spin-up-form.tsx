@@ -53,9 +53,9 @@ import { useToast } from "./ui/toast";
  * `restartPolicy` are absent because neither is an `ActionField` at all — see the note on
  * that type.
  *
- * A second copy of `advancedFields` in lib/validation.ts, and deliberately so: importing
+ * A second copy of `advancedFields` in lib/validation/schemas.ts, and deliberately so: importing
  * that module here would drag zod into /dashboard's first load. `spin-up-form.test.tsx`
- * holds the two together — it may import validation.ts, because a test has no bundle.
+ * holds the two together — it may import the schemas, because a test has no bundle.
  */
 export const ADVANCED_FIELDS: ReadonlySet<string> = new Set([
   "replicas",
@@ -94,7 +94,7 @@ export function SpinUpForm({
    * one way worth knowing here: an empty array is a designed answer rather than only an
    * unresolved one — the read is allowed to fail into it — so the select says the choice is
    * unavailable instead of rendering a list of nothing. See deployRegions in
-   * app/dashboard/data.ts.
+   * app/dashboard/data-regions.ts.
    */
   regions: Promise<RegionOption[]>;
 }) {

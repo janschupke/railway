@@ -7,9 +7,10 @@ export { discoveryUrl, railwayMetadata } from "@/lib/auth/oidc-metadata";
 /**
  * Scopes requested at consent.
  *
- * - `offline_access` is what earns a refresh token. Railway issues one on the flow
- *   where consent is granted; see the callback route for the path taken when a later,
- *   silent authorization returns none.
+ * - `offline_access` is half of what earns a refresh token. Railway's condition is both
+ *   this scope and `prompt=consent` on the authorization request, which is why the login
+ *   route sends that parameter unconditionally. Either one alone yields an access token
+ *   that expires in an hour and nothing to renew it with.
  * - `project:admin` is the write-capable project scope. It appears in the live
  *   discovery document's `scopes_supported` but is absent from the prose scope
  *   table in Railway's docs, which lists only viewer/member for projects.

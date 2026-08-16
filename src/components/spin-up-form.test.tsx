@@ -965,7 +965,7 @@ describe("the public port", () => {
 describe("the advanced panel", () => {
   it("knows every advanced field the schema has", () => {
     /*
-     * `ADVANCED_FIELDS` is a second copy of `advancedFields` in lib/validation.ts, kept
+     * `ADVANCED_FIELDS` is a second copy of `advancedFields` in lib/validation/schemas.ts, kept
      * separate on purpose: importing that module into a client component drags zod into
      * /dashboard's first load. A test has no bundle, so it can hold the two together.
      *

@@ -40,7 +40,7 @@ import {
  *     and those are not this service's to edit — see SERVICE_VARIABLES_QUERY. Subtracted by
  *     name *and* value, because a service may override a shared name with its own value and
  *     that override is genuinely the service's.
- *   - **The `RAILWAY_` namespace.** Railway injects its own block, and `validation.ts`
+ *   - **The `RAILWAY_` namespace.** Railway injects its own block, and `validation/schemas.ts`
  *     refuses those names on the way back in. Listing them would be drawing rows the form
  *     cannot submit.
  */

@@ -10,7 +10,7 @@
  * in the root layout, so importing that module here would pull every constant in it into
  * the shared client graph of every route — measured at +1.5 kB gzip on / and /_not-found,
  * and enough to put /dashboard over its budget. `lib/registry/reference.ts` exists for
- * exactly this reason relative to lib/validation.ts; constants.ts carries a note pointing
+ * exactly this reason relative to lib/validation/schemas.ts; constants.ts carries a note pointing
  * here.
  *
  * Before this, both sites spelled `"theme"` and `"light"|"dark"` out by hand. Renaming the

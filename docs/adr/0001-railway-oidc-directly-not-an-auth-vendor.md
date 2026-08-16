@@ -28,13 +28,15 @@ Railway scopes workspaces separately from projects, so a token holding `project:
 project list discards both. The scope closes that; independent per-source documents keep a future
 refusal from taking a whole dashboard load with it.
 
-**Consent is Railway's decision, not the app's.** `/api/auth/login` sends no `prompt` parameter,
-so the consent screen appears on the first authorization — where no grant exists yet — and is
-skipped afterwards. Sending `prompt=consent` is an override meaning "show it regardless", which
-makes re-picking every shared project the price of each sign-in. `?consent=1` forces it, and only
-the explicit "Authorize again" and "Choose projects" controls pass it. The one case a silent authorization can fail is a provider that mints refresh tokens
-only alongside a displayed consent screen; the callback detects a missing refresh token and
-retries once with consent forced, guarded by a cookie so it cannot loop.
+**The consent screen appears on every sign-in, because that is Railway's price for a refresh
+token.** Railway issues one only for an authorization carrying both the `offline_access` scope
+and `prompt=consent`, so `/api/auth/login` sends the parameter unconditionally. Omitting it was
+tried, on the reading that Railway would re-grant silently for a user who had already
+authorized: the silent grant came back without a refresh token, the callback retried with
+consent forced, and the user reached the same screen one redirect later. The retry still
+exists for a grant that declines offline access at the screen, guarded by a cookie so it
+cannot loop. `?consent=1` now records which attempt is the retry rather than changing what is
+sent.
 
 ## Alternatives rejected
 
@@ -56,8 +58,8 @@ from the thing that needs it.
 
 ## Consequences
 
-- **The implementation is hand-rolled and it is not small.** `src/lib/auth/**` plus the four auth
-  route handlers, with `src/proxy.ts` beside them; there are more lines of test than of
+- **The implementation is hand-rolled and it is not small.** `src/lib/auth/**` plus the three
+  auth route handlers, with `src/proxy.ts` beside them; there are more lines of test than of
   implementation. `wc -l` over those paths is the honest way to check the ratio rather than a
   figure quoted here.
 - **Session encryption, CSRF and cookie chunking are hand-rolled** rather than inherited. Two

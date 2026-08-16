@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  *
  * The sixth route handler and the third that is not a stream, and it is here for the reason
  * `/api/service-variables` states next door: this is a read a client component performs
- * mid-interaction, `dashboard/data.ts` is reserved for Server Components, `dashboard/actions.ts`
+ * mid-interaction, the `dashboard/data-*.ts` loaders are reserved for Server Components, `dashboard/actions.ts`
  * is the write lane, and a route handler is the only one of the three that gets the inbound
  * `AbortSignal` — which a panel that can be collapsed before its request lands genuinely
  * wants.

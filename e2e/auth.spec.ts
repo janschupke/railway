@@ -31,11 +31,32 @@ test.describe("authentication", () => {
     expect(url.searchParams.get("scope")).toContain("project:admin");
     expect(url.searchParams.get("scope")).toContain("workspace:viewer");
     /*
-     * No prompt: Railway decides whether consent is needed, which is what makes
-     * authorizing a one-time act. Forcing it here meant the consent screen — and
-     * re-picking every shared project — was the price of every single sign-in.
+     * Both halves of Railway's condition for issuing a refresh token, on every sign-in.
+     * Omitting `prompt` does not skip the consent screen — it produces a grant with no
+     * refresh token, which the callback answers by retrying with consent forced, so the
+     * screen appears anyway one redirect later. Asserted here because the fixture is the
+     * only place that difference is observable before a real account sees it.
      */
-    expect(url.searchParams.get("prompt")).toBeNull();
+    expect(url.searchParams.get("scope")).toContain("offline_access");
+    expect(url.searchParams.get("prompt")).toBe("consent");
+  });
+
+  test("carries a refresh token out of the first exchange, so no retry is needed", async ({
+    page,
+  }) => {
+    /*
+     * The regression this pair exists for: a sign-in that reaches the dashboard through
+     * two authorization round trips looks identical to one that took a single trip.
+     * Counting the requests is what tells them apart.
+     */
+    const authorizations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/oauth/auth")) authorizations.push(request.url());
+    });
+
+    await signIn(page);
+
+    expect(authorizations).toHaveLength(1);
   });
 
   test("keeps the session across a reload", async ({ page }) => {

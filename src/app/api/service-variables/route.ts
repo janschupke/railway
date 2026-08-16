@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  *
  * The fifth route handler and the second that is not a stream, so the lane argument
  * `/api/image-check` makes applies here almost unchanged: this is a read a client component
- * performs mid-interaction, `dashboard/data.ts` is reserved for Server Components and
+ * performs mid-interaction, the `dashboard/data-*.ts` loaders are reserved for Server Components and
  * `dashboard/actions.ts` is the write lane, and a route handler is the only one of the three
  * with the inbound `AbortSignal` — which a dialog that can be closed before its request
  * lands genuinely wants.

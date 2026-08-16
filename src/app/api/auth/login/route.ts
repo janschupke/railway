@@ -16,11 +16,21 @@ import {
 /**
  * Starts the authorization flow.
  *
- * `?consent=1` forces Railway's consent screen. Without it Railway decides, which is the
- * behaviour worth having: the first sign-in shows the screen because no grant exists
- * yet, and every later one redirects straight back. This used to send `prompt=consent`
- * unconditionally — an override meaning "show it every time regardless" — so choosing
- * projects again was the price of every single sign-in.
+ * `prompt=consent` goes on every request, because Railway issues a refresh token only for
+ * an authorization that carries both `offline_access` and `prompt=consent`. Its own docs
+ * say so in two places — Login & Tokens, and Troubleshooting under "Refresh token not
+ * returned" — and a session without a refresh token dies one hour in, mid-use.
+ *
+ * This was omitted once, on the belief that Railway would re-grant silently for a user who
+ * had already authorized and that the consent screen was therefore the price of every
+ * sign-in. The screen was shown every time either way: the silent request came back with no
+ * refresh token, the callback retried with consent forced, and the user reached the same
+ * screen one redirect later. The parameter is back and the retry is now the rare path it
+ * was written to be. Do not remove it again without evidence that Railway has changed.
+ *
+ * `?consent=1` therefore no longer changes what is sent. It survives as the record of
+ * *why* an attempt was made — the callback reads its cookie to know consent has already
+ * been shown, which is what stops the retry becoming a loop.
  */
 export async function GET(request: NextRequest) {
   return withRequestScope("/api/auth/login", { trustInboundId: false }, () =>
@@ -51,12 +61,10 @@ async function start(request: NextRequest) {
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     /*
-     * Only when asked for. A silent authorization can come back without a refresh
-     * token, since some providers mint one only on a flow where consent was displayed —
-     * the callback detects exactly that and retries here with consent forced, which
-     * costs one redirect in the rare case instead of a consent screen in every case.
+     * Unconditional. See the docblock above: `offline_access` in SCOPES is only half of
+     * Railway's condition for issuing a refresh token, and this is the other half.
      */
-    ...(forceConsent ? { prompt: "consent" } : {}),
+    prompt: "consent",
   });
 
   const response = NextResponse.redirect(authorizationUrl.href);
@@ -68,7 +76,8 @@ async function start(request: NextRequest) {
   response.cookies.set(names.pkce, codeVerifier, opts);
   response.cookies.set(names.state, state, opts);
 
-  // Records which kind of attempt this is, so the callback's retry cannot become a loop.
+  // Records that this attempt is the callback's retry, so that retry cannot become a loop.
+  // The request itself is identical either way now; only the cookie differs.
   if (forceConsent) response.cookies.set(names.consent, "1", opts);
   else clearCookie(response.cookies, names.consent, origin);
 

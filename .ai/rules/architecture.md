@@ -59,7 +59,7 @@ Three lanes, and a change belongs in exactly one of them.
   than coercing an absent search param to `""`.
 
 - **Write** — `src/app/dashboard/actions.ts`, the only `"use server"` file in the repo, and
-  the seven `action-*.ts` modules beside it. The directive file holds the ten exports and
+  the seven `action-*.ts` modules beside it. The directive file holds the exports and
   nothing else: each opens a request scope and hands off. What a verb does lives in
   `action-<verb>.ts`, and the shared parts in `action-form.ts` (fields, zod issues, thrown
   values) and `action-managed.ts` (the ownership guard). Actions return an `ActionResult`;
@@ -67,17 +67,19 @@ Three lanes, and a change belongs in exactly one of them.
 
   The split is forced rather than chosen: a `"use server"` file may export only async
   functions, so a type, a constant or a synchronous helper cannot sit beside an action.
-  Adding a verb means a module and one forwarder, never a tenth concern in the directive
+  Adding a verb means a module and one forwarder, never another concern in the directive
   file.
 
 - **Route handlers** — `src/app/api/**`. Two stream:
   `src/app/api/streams/[deploymentId]/route.ts` multiplexes deployment status and logs into
   a single SSE response, and `src/app/api/watch/[projectId]/route.ts` is the project
   watcher. SSE downstream, WebSocket upstream (ADR-3): the browser never opens a socket to
-  Railway, because that would require the token in the browser. Two do not:
-  `src/app/api/image-check/route.ts` answers a JSON enum member, and
+  Railway, because that would require the token in the browser. Three answer a `fetch`:
+  `src/app/api/image-check/route.ts` answers a JSON enum member,
   `src/app/api/service-variables/route.ts` answers the names of one service's variables so
-  the edit dialog can draw its rows.
+  the edit dialog can draw its rows, and `src/app/api/service-deployments/route.ts` answers
+  one service's recent deployments for the rollback control in an expanded row. `/api/health`
+  is the sixth, and belongs to the platform rather than to the browser.
 
 **A route handler is the right lane when the browser needs an answer mid-interaction, or
 when the work needs the inbound `AbortSignal`.** The image check is both. A Server Action
@@ -270,9 +272,9 @@ upstream; `mappers.ts` turns Railway's shapes into `src/lib/railway/types.ts`.
 **The documents carry their own types, and nothing else may claim them.** Each export in
 `operations.ts` is annotated `TypedDocument<Result, Variables>` from
 `graphql.generated.ts`, and `gql`/`gqlPartial` read both off the document — so a call site
-passes no type argument and its variables are checked. Writing a result shape by hand is
-the thing T-476 removed: it was an assertion nothing verified. A new document means a new
-entry in `operations.ts`, `pnpm codegen`, and nothing else.
+passes no type argument and its variables are checked. Never write a result shape by hand:
+it is an assertion nothing verifies. A new document means a new entry in `operations.ts`,
+`pnpm codegen`, and nothing else.
 
 Scripts exist so you do not have to reason about Railway's schema from memory:
 
@@ -281,21 +283,9 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
 - `pnpm probe:metrics <projectId> <environmentId>` — prints what `metrics`,
   `estimatedUsage` and the `project.workspace.customer` chain answer for a real OAuth
   session. Introspection says what the schema declares; only this says what the token is
-  permitted to read, which is a different question and the one the readouts depend on.
-
-  **It has been run, and these are settled — do not spend a live session re-asking them.**
-  `metrics` and the workspace chain are both readable on a `project:admin` +
-  `workspace:viewer` session. `CPU_USAGE` is populated and `CPU_USAGE_2` answers with an
-  empty array. `CPU_LIMIT` and `MEMORY_LIMIT_GB` are populated per service, in the same
-  request, which is what each row's denominator is built on. `sampleRateSeconds: 60` over a
-  five-minute window returns exactly five points per series. `estimatedUsage` returns
-  magnitudes, not money. Railway adds one aggregate result per measurement with
-  `tags.serviceId: null`, which `toContainerMetrics` drops.
-
-  **Still open:** whether passing `environmentId` alongside `projectId` narrows the result.
-  The probe project has services in one environment only, so both shapes returned the same
-  rows and proved nothing. A project with two populated environments would settle it.
-
+  permitted to read, which is a different question and the one the readouts depend on. Its
+  findings are recorded in [docs/limitations.md](../../docs/limitations.md#cost-and-readouts)
+  — read them there before spending a live session re-asking.
 - `pnpm probe:deployment <deploymentId>` — prints a failed deployment's events verbatim and
   what `pickFailureReason` chose from them, which is the only way to check the order in
   `failure-reason.ts` against a real failure.
@@ -306,13 +296,6 @@ Scripts exist so you do not have to reason about Railway's schema from memory:
   versus a finished one. The ordering is the one with teeth — `DEPLOYMENTS_QUERY` asks for
   `last: N` on the strength of the single observation in `DEPLOYMENT_EVENTS_QUERY`, and if
   deployments arrive newest-first instead it silently offers the ten oldest.
-
-  **Still open, and deliberately unanswerable here:** whether `deploymentRollback` reuses a
-  deployment id or mints a new one. It returns a Boolean, so observing it would mean
-  performing a real rollback — and these are all read-only. Nothing depends on the answer;
-  the row re-keys its stream on whatever the refreshed list reports, as it does after a
-  redeploy.
-
 - `pnpm probe:logs <deploymentId> [--phase build]` — settles what the two log feeds
   actually return: whether a line carries an id, whether `limit` means the most recent N,
   and how far back a subscription replays. `src/lib/log-overlap.ts` is built on the
@@ -479,7 +462,6 @@ allowlist goes on the `boot` line instead, which is where the answerable half li
 - **Named exports**, PascalCase for components (`export function ContainerRow`). Default
   exports only where the App Router requires them (`page.tsx`, `layout.tsx`, `route.ts`,
   `error.tsx`, `loading.tsx`, `not-found.tsx`).
-- **Import order**: React → `next` → third-party → `@/…` → relative.
 - **Props** are an inline object type in the signature; primitives extend
   `React.ComponentProps<"button"> & VariantProps<typeof …>`.
 - **Comments explain why, not what.** This codebase records what broke before, which
