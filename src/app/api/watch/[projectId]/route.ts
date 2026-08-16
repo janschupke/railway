@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { getProjectContainers } from "@/lib/railway/projects";
 import { RailwayApiError } from "@/lib/railway/errors";
+import { applyStopped } from "@/lib/railway/stopped";
 import { fingerprint } from "@/lib/railway/watch-fingerprint";
 import { sseResponse } from "@/lib/sse";
 import { log } from "@/lib/logger";
@@ -102,12 +103,25 @@ async function handle(
 
       while (!signal.aborted) {
         try {
-          const { containers } = await getProjectContainers(
+          const { containers: raw } = await getProjectContainers(
             accessToken,
             projectId,
             environmentId,
             signal,
           );
+          /*
+           * The same overlay the dashboard render applies, and it belongs here for the
+           * reason this watcher exists at all: a stop is a change every OTHER open tab
+           * has to learn about.
+           *
+           * Railway leaves a stopped deployment at SUCCESS forever, so nothing in this
+           * response ever changes when one is stopped — a watcher reading Railway's raw
+           * answer would hash the same value before and after and stay silent, and a
+           * second tab would go on showing Running until someone navigated. Hashing the
+           * state the page is actually rendered from is what makes the stop propagate,
+           * once. See lib/railway/stopped.ts.
+           */
+          const containers = applyStopped(raw);
           const next = fingerprint(containers);
 
           // The first poll establishes the baseline. Announcing a change against nothing

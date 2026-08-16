@@ -6,12 +6,21 @@ The automated equivalents are in [Tests](testing.md); this is what a reviewer ru
 1. **Sign in.** Railway's consent screen should list your projects — select at least one.
 2. **Spin up `redis:7-alpine`.** The row should move Queued → Building → Deploying → Running,
    with build output streaming in the expanded log pane.
-3. **Stop it.** The badge should settle at **Removed** while the row stays on the dashboard —
-   the service, its variables and its history are all still on Railway. The row's controls
-   change with it: Stop and Restart give way to Redeploy. Press that and it should come back
-   Queued → Building → Deploying → Running. Then press **Restart** on the running container
-   with its log pane open: the pane keeps filling, because a restart keeps the same deployment
-   rather than starting a new one.
+3. **Stop it**, from the row's **…** menu. The badge should settle at **Removed** while the row
+   stays on the dashboard — the service, its variables and its history are all still on Railway.
+   Reopen the menu and the commands have changed with it: Stop and Restart give way to Redeploy.
+   Press that and it should come back Queued → Building → Deploying → Running.
+
+   This step is worth running slowly, because it is the one the API does not support and the app
+   makes true. Railway answers `deploymentStop` with `true` and leaves the deployment at
+   `SUCCESS` forever, so **Removed** is this app's own memory of the stop rather than something
+   read back — see [ADR-4](adr/0004-no-database.md). Two things to check while you are here: the
+   newest entry in the expanded history panel agrees with the badge rather than still saying
+   Running, and the row shows no uptime for a container that is not running.
+
+   Then press **Restart** on the running container with its log pane open: the pane keeps
+   filling, because a restart keeps the same deployment rather than starting a new one.
+
 4. **Destroy it** (type the container name to confirm) and check it disappears from the Railway
    dashboard too.
 5. **Several at once.** Spin up three, tick their checkboxes and press **Destroy selected**. The
@@ -26,9 +35,10 @@ The automated equivalents are in [Tests](testing.md); this is what a reviewer ru
 7. **Token expiry.** Leave the tab open past the hour, or rewind `expiresAt` in the session
    cookie, then perform an action. It should succeed — the proxy refreshes and rotates
    transparently.
-8. **Ownership.** Create a service in the Railway dashboard directly. It appears here as _Not
-   managed here_, with no lifecycle controls at all — no stop, restart, redeploy or destroy, and
-   no selection checkbox either.
+8. **Ownership.** Create a service in the Railway dashboard directly. Its row carries the same
+   **…** menu as every other, holding only Details and Open in Railway — no stop, restart,
+   redeploy or destroy, and no selection checkbox either. The reason it cannot be changed here
+   is a sentence in its Details dialog rather than something to infer from an absence.
 9. **The way out.** Click any container's name — every row, not only the broken ones — and confirm
    it opens that service on Railway in a new tab. The chevron beside it is the log panel's
    disclosure; check it still expands from the keyboard.

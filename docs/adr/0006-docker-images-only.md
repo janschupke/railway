@@ -25,8 +25,13 @@ Image sources work for anyone, so that is the product surface.
 - **No build ever runs**, so a failed deployment writes nothing to the build log phase — which is
   why a failed row carries an explanation and a deep link rather than empty output. See
   [Limitations](../limitations.md#failure-reasons).
-- **A preset cannot need a command-line argument.** Core NATS is offered and JetStream is not,
-  for exactly that reason.
+- **A preset cannot need a command-line argument.** ~~Core NATS is offered and JetStream is
+  not, for exactly that reason.~~ **Superseded.** The Advanced panel ships a **Start command**
+  that Railway accepts and stores, so this consequence has been false since it did. The NATS
+  exclusion stands on its real ground instead: JetStream needs somewhere to persist, and the
+  catalog attaches a volume only to the six presets it knows keep state — an image given
+  JetStream and no volume is a queue that silently loses what it was handed. That is a
+  storage decision, not a command one.
 - **Adding GitHub sources is a feature, not a configuration change** — it needs a path through
   the app-installation problem above, not just another source type in the form:
   [Limitations](../limitations.md#sources-and-registries).

@@ -319,6 +319,29 @@ async function attempt(
     restart_policy: restartPolicy ?? "",
     restart_retries: settings.restartRetries ?? -1,
     start_command_length: startCommand?.length ?? 0,
+    /*
+     * And what Railway actually stored, beside what it was asked for.
+     *
+     * Every field above this block is what the form sent. None of these controls is
+     * rendered anywhere afterwards, so until this read existed a value Railway dropped
+     * could only be found by opening Railway's own dashboard and comparing by eye — and two
+     * were found exactly that way: a region sent as an airport code was answered `true` and
+     * stored as `null`, and a retry count of 3 came back as 10 once.
+     *
+     * Absent, not zero, when nothing was customised or the read was refused: a `stored_`
+     * field that defaulted to the same sentinel as the field above it would read as
+     * agreement, which is the one thing this must never say by accident. `createContainer`
+     * makes both of those cases null — see `stored` there.
+     */
+    ...(created.stored
+      ? {
+          stored_region: created.stored.region ?? "",
+          stored_replicas: created.stored.replicas ?? 0,
+          stored_restart_policy: created.stored.restartPolicy ?? "",
+          stored_restart_retries: created.stored.restartRetries ?? -1,
+          stored_start_command_length: created.stored.startCommand?.length ?? 0,
+        }
+      : {}),
   });
 
   revalidatePath("/dashboard");

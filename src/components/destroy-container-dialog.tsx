@@ -17,6 +17,10 @@ export function DestroyContainerDialog({
   environmentId,
   volumeSize,
   disabled,
+  open,
+  onOpenChange,
+  hideTrigger,
+  startRefresh,
 }: {
   serviceId: string;
   displayName: string;
@@ -31,6 +35,16 @@ export function DestroyContainerDialog({
    */
   volumeSize?: string;
   disabled?: boolean;
+  /**
+   * Passed straight through to `ConfirmDestroyDialog`, for the row menu.
+   *
+   * Not re-argued here — see that component, which is where the opt-in control, the wrapped
+   * `onOpenChange` and the lifted refresh transition all state their reasons.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  startRefresh?: React.TransitionStartFunction;
 }) {
   const t = useTranslations("destroy");
   const tOne = useTranslations("destroy.one");
@@ -65,6 +79,10 @@ export function DestroyContainerDialog({
             }
       }
       triggerDisabled={disabled}
+      {...(open === undefined ? {} : { open })}
+      {...(onOpenChange ? { onOpenChange } : {})}
+      {...(hideTrigger === undefined ? {} : { hideTrigger })}
+      {...(startRefresh ? { startRefresh } : {})}
       copy={{
         trigger: tOne("trigger"),
         title: tOne("title", { name: displayName }),

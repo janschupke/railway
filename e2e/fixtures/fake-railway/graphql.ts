@@ -435,22 +435,33 @@ export function execute(
        * spin-up-form.test.tsx.
        */
       /*
-       * Four rows, two of which exist to be dropped. A region with no id would post an empty
-       * string, and a deprecated one is a datacentre with an end date — so both filters in
-       * `toRegionOptions` run end to end here rather than only in a unit test.
+       * Four rows, and the shape matters as much as the count.
+       *
+       * `id` and `name` are DIFFERENT on every row here, because they are different on the
+       * live API and this fixture used to pretend otherwise. Railway's `id` is an airport
+       * code shared by several datacentres — three rows come back as `ams` — while `name`
+       * is the unique identifier `serviceInstanceUpdate` accepts. The app sent `id` for as
+       * long as the control existed, Railway answered `true` and stored `null`, and nothing
+       * caught it because every fixture set the two fields to the same string.
+       *
+       * Two rows exist to be dropped and one to be kept for a reason that changed: the
+       * deprecated one is a datacentre with an end date, and the one with a null `id` is now
+       * perfectly usable — `name` is `String!` — so it is offered rather than filtered. The
+       * two `ams` rows prove the third thing: keyed on `id` they would collapse into one
+       * option, and keyed on `name` they are two choices.
        */
       return {
         data: {
           regions: [
             {
-              id: "us-west2",
-              name: "us-west2",
+              id: "sfo",
+              name: "us-west2-xrhvwla",
               location: "US West (Oregon)",
               country: "United States",
               deploymentConstraints: null,
             },
             {
-              id: "europe-west4-drams3a",
+              id: "ams",
               name: "europe-west4-drams3a",
               location: "Europe West (Amsterdam)",
               country: "Netherlands",
@@ -458,14 +469,14 @@ export function execute(
             },
             {
               id: null,
-              name: "unnamed",
-              location: "Somewhere with no identifier",
-              country: "Nowhere",
+              name: "europe-west4-drams3a2",
+              location: "Europe West (Amsterdam 2)",
+              country: "Netherlands",
               deploymentConstraints: null,
             },
             {
-              id: "us-west1",
-              name: "us-west1",
+              id: "sfo",
+              name: "us-west1-eqdc4a",
               location: "US West (retiring)",
               country: "United States",
               deploymentConstraints: { deprecationInfo: { isDeprecated: true } },

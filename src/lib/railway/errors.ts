@@ -3,6 +3,7 @@ import type { MessageDescriptor } from "@/lib/messages";
 
 export type RailwayErrorKind =
   | "auth" // 401/403, or a GraphQL-layer refusal — token rejected or scope insufficient
+  | "plan_limit" // the account's plan will not provision more — nothing to retry
   | "rate_limit" // 429 — retries exhausted
   | "graphql" // HTTP 200 with an errors[] payload
   | "network" // transport failure or timeout
@@ -68,6 +69,37 @@ export function isAuthEntry(entry: GraphQLErrorEntry): boolean {
   // is checked first so a genuine schema rejection is never mistaken for a permission.
   if (code === "GRAPHQL_VALIDATION_FAILED") return false;
   return AUTH_MESSAGE.test(entry.message);
+}
+
+/**
+ * Railway's plan ceilings, which arrive as an ordinary `errors[]` entry.
+ *
+ * Measured live on a free account, spinning up one service past the cap:
+ * `{"message":"Free plan resource provision limit exceeded. Please upgrade to provision
+ * more resources!","extensions":{"code":"INTERNAL_SERVER_ERROR"}}`. There is no code to
+ * match on — every refusal Railway sends carries that same code — so the wording is the
+ * only signal, and without this the sentence shown was "a reason the app does not
+ * recognise", which is both wrong and unactionable: Railway had said exactly what to do.
+ *
+ * The two patterns are deliberately separate. The first is the wording measured above;
+ * the second catches the sibling refusals (`resource limit reached`, `service limit
+ * exceeded`) without matching a rate limit, whose own kind carries a retry delay this one
+ * must never suggest — hence `rate` is excluded rather than left to chance.
+ */
+const PLAN_LIMIT_MESSAGE =
+  /\bplan\b.*\blimit\b|(?<!rate\s)\blimit\s+(exceeded|reached)\b|\bupgrade\s+(your\s+plan|to\s+provision)\b/i;
+
+/**
+ * Whether one `errors[]` entry is Railway refusing on the account's plan.
+ *
+ * Checked before the auth classifier at the one call site below, which is safe in both
+ * directions: `AUTH_MESSAGE` matches neither "limit exceeded" nor "upgrade", and the
+ * spec-conformant auth codes short-circuit before any wording is read.
+ */
+export function isPlanLimitEntry(entry: GraphQLErrorEntry): boolean {
+  if (entry.extensions?.code === "GRAPHQL_VALIDATION_FAILED") return false;
+  if (/\brate\s+limit\b/i.test(entry.message)) return false;
+  return PLAN_LIMIT_MESSAGE.test(entry.message);
 }
 
 export class RailwayApiError extends Error {
@@ -169,6 +201,14 @@ export class RailwayApiError extends Error {
           };
         }
         return { key: "errors.api.notAuthorized", values: { incident } };
+      case "plan_limit":
+        /*
+         * The one refusal in this list with a remedy that is not "retry" and not
+         * "authorize again" — the account is at its ceiling, so something has to be
+         * destroyed or the plan has to change. Retrying is the one thing guaranteed
+         * to fail, which is why this is its own kind rather than a graphql sentence.
+         */
+        return { key: "errors.api.planLimit", values: { incident } };
       case "rate_limit":
         return this.retryAfterSeconds
           ? {
@@ -205,9 +245,15 @@ export function toApiError(
   status: number,
 ): RailwayApiError {
   const code = entry.extensions?.code;
-  const auth = isAuthEntry(entry);
+  // Auth first: a dead token is the more specific diagnosis, and a refusal cannot be
+  // both. Plan limit second, so only what neither classifier claims falls to `graphql`.
+  const kind: RailwayErrorKind = isAuthEntry(entry)
+    ? "auth"
+    : isPlanLimitEntry(entry)
+      ? "plan_limit"
+      : "graphql";
   return new RailwayApiError(entry.message || "Railway rejected the operation", {
-    kind: auth ? "auth" : "graphql",
+    kind,
     status,
     operation: operationName,
     ...(code ? { code } : {}),

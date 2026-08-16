@@ -8,10 +8,19 @@ import type { Container, ContainerMetrics } from "./railway/types";
  * container-filters.ts for the same reason: the list's client-side reductions belong
  * together, and neither of them touches Railway.
  *
- * The scope is the ticket's: only containers this app created, identified by the same
- * `managed` flag the owner filter and the destroy gate already key on. A total that quietly
- * included services someone else made would be the exact misreading the copy around it is
- * written to prevent.
+ * The default scope is the ticket's: only containers this app created, identified by the
+ * same `managed` flag the owner filter and the destroy gate already key on. A total that
+ * quietly included services someone else made would be the exact misreading the copy around
+ * it is written to prevent.
+ *
+ * **`managedOnly: false` widens it, and the widening is only safe because it is labelled.**
+ * The usage tooltip states two figures — what this app's containers use, and what everything
+ * in the environment uses — and the second is what makes the first legible: a number with
+ * nothing beside it is a number nobody can tell is large. The invariant above is not relaxed
+ * by the option; it is that a total must never be shown without saying which set it covers,
+ * and a caller that widens the scope owes the reader that sentence. Note the second figure
+ * is still an *environment* total, never a workspace one — the only workspace figure in this
+ * app is `spend`, in dollars, on the Billing tab.
  *
  * **The ceilings are deliberately not summed here, and this will be proposed again.** Each
  * row now reads "0.25 of 2 vCPU", and totalling the denominators to "6 vCPU provisioned"
@@ -32,13 +41,16 @@ export type MetricsTotals = {
 export function sumContainerMetrics(
   containers: Container[],
   metrics: Record<string, ContainerMetrics>,
+  options: { managedOnly?: boolean } = {},
 ): MetricsTotals {
+  const { managedOnly = true } = options;
+
   let cpuCores: number | null = null;
   let memoryGb: number | null = null;
   let counted = 0;
 
   for (const container of containers) {
-    if (!container.managed) continue;
+    if (managedOnly && !container.managed) continue;
 
     const usage = metrics[container.serviceId];
     if (!usage) continue;

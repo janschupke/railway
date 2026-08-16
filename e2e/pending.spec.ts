@@ -5,6 +5,7 @@ import {
   injectFaults,
   onlyVisible,
   openNewContainerTab,
+  pickRowAction,
   row,
   settled,
   signIn,
@@ -73,7 +74,7 @@ test("destroy marks its button busy and locks cancel", async ({ page }) => {
   await expect(row(page, "doomed")).toBeVisible();
 
   await injectFaults(page, { slowMs: 1500 });
-  await row(page, "doomed").getByRole("button", { name: "Destroy" }).click();
+  await pickRowAction(page, "doomed", /^Destroy$/);
 
   await onlyVisible(page.getByLabel(/type .doomed. to confirm/i)).fill("doomed");
   const confirm = button(page, /destroy permanently|destroying/i);

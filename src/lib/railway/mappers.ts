@@ -407,43 +407,45 @@ export type RegionNode = {
 /**
  * The regions worth offering, in the order a select should show them.
  *
- * Two filters, and each drops a row that would be a worse choice than no choice:
+ * **`name` is the value, and `id` is not.** This read `region.id` for a long time, and it
+ * was wrong in a way nothing could catch from inside the app. Railway documents `id` as
+ * "Region ID (airport code)", and on the live API it is exactly that — a *location* code
+ * shared by every datacentre at that airport: three rows come back as `ams` and three more
+ * as `sfo`. The identifier `serviceInstanceUpdate` accepts is `name`, which is unique per
+ * row — `europe-west4-drams3a`. Sending `ams` produced `true` from the mutation and `null`
+ * in the stored setting: a control that appeared to work and did nothing, on a field that
+ * has no read-back in the UI to contradict it. `constants.ts` measures `REGION_MAX`
+ * against `europe-west4-drams3a` already, so only this line was ever wrong.
  *
- *   - **No `id`.** The field is nullable on Railway's own type while `name` and `location`
- *     are not, so a region can be listed with nothing to submit. An option posting the empty
- *     string is indistinguishable from the blank one above it, which means Railway picks —
- *     so the user would choose a region and silently get a different one.
+ * One filter now, where there were two. Dropping a row with no `id` was right when `id`
+ * was the submitted value — it is nullable on Railway's own type, so an option posting the
+ * empty string would read as "let Railway choose" rather than as the choice the person
+ * made. `name` is `String!`, so that row no longer exists and a guard for it would be a
+ * branch nothing can reach.
+ *
+ * What is left drops a row that would still be a worse choice than no choice:
+ *
  *   - **Deprecated.** Railway carries a replacement region beside the flag, so these are
  *     datacentres with an end date. Offering one is offering a container that stops working
  *     later, at a moment nothing in this app will explain.
  *
- * `location` rather than `name` as the label: `name` is the identifier again in most rows,
- * where `location` is the sentence a person reads. Sorted by country then label, because the
- * country is the `<optgroup>` heading and an unsorted list would repeat headings.
+ * `location` rather than `name` as the label, which is what makes the two fields a value
+ * and a caption rather than two spellings of one thing: `location` is the sentence a person
+ * reads. Sorted by country then label, because the country is the `<optgroup>` heading and
+ * an unsorted list would repeat headings.
  */
 export function toRegionOptions(regions: RegionNode[]): RegionOption[] {
-  return (
-    regions
-      /*
-       * One pass, because the guard and the read have to stay together. `id` is nullable on
-       * the live schema, so this was a `.filter` for null followed four lines later by a
-       * `.map` asserting non-null — two statements holding one invariant between them, and
-       * the compiler checking neither. `flatMap` narrows `id` where it is tested and uses it
-       * in the same expression, which is the same refusal expressed so that it cannot come
-       * apart in a later edit.
-       */
-      .flatMap((region) =>
-        region.id === null ||
-        region.deploymentConstraints?.deprecationInfo?.isDeprecated
-          ? []
-          : [{ id: region.id, label: region.location, country: region.country }],
-      )
-      .sort(
-        (left, right) =>
-          left.country.localeCompare(right.country) ||
-          left.label.localeCompare(right.label),
-      )
-  );
+  return regions
+    .flatMap((region) =>
+      region.deploymentConstraints?.deprecationInfo?.isDeprecated
+        ? []
+        : [{ value: region.name, label: region.location, country: region.country }],
+    )
+    .sort(
+      (left, right) =>
+        left.country.localeCompare(right.country) ||
+        left.label.localeCompare(right.label),
+    );
 }
 
 /**

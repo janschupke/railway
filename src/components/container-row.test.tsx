@@ -76,6 +76,12 @@ async function expand(user: ReturnType<typeof userEvent.setup>, name = "cache") 
   );
 }
 
+/** Opens the row's actions menu and waits for it to be there. */
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, name = "cache") {
+  await user.click(screen.getByRole("button", { name: `Actions for ${name}` }));
+  return screen.findByRole("menu");
+}
+
 /** Mirrors the dashboard layout, which owns both providers. */
 const renderRow = (
   over: Partial<Container> = {},
@@ -157,13 +163,16 @@ describe("ContainerRow", () => {
     });
   });
 
-  it("offers destroy only for containers this app created", () => {
+  it("offers destroy only for containers this app created", async () => {
+    const user = userEvent.setup();
     const { unmount } = renderRow({ managed: true });
-    expect(screen.getByRole("button", { name: /^destroy$/i })).toBeInTheDocument();
+    await openRowMenu(user);
+    expect(screen.getByRole("menuitem", { name: /^destroy$/i })).toBeInTheDocument();
     unmount();
 
     renderRow({ managed: false });
-    expect(screen.queryByRole("button", { name: /^destroy$/i })).toBeNull();
+    await openRowMenu(user);
+    expect(screen.queryByRole("menuitem", { name: /^destroy$/i })).toBeNull();
   });
 
   it("reads a deployment history only for containers this app created", async () => {
@@ -194,46 +203,40 @@ describe("ContainerRow", () => {
     vi.unstubAllGlobals();
   });
 
-  it("gives an unmanaged container the one action it does have", () => {
+  it("gives an unmanaged container the actions it does have, in the same menu", async () => {
     /*
      * The slot used to hold a button reading "Not managed here" that did nothing when
      * pressed — a control whose entire content was an explanation of why it was not a
-     * control, which is read as broken long before it is read as a note. Railway's own
-     * page is where this service can actually be managed, so that is what the row's
-     * action column offers.
+     * control, which is read as broken long before it is read as a note. Then it held two
+     * bare buttons where every other row held a cluster of four, so the column ended in a
+     * different shape depending on who made the service.
+     *
+     * One menu on every row now, holding whatever that row may do. Railway's own page is
+     * where this service can actually be managed, and it is still here.
      */
+    const user = userEvent.setup();
     renderRow({ managed: false, serviceId: "svc_pg" });
+    await openRowMenu(user);
 
-    const open = screen.getByRole("link", { name: "Open in Railway" });
+    const open = screen.getByRole("menuitem", { name: "Open in Railway" });
     expect(open).toHaveAttribute("href", expect.stringContaining("/service/svc_pg"));
     // A new tab that can reach back into this one is the reason rel is asserted, not
     // assumed, on every outbound link in this file.
     expect(open).toHaveAttribute("rel", "noreferrer");
   });
 
-  it("explains why an unmanaged container has no destroy control", async () => {
-    // Silently omitting the control leaves the user wondering; the reason is reachable
-    // by keyboard, not buried in a title attribute.
-    const user = userEvent.setup();
-    renderRow({ managed: false, displayName: "postgres" });
-
+  it("withholds destroy entirely while a removal is already running", async () => {
     /*
-     * A description, not a label. Overriding the name left it sharing no words with the
-     * visible text — WCAG 2.5.3, and unusable by voice control — so the accessible name
-     * stays "Open in Railway" and the reason rides along as the tooltip.
+     * Absent rather than dimmed, which is what the menu changed here. As a button, Destroy
+     * was rendered disabled — a control that is present and inert reads as "not yet" on a
+     * row where the answer is "never again". A menu has no such obligation.
      */
-    const open = screen.getByRole("link", { name: "Open in Railway" });
-    // Radix Tooltip opens on hover or focus, not click.
-    await user.hover(open);
-
-    expect(
-      await screen.findByText(/only services created in this app/i),
-    ).toBeInTheDocument();
-  });
-
-  it("disables destroy while a removal is already running", () => {
+    const user = userEvent.setup();
     renderRow({ state: "removing" });
-    expect(screen.getByRole("button", { name: /^destroy$/i })).toBeDisabled();
+    await openRowMenu(user);
+
+    expect(screen.queryByRole("menuitem", { name: /^destroy$/i })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: /^details$/i })).toBeInTheDocument();
   });
 
   it("expands and collapses the log panel", async () => {
@@ -352,6 +355,49 @@ describe("ContainerRow", () => {
       expect(useDeploymentStream).toHaveBeenLastCalledWith("dep_1", "build", false);
     } finally {
       streamState.state = null;
+    }
+  });
+
+  it("stops following a closed stream once the server has a terminal reading", async () => {
+    /*
+     * The other half of that rule, and the one whose absence made a stop invisible.
+     *
+     * Railway leaves a stopped deployment at SUCCESS, which is terminal, so the monitor
+     * had already emitted `done` and the EventSource had already closed *before* Stop was
+     * pressed — and the effect that opens it is keyed on the deployment id, which a stop
+     * does not change. No second poll is ever issued. So `stream.state` stayed frozen at
+     * `running` and won against a server render that now correctly said `removed`, and the
+     * row went on offering Stop and Restart for a container that was already stopped.
+     *
+     * A closed stream has nothing left to say; a terminal server render is newer.
+     */
+    streamState.state = "running";
+    streamState.done = true;
+    try {
+      renderRow({ state: "removed" });
+      expect(screen.getByText("Removed")).toBeInTheDocument();
+      await openRowMenu(userEvent.setup());
+      expect(
+        screen.queryByRole("menuitem", { name: /^stop$/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: /redeploy/i })).toBeInTheDocument();
+    } finally {
+      streamState.state = null;
+      streamState.done = false;
+    }
+  });
+
+  it("still follows a closed stream when the server render is mid-flight", () => {
+    // The guard is `isTerminal`, not `done` alone: the settle refresh can race a list read
+    // still saying DEPLOYING, and `deploying` is not terminal, so the stream wins there.
+    streamState.state = "running";
+    streamState.done = true;
+    try {
+      renderRow({ state: "deploying" });
+      expect(screen.getByText("Running")).toBeInTheDocument();
+    } finally {
+      streamState.state = null;
+      streamState.done = false;
     }
   });
 

@@ -17,10 +17,13 @@ import {
   openDetailDialog,
   openEditDialog,
   openNewContainerTab,
+  openRowMenu,
   pickPreset,
+  pickRowAction,
   railwayLink,
   rollBackTo,
   row,
+  rowMenuItems,
   runRowAction,
   seedServices,
   setTabVisibility,
@@ -339,9 +342,13 @@ test.describe("container lifecycle", () => {
      * so a component test can assert the derivation but never that the status the browser
      * actually receives drives it.
      *
-     * Stopping settles the deployment at REMOVED in the fixture, which is what Railway's
-     * own dashboard reports for a stopped deployment — and it is terminal in this app's
-     * state machine, so the stream closes rather than polling for the duration ceiling.
+     * **And it used to prove none of it.** The fixture set the deployment to REMOVED on
+     * stop, so this passed by asking Railway a question it answers. It does not: measured
+     * live, `deploymentStop` returns `true`, the container really stops, and the status
+     * stays **SUCCESS** indefinitely. There is no terminal status for a stopped deployment.
+     * The fixture now does the same nothing the live API does, which makes the two
+     * assertions below a real test of `lib/railway/stopped.ts` — the memory of a stop that
+     * is the only reason the badge reaches Removed and Redeploy becomes reachable at all.
      */
     await spinUp(page, "cache");
     const cache = row(page, "cache");
@@ -352,16 +359,46 @@ test.describe("container lifecycle", () => {
     await expect(toast(page, "Stopped cache")).toBeVisible();
     await expect(cache.getByText("Removed")).toBeVisible({ timeout: 20_000 });
 
-    // The row survives the stop — that is the difference from Destroy — and the control it
+    // The row survives the stop — that is the difference from Destroy — and the command it
     // now offers is the way back.
-    await expect(
-      onlyVisible(cache.getByRole("button", { name: /^stop$/i })),
-    ).toHaveCount(0);
+    expect(await rowMenuItems(page, "cache")).not.toContain("Stop");
 
     await runRowAction(page, "cache", "Redeploy");
 
     await expect(toast(page, "Redeploying cache")).toBeVisible();
     await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("does not strand a container that is stopped and then restarted", async ({
+    page,
+  }) => {
+    /*
+     * The failure mode of the obvious implementation of the fix above, so it is worth
+     * stating what it would look like. `restartDeployment` keeps the same deployment id
+     * and Railway walks the status back to SUCCESS, so a restarted container is byte for
+     * byte a stopped one in the response. A memory keyed on the deployment id would still
+     * match, the row would stay on **Removed**, and `availableActions("removed")` offers
+     * only Redeploy — so the container could not be stopped again, and pressing Redeploy
+     * would mint a second deployment of one that is already running.
+     *
+     * What stops that is `withManagedContainer` clearing the memory for every verb but
+     * stop. This is the spec that would fail if it were ever moved into the individual
+     * verbs and one of them forgot.
+     */
+    await spinUp(page, "cache");
+    const cache = row(page, "cache");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    await runRowAction(page, "cache", "Stop");
+    await expect(cache.getByText("Removed")).toBeVisible({ timeout: 20_000 });
+
+    await runRowAction(page, "cache", "Redeploy");
+    await expect(cache.getByText("Running")).toBeVisible({ timeout: 20_000 });
+
+    // Back to the full set a running container offers, not the one Redeploy leaves behind.
+    expect(await rowMenuItems(page, "cache")).toEqual(
+      expect.arrayContaining(["Stop", "Restart"]),
+    );
   });
 
   test("restarts a running container without leaving its log stream", async ({
@@ -432,7 +469,7 @@ test.describe("container lifecycle", () => {
      * control. That pairing is the panel's whole claim about which row is which, and it is
      * what stops someone rolling back to where they already are.
      */
-    await expect(entries.nth(0)).toContainText("Running now");
+    await expect(entries.nth(0)).toContainText("Current");
     await expect(
       entries.nth(0).getByRole("button", { name: /^Roll back/ }),
     ).toHaveCount(0);
@@ -524,9 +561,7 @@ test.describe("container lifecycle", () => {
       timeout: 20_000,
     });
 
-    await onlyVisible(
-      row(page, "cache").getByRole("button", { name: /^stop$/i }),
-    ).click();
+    await pickRowAction(page, "cache", /^stop$/i);
 
     const dialog = onlyVisible(page.getByRole("alertdialog"));
     await expect(dialog).toContainText("Stop cache?");
@@ -650,13 +685,21 @@ test.describe("container lifecycle", () => {
     const postgres = row(page, "postgres");
     await expect(postgres).toBeVisible();
 
-    await expect(
-      onlyVisible(postgres.getByRole("button", { name: /^destroy$/i })),
-    ).toHaveCount(0);
+    /*
+     * The same menu every other row ends in, holding only what this row may do. The two
+     * bare buttons this replaced were a different shape in the same column, which left a
+     * reader to work out why — and the answer, that somebody else made the service, was on
+     * a tooltip.
+     */
+    const menu = await openRowMenu(page, "postgres");
+    expect(await menu.getByRole("menuitem").allInnerTexts()).toEqual([
+      "Details",
+      "Open in Railway",
+    ]);
 
-    // The slot is not left dead: what a reader wants from a row this app cannot destroy
-    // is Railway's own page for it, and that is what the action column offers instead.
-    const open = onlyVisible(postgres.getByRole("link", { name: "Open in Railway" }));
+    // The menu is not left dead: what a reader wants from a row this app cannot destroy is
+    // Railway's own page for it, and that is what the second command is.
+    const open = onlyVisible(menu.getByRole("menuitem", { name: "Open in Railway" }));
     await expect(open).toHaveAttribute("target", "_blank");
     await expect(open).toHaveAttribute("href", /railway\.com\/project\/.+\/service\//);
   });
@@ -1124,6 +1167,31 @@ test.describe("container lifecycle", () => {
     await expect(toast(page, /rate limit/i)).toBeVisible();
   });
 
+  test("names the plan when the account is at its ceiling", async ({ page }) => {
+    /*
+     * Measured against the live API: a free account already holding five services refused
+     * the sixth with `Free plan resource provision limit exceeded. Please upgrade to
+     * provision more resources!` — HTTP 200, `INTERNAL_SERVER_ERROR`, the same shape as
+     * every other Railway refusal. It fell through to the generic graphql sentence, so
+     * the app told the user it did not recognise the reason while Railway had said
+     * exactly what to do about it.
+     *
+     * The same hidden-tab-then-open-then-inject ordering as the two rate-limit tests
+     * above, and for the same reasons: the watcher and the navigation's own reads both
+     * draw from this queue.
+     */
+    await setTabVisibility(page, "hidden");
+    await openNewContainerTab(page);
+    // One is enough — a plan ceiling is not retried, which is half of what makes it its
+    // own kind. A second queued fault would still be sitting there at the assertion.
+    await injectFaults(page, { planLimit: 1 });
+
+    await field(page, "Name").fill("cache");
+    await button(page, /spin up container/i).click();
+
+    await expect(toast(page, /plan's resource limit/i)).toBeVisible();
+  });
+
   test("honours Retry-After rather than its own backoff", async ({ page }) => {
     /*
      * ADR-8 sells this as one of the things a hand-rolled client buys over RetryLink —
@@ -1456,8 +1524,14 @@ test.describe("resource controls on a spin-up", () => {
     await expect(page.getByRole("listbox")).toHaveCount(0);
     await field(page, "Name").fill("tuned");
 
-    // Labels going in, values coming out — the assertion below is what proves the row a
-    // person clicked still reaches Railway as the identifier it stands for.
+    /*
+     * Labels going in, values coming out — the assertion below is what proves the row a
+     * person clicked still reaches Railway as the identifier it stands for. Load-bearing
+     * for the region in particular: the app sent Railway's airport code for as long as the
+     * control existed, Railway answered `true` and stored `null`, and the only way to see
+     * it was to open Railway's own dashboard. Reading the stored settings back out of the
+     * fixture is what makes that visible from inside the suite.
+     */
     await fillAdvanced(page, {
       region: "US West (Oregon)",
       replicas: "2",
@@ -1471,7 +1545,7 @@ test.describe("resource controls on a spin-up", () => {
 
     await expect(row(page, "tuned")).toBeVisible();
     expect((await created(page, "tuned"))?.settings).toEqual({
-      region: "us-west2",
+      region: "us-west2-xrhvwla",
       replicas: 2,
       restartPolicy: "ON_FAILURE",
       restartRetries: 4,
@@ -1617,9 +1691,9 @@ test.describe("resource controls on a spin-up", () => {
   });
 
   /*
-   * Both filters in `toRegionOptions`, end to end. The fixture lists four regions: one with
-   * no id, which would post an empty string and silently mean "Railway chooses", and one
-   * Railway is retiring, which is a container that stops working later.
+   * `toRegionOptions` end to end. The fixture lists four regions in the live API's own
+   * shape: two Amsterdam datacentres sharing one airport code, one row Railway left with no
+   * code at all, and one it is retiring — which is a container that stops working later.
    */
   test("offers only the regions worth choosing", async ({ page }) => {
     await openNewContainerTab(page);
@@ -1633,10 +1707,23 @@ test.describe("resource controls on a spin-up", () => {
     await onlyVisible(page.getByRole("combobox", { name: "Region" })).click();
     const list = onlyVisible(page.getByRole("listbox"));
 
-    await expect(list.getByRole("option")).toHaveCount(3);
+    /*
+     * Four listed regions, one deprecated, plus the blank row — so four options.
+     *
+     * Two of them are the two Amsterdam datacentres, which is the assertion that would have
+     * caught the defect this fixture used to hide: Railway's `id` is an airport code shared
+     * by several rows, so an app keyed on it would show one Amsterdam here and post a value
+     * Railway stores as null. Keyed on `name`, they are two distinct choices.
+     */
+    await expect(list.getByRole("option")).toHaveCount(4);
     await expect(list.getByRole("option", { name: "Railway chooses" })).toBeVisible();
     await expect(list.getByRole("option", { name: "US West (Oregon)" })).toBeVisible();
-    await expect(list.getByRole("option", { name: /no identifier/i })).toHaveCount(0);
+    await expect(
+      list.getByRole("option", { name: /Europe West \(Amsterdam\)/ }),
+    ).toBeVisible();
+    await expect(
+      list.getByRole("option", { name: /Europe West \(Amsterdam 2\)/ }),
+    ).toBeVisible();
     await expect(list.getByRole("option", { name: /retiring/i })).toHaveCount(0);
 
     // The panel behind it is unreachable while this layer holds pointer-events on body.
@@ -1690,6 +1777,36 @@ test.describe("usage and spend", () => {
     await expect(readout).not.toContainText(/\d{4}d/);
   });
 
+  test("carries both usage scopes in a tooltip on the count", async ({ page }) => {
+    /*
+     * The figures used to be a second caption under the count — two subtle lines competing
+     * for one slot, reading as one sentence continuing. They hang off the count now, which
+     * also made room for the second scope: a total with nothing beside it is a total nobody
+     * can tell is large.
+     *
+     * Hovered rather than queried in place, and that is the assertion rather than a
+     * mechanic: Radix mounts tooltip content only while open, which is what keeps numbers
+     * that move on every metrics poll out of the live region the count sits in.
+     */
+    await spinUp(page, "cache");
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const count = onlyVisible(page.getByRole("button", { name: /created here/ }));
+    await expect(count).toBeVisible();
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+    await count.hover();
+    const tip = onlyVisible(page.getByRole("tooltip"));
+    await expect(tip).toContainText("Created here");
+    await expect(tip).toContainText("Everything in this environment");
+    // The seeded postgres this app did not create is in the second figure and not the
+    // first, which is the whole point of stating two.
+    await expect(tip).toContainText(/vCPU and .* across 1 container/);
+    await expect(tip).toContainText(/vCPU and .* across 2 containers/);
+  });
+
   test("says a barely-busy container is barely busy, not idle", async ({ page }) => {
     /*
      * The defect this follow-up exists for, proven through the whole stack. A live probe
@@ -1724,9 +1841,9 @@ test.describe("usage and spend", () => {
 
     const readout = cache.getByLabel(/Resource use for cache/);
     await expect(readout).toContainText("—");
-    // The row, its logs and its destroy control are all untouched.
+    // The row, its logs and its commands are all untouched.
     await expect(cache.getByRole("log")).toBeVisible();
-    await expect(cache.getByRole("button", { name: "Destroy" })).toBeVisible();
+    expect(await rowMenuItems(page, "cache")).toContain("Destroy");
   });
 });
 
@@ -1888,9 +2005,7 @@ test.describe("editing a container", () => {
     expect(services.map((s) => s.name)).toContain("spun-renamed");
 
     // Still ours, so the destroy control is still offered.
-    await expect(
-      row(page, "renamed").getByRole("button", { name: "Destroy" }),
-    ).toBeVisible();
+    expect(await rowMenuItems(page, "renamed")).toContain("Destroy");
   });
 
   test("adds and removes a variable without ever showing a stored value", async ({
@@ -2015,10 +2130,8 @@ test.describe("editing a container", () => {
     await expect(dialog.getByRole("button", { name: /^edit$/i })).toHaveCount(0);
     await expect(dialog.getByText(/did not create this service/i)).toBeVisible();
     await dismissWithEscape(page, dialog);
-    // The slot still offers Railway's own page, which is the row's one action.
-    await expect(
-      onlyVisible(row(page, "postgres").getByRole("link", { name: "Open in Railway" })),
-    ).toBeVisible();
+    // The menu still offers Railway's own page, which is where this one can be changed.
+    expect(await rowMenuItems(page, "postgres")).toContain("Open in Railway");
   });
 
   test("dismisses with Escape without saving", async ({ page }) => {

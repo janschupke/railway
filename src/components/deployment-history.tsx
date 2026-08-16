@@ -151,8 +151,15 @@ export function DeploymentHistory({
    * One deployment is not a history. Saying so is worth a sentence of its own: the generic
    * list would render a single row with no control on it, which looks like the control
    * failing rather than like there being nowhere to go back to.
+   *
+   * **And it has to BE the current one**, which this used to assume rather than check. The
+   * copy says "the only deployment this service has had", and a lone entry that is not the
+   * one the service is on is a different fact entirely — Railway's list is capped at
+   * LIST.DEPLOYMENT_HISTORY and this app has already seen it answer with an id the service
+   * has moved off. Falling through to the list is right in that case: the row renders with
+   * its own rollback control, which is exactly what somebody in that position wants.
    */
-  if (history.entries.length === 1) {
+  if (history.entries.length === 1 && history.entries[0]?.id === currentDeploymentId) {
     return (
       <Text variant="caption" tone="subtle">
         {t("historyOnlyCurrent")}

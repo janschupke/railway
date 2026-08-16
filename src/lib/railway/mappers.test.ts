@@ -622,29 +622,68 @@ describe("toWorkspaceSpend", () => {
 });
 
 describe("toRegionOptions", () => {
+  /**
+   * The real shape, which is not what this fixture used to hold.
+   *
+   * It set `id` and `name` to the same string, so every assertion below passed whichever
+   * field the mapper read — and the mapper read the wrong one for as long as it existed.
+   * On the live API `id` is a *location* code shared by several rows (`ams` three times,
+   * `sfo` three times) and `name` is the unique identifier the mutation accepts. A fixture
+   * where the two agree cannot tell them apart, which is exactly why nothing caught it.
+   */
   const region = (over: Partial<RegionNode> = {}): RegionNode => ({
-    id: "us-west2",
-    name: "us-west2",
-    location: "US West (Oregon)",
-    country: "United States",
+    id: "ams",
+    name: "europe-west4-drams3a",
+    location: "EU West (Amsterdam)",
+    country: "Netherlands",
     deploymentConstraints: null,
     ...over,
   });
 
-  it("maps a region to the value a select posts and the sentence it shows", () => {
+  it("posts the identifier Railway accepts, not the airport code beside it", () => {
+    /*
+     * Sending `id` returned `true` from `serviceInstanceUpdate` and stored `null`: a
+     * control that appeared to work and did nothing, on a field with no read-back in the
+     * UI to contradict it. The label stays `location`, which is the sentence a person
+     * reads rather than either identifier.
+     */
     expect(toRegionOptions([region()])).toEqual([
-      { id: "us-west2", label: "US West (Oregon)", country: "United States" },
+      {
+        value: "europe-west4-drams3a",
+        label: "EU West (Amsterdam)",
+        country: "Netherlands",
+      },
     ]);
   });
 
-  /*
-   * `Region.id` is nullable on the live schema while `name` and `location` are not, so a
-   * listed region can carry nothing to submit. An option posting the empty string is
-   * indistinguishable from the blank row above it — which means Railway picks — so somebody
-   * would choose a region and silently get a different one.
-   */
-  it("drops a region with no id, which would post an empty string", () => {
-    expect(toRegionOptions([region({ id: null }), region()])).toHaveLength(1);
+  it("offers every datacentre at one airport rather than collapsing them", () => {
+    // Three rows come back as `ams` on the live API. Keyed on `id`, two of them would have
+    // been three ways of spelling one option; keyed on `name`, they are three choices.
+    const listed = toRegionOptions([
+      region({ name: "europe-west4-drams3a" }),
+      region({ name: "europe-west4-drams3a2" }),
+      region({ name: "europe-west4-drams3a3" }),
+    ]);
+
+    expect(listed.map((option) => option.value)).toHaveLength(3);
+    expect(new Set(listed.map((option) => option.value)).size).toBe(3);
+  });
+
+  it("keeps a region whose airport code Railway left null", () => {
+    /*
+     * `id` is nullable on the live schema and `name` is not, so a row with no code used to
+     * be dropped — correctly, while `id` was the submitted value, because an option posting
+     * the empty string reads as "let Railway choose" rather than as the choice the person
+     * made. Reading `name` makes that row perfectly usable, and dropping it would be
+     * withholding a datacentre for a field the app no longer sends.
+     */
+    expect(toRegionOptions([region({ id: null })])).toEqual([
+      {
+        value: "europe-west4-drams3a",
+        label: "EU West (Amsterdam)",
+        country: "Netherlands",
+      },
+    ]);
   });
 
   /*
@@ -654,15 +693,15 @@ describe("toRegionOptions", () => {
    */
   it("drops a deprecated region", () => {
     const retiring = region({
-      id: "us-west1",
-      location: "US West (old)",
+      name: "europe-west4-drams3a-old",
+      location: "EU West (old)",
       deploymentConstraints: {
         deprecationInfo: { isDeprecated: true },
       },
     });
-    expect(toRegionOptions([retiring, region()]).map((option) => option.id)).toEqual([
-      "us-west2",
-    ]);
+    expect(toRegionOptions([retiring, region()]).map((option) => option.value)).toEqual(
+      ["europe-west4-drams3a"],
+    );
   });
 
   it("keeps a region whose constraints say nothing about deprecation", () => {
@@ -675,14 +714,26 @@ describe("toRegionOptions", () => {
   // Country first, because it is the optgroup heading and an unsorted list repeats headings.
   it("sorts by country and then by label", () => {
     const listed = toRegionOptions([
-      region({ id: "us-east4", location: "US East", country: "United States" }),
-      region({ id: "eu-west4", location: "Amsterdam", country: "Netherlands" }),
-      region({ id: "us-west2", location: "US West", country: "United States" }),
+      region({
+        name: "us-east4-eqdc4a",
+        location: "US East",
+        country: "United States",
+      }),
+      region({
+        name: "europe-west4-drams3a",
+        location: "Amsterdam",
+        country: "Netherlands",
+      }),
+      region({
+        name: "us-west2-xrhvwla",
+        location: "US West",
+        country: "United States",
+      }),
     ]);
-    expect(listed.map((option) => option.id)).toEqual([
-      "eu-west4",
-      "us-east4",
-      "us-west2",
+    expect(listed.map((option) => option.value)).toEqual([
+      "europe-west4-drams3a",
+      "us-east4-eqdc4a",
+      "us-west2-xrhvwla",
     ]);
   });
 });

@@ -52,6 +52,10 @@ export function LifecycleActionDialog({
   fields,
   values,
   triggerLabel,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+  startRefresh: callerRefresh,
 }: {
   action: LifecycleDialogAction;
   serviceId: string;
@@ -87,12 +91,53 @@ export function LifecycleActionDialog({
    * name has to say which one — WCAG 2.5.3 is why it must still *contain* the visible label.
    */
   triggerLabel?: string;
+  /**
+   * Opt-in control of the open state, for a caller that opens this from somewhere other
+   * than the trigger below.
+   *
+   * Opt-in rather than required, because the second consumer still wants a trigger:
+   * `deployment-history.tsx` renders one of these per rollback-eligible entry, in place,
+   * with its own `triggerLabel`. Only the row menu needs to open one from outside — a
+   * trigger rendered inside a menu item unmounts the moment the menu closes, which breaks
+   * both the open and the focus restore.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Suppresses the trigger entirely, for a caller that supplies its own. */
+  hideTrigger?: boolean;
+  /**
+   * The transition the post-action list refresh runs inside, when a caller owns one.
+   *
+   * The window between "the action returned" and "the refreshed list arrived" is one where
+   * the row on screen is stale and its controls are live — a second click acts on a state
+   * that no longer holds. This dialog closes that window itself when it owns its trigger,
+   * because the trigger is what it can mark busy.
+   *
+   * A caller that replaced the trigger has replaced the thing that shows the busy state, so
+   * it has to own the transition too. One transition in the parent covers every verb on the
+   * row, which is what `e2e/skeleton.spec.ts` asserts: no control anywhere on a row is live
+   * while a stale list is still on screen.
+   */
+  startRefresh?: React.TransitionStartFunction;
 }) {
   const t = useTranslations("lifecycle");
   const tCommon = useTranslations("common");
   const router = useRouter();
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [selfOpen, setSelfOpen] = useState(false);
+  /*
+   * The merged value, read by BOTH Radix and the body gate below.
+   *
+   * Reading the controlled prop in one place and `selfOpen` in the other is the regression
+   * `confirm-destroy-dialog.tsx` documents: the dialog mounts with an empty content, and an
+   * empty AlertDialogContent traps no focus, so Tab walks straight into the page behind it.
+   * `e2e/keyboard.spec.ts` is what catches it.
+   */
+  const open = controlledOpen ?? selfOpen;
+  const setOpen = (next: boolean) => {
+    setSelfOpen(next);
+    onOpenChange?.(next);
+  };
   const [pending, startTransition] = useTransition();
   /*
    * The action has returned but the row is still the old one until the refreshed list
@@ -100,7 +145,11 @@ export function LifecycleActionDialog({
    * holds. The transition makes that window visible and closes it; Button derives
    * aria-busy and disabled from `pending` already. Same reasoning as the destroy dialog.
    */
-  const [refreshing, startRefresh] = useTransition();
+  const [selfRefreshing, startSelfRefresh] = useTransition();
+  // The caller's transition wins when there is one — see `startRefresh` above. `refreshing`
+  // is then always false, and the trigger it would have marked is not rendered anyway.
+  const refresh = callerRefresh ?? startSelfRefresh;
+  const refreshing = callerRefresh ? false : selfRefreshing;
 
   /*
    * `name` is every verb's, and a verb's own values are merged over it rather than under —
@@ -115,7 +164,7 @@ export function LifecycleActionDialog({
       if (result.ok) {
         toast({ title: result.message, tone: "success" });
         setOpen(false);
-        startRefresh(() => router.refresh());
+        refresh(() => router.refresh());
       } else {
         toast({
           title: t("failedTitle"),
@@ -128,18 +177,20 @@ export function LifecycleActionDialog({
 
   return (
     <AlertDialogRoot open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="secondary"
-          size="sm"
-          pending={refreshing}
-          pendingLabel={t("refreshPending")}
-          aria-label={triggerLabel}
-        >
-          {icon}
-          {t(`${action}.trigger`)}
-        </Button>
-      </AlertDialogTrigger>
+      {!hideTrigger && (
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="secondary"
+            size="sm"
+            pending={refreshing}
+            pendingLabel={t("refreshPending")}
+            aria-label={triggerLabel}
+          >
+            {icon}
+            {t(`${action}.trigger`)}
+          </Button>
+        </AlertDialogTrigger>
+      )}
 
       <AlertDialogContent>
         {/* Mounted only while open, which is also what resets the pending state. */}

@@ -13,7 +13,7 @@ import "server-only";
 import { log } from "@/lib/logger";
 // The catalog decides which images get a volume and where it mounts; this layer sends it.
 import { presetVolumeFor } from "@/lib/presets";
-import { gql } from "./client";
+import { gql, gqlPartial } from "./client";
 // The last two steps of the saga, and both are their own module because they are also
 // reached on their own: a redeploy of a service that already exists, and a domain added
 // to one long after it was created.
@@ -22,6 +22,7 @@ import { deployService } from "./service-lifecycle";
 import {
   SERVICE_CREATE_MUTATION,
   SERVICE_INSTANCE_LIMITS_UPDATE_MUTATION,
+  SERVICE_INSTANCE_QUERY,
   SERVICE_INSTANCE_UPDATE_MUTATION,
   VARIABLE_COLLECTION_UPSERT_MUTATION,
   VOLUME_CREATE_MUTATION,
@@ -55,6 +56,65 @@ export type ContainerLimits = {
 /** Whether a person asked for anything at all, which decides whether a request is made. */
 const asked = (values: object): boolean =>
   Object.values(values).some((value) => value !== undefined);
+
+/**
+ * What Railway holds for a service instance, as distinct from what it was told.
+ *
+ * The same five members `ContainerSettings` carries, so the audit line can put the two
+ * side by side. Every one is nullable here and optional there, and the difference matters:
+ * `undefined` in a request means "do not set this", `null` in a response means "Railway is
+ * storing nothing", and the pair `{ asked: "ams", stored: null }` is the whole finding.
+ */
+export type StoredSettings = {
+  region: string | null;
+  replicas: number | null;
+  restartPolicy: string | null;
+  restartRetries: number | null;
+  startCommand: string | null;
+};
+
+/**
+ * Read back what Railway stored, or null if it would not say.
+ *
+ * **Why this request exists.** Every member of the Advanced panel is write-only: the app
+ * sends it and never renders it again, so Railway silently dropping one can only be found
+ * by opening Railway's own dashboard and comparing by eye. Two live measurements say that
+ * is not hypothetical — a region sent as an airport code was answered `true` and stored as
+ * `null`, and a retry count of 3 came back as 10 on one occasion out of many.
+ *
+ * **Why it cannot fail the create.** By the time this runs the service exists, is deployed,
+ * and is on screen. `gqlPartial` and the DEGRADING_OPERATIONS entry are what stop a refused
+ * diagnostic from being reported to the user as a failed spin-up. It logs nothing itself:
+ * the caller has one audit line for this whole saga and this belongs in it.
+ */
+async function readStoredSettings(
+  accessToken: string,
+  params: { serviceId: string; environmentId: string },
+  signal?: AbortSignal,
+): Promise<StoredSettings | null> {
+  const { data } = await gqlPartial(
+    SERVICE_INSTANCE_QUERY,
+    { serviceId: params.serviceId, environmentId: params.environmentId },
+    { accessToken, signal },
+  );
+
+  const instance = data?.serviceInstance;
+  if (!instance) return null;
+
+  return {
+    region: instance.region ?? null,
+    replicas: instance.numReplicas ?? null,
+    /*
+     * `restartPolicyType` and `restartPolicyMaxRetries` are non-null on the schema, which is
+     * why they read differently from the three beside them: Railway always holds a value,
+     * so what this catches is a value that is not the one asked for rather than an absent
+     * one — which is exactly the shape of the retries observation.
+     */
+    restartPolicy: instance.restartPolicyType,
+    restartRetries: instance.restartPolicyMaxRetries,
+    startCommand: instance.startCommand ?? null,
+  };
+}
 
 export async function createContainer(
   accessToken: string,
@@ -123,6 +183,20 @@ export async function createContainer(
    * a successful spin-up into a failed one.
    */
   url: string | null;
+  /**
+   * What Railway actually holds for the settings it was sent, read back once.
+   *
+   * Null on every failure branch and on a spin-up that customised nothing: there is no
+   * settled service to read on the first, and nothing worth comparing on the second. Null
+   * also when Railway refused the read — see `readStoredSettings`, which degrades rather
+   * than throwing, because a container that exists must not be reported as a failure over
+   * a diagnostic.
+   *
+   * Consumed by the caller's audit line and nothing else. It reaches no screen, which is
+   * deliberate: rendering it would be a settings readout, and that is a feature with its
+   * own ticket rather than something to grow out of a log field.
+   */
+  stored: StoredSettings | null;
   /**
    * What happened after `serviceCreate` returned.
    *
@@ -222,7 +296,13 @@ export async function createContainer(
         start_command_length: settings.startCommand?.length ?? 0,
         error,
       });
-      return { serviceId, deploymentId: null, url: null, outcome: "settings_failed" };
+      return {
+        serviceId,
+        deploymentId: null,
+        url: null,
+        stored: null,
+        outcome: "settings_failed",
+      };
     }
   }
 
@@ -256,7 +336,13 @@ export async function createContainer(
         memory_gb: limits.memory ?? 0,
         error,
       });
-      return { serviceId, deploymentId: null, url: null, outcome: "limits_failed" };
+      return {
+        serviceId,
+        deploymentId: null,
+        url: null,
+        stored: null,
+        outcome: "limits_failed",
+      };
     }
   }
 
@@ -322,7 +408,13 @@ export async function createContainer(
         mount_path: volume.mountPath,
         error,
       });
-      return { serviceId, deploymentId: null, url: null, outcome: "volume_failed" };
+      return {
+        serviceId,
+        deploymentId: null,
+        url: null,
+        stored: null,
+        outcome: "volume_failed",
+      };
     }
   }
 
@@ -380,6 +472,7 @@ export async function createContainer(
         serviceId,
         deploymentId: null,
         url: null,
+        stored: null,
         outcome: "variables_failed",
       };
     }
@@ -405,7 +498,13 @@ export async function createContainer(
     );
   } catch (error) {
     log.warn("railway.deploy_failed", { service_id: serviceId, error });
-    return { serviceId, deploymentId: null, url: null, outcome: "deploy_failed" };
+    return {
+      serviceId,
+      deploymentId: null,
+      url: null,
+      stored: null,
+      outcome: "deploy_failed",
+    };
   }
 
   /*
@@ -458,5 +557,25 @@ export async function createContainer(
     }
   }
 
-  return { serviceId, deploymentId, url, outcome: "deployed" };
+  /*
+   * Only when something was asked for, which is the same test the settings mutation itself
+   * is gated on.
+   *
+   * Two reasons, and the second is a promise this module has already made. There is nothing
+   * to compare when nobody customised anything — a read-back of five defaults says only
+   * that Railway has defaults. And the round-trip count for an uncustomised spin-up is a
+   * property this file states outright and `api.integration.test.ts` asserts: an
+   * unconditional query here would quietly add a fourth request to the path most people
+   * take, to diagnose settings they never sent.
+   */
+  const stored =
+    params.settings && asked(params.settings)
+      ? await readStoredSettings(
+          accessToken,
+          { serviceId, environmentId: params.environmentId },
+          signal,
+        )
+      : null;
+
+  return { serviceId, deploymentId, url, stored, outcome: "deployed" };
 }

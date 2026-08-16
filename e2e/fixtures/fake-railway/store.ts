@@ -210,6 +210,17 @@ export type Faults = {
    * non-issues" records that shape; this is the knob that exercises it.
    */
   notAuthorizedField: number;
+  /**
+   * Next N GraphQL calls answer Railway's *plan ceiling* refusal, measured live on a free
+   * account that already held five services: HTTP **200**, the same
+   * `INTERNAL_SERVER_ERROR` code `notAuthorizedField` carries, and only the wording
+   * telling them apart.
+   *
+   * Its own knob rather than a message variant of that one, because the remedy is
+   * different in kind: destroy something or change the plan. Retrying and re-authorizing
+   * both fail, and those were the only two sentences the app could produce for it.
+   */
+  planLimit: number;
   /** The refresh grant fails, simulating a revoked authorization. */
   refreshFails: boolean;
   /** Access tokens are issued with this lifetime, to force a refresh mid-session. */
@@ -345,6 +356,7 @@ const DEFAULT_FAULTS: Faults = {
   rateLimitRetryAfter: 0,
   unauthorized: 0,
   notAuthorizedField: 0,
+  planLimit: 0,
   refreshFails: false,
   accessTokenTtl: 3600,
   deploymentsFail: false,
@@ -559,12 +571,23 @@ export class Store {
   }
 
   /**
-   * What `deploymentStop` does here: the deployment settles at REMOVED and stays there.
+   * What `deploymentStop` does here: **nothing at all to the status.**
    *
-   * REMOVED rather than SLEEPING, because that is what Railway's own dashboard shows for a
-   * deployment that was stopped — SLEEPING is its app-sleep feature, which this app does
-   * not turn on. Both are terminal in the app's state machine either way, so the stream
-   * closes rather than polling on; that is the property the fixture is here to exercise.
+   * This used to set REMOVED, on the reasonable assumption that Railway's dashboard showing
+   * a stopped deployment meant the API said so. It does not. Measured live: `deploymentStop`
+   * answers `true`, the container is genuinely stopped — its own log records the SIGTERM —
+   * and `deployment.status` stays **SUCCESS** indefinitely. There is no terminal status for
+   * a stopped deployment and no field anywhere that says one is stopped.
+   *
+   * So the fixture was answering a question Railway does not answer, and the spec asserting
+   * that a stopped row reads "Removed" passed against a shape that has never existed. The
+   * app shipped a row that went on reading "Running", counting uptime through the downtime,
+   * and offering Stop and Restart while withholding the only control that would bring the
+   * container back. Making this a no-op is what turns that spec into a real test of
+   * `lib/railway/stopped.ts`, which is the thing that now produces the Removed reading.
+   *
+   * The step is still pushed past both progressions, so `tick()` does not walk a stopped
+   * deployment onward — that part was always right, and it is what the live API does too.
    *
    * The service survives, which is the whole difference from ServiceDelete: its row stays
    * on the dashboard, and redeploying it is what a spec goes on to do next.
@@ -572,7 +595,6 @@ export class Store {
   stopDeployment(deploymentId: string): Deployment | null {
     const deployment = this.deployments.get(deploymentId);
     if (!deployment) return null;
-    deployment.status = "REMOVED";
     deployment.updatedAt = new Date().toISOString();
     // Past the end of both progressions, so tick() leaves it where it was put.
     deployment.step = Math.max(PROGRESSION.length, FAILING_PROGRESSION.length);
@@ -621,10 +643,10 @@ export class Store {
    * rather than a rule the app derives.
    *
    * Modelled as "settled successfully, and not the one running now". The second half is what
-   * gives a spec both kinds of row in one list: the current deployment is rendered with
-   * "Running now" and no control, and a failed one with the sentence saying Railway will not
-   * go back to it. Without a false case the panel's own promise — that an ineligible entry is
-   * shown rather than dropped — would be untestable.
+   * gives a spec both kinds of row in one list: the current deployment is rendered with the
+   * "Current" marker and no control, and a failed one with the sentence saying Railway will
+   * not go back to it. Without a false case the panel's own promise — that an ineligible
+   * entry is shown rather than dropped — would be untestable.
    */
   canRollback(deployment: Deployment): boolean {
     const service = this.services.get(deployment.serviceId);

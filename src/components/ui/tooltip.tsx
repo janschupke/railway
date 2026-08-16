@@ -26,10 +26,22 @@ export function Tooltip({
   content,
   children,
   side = "top",
+  wide = false,
 }: {
   content: React.ReactNode;
   children: React.ReactNode;
   side?: "top" | "right" | "bottom" | "left";
+  /**
+   * Gives the content a width and room to breathe, for the tooltips that carry a small
+   * block rather than a phrase.
+   *
+   * A flag rather than a `className` passthrough, and the constraint it encodes is the
+   * reason: the default has no `max-width` at all, which is right for a phrase and wrong
+   * for anything longer — a sentence would run to the width of the viewport. Two shapes,
+   * both defined here, is what keeps that decision in the primitive instead of leaving
+   * every call site to reinvent a width.
+   */
+  wide?: boolean;
 }) {
   return (
     <Primitive.Root>
@@ -51,6 +63,7 @@ export function Tooltip({
              * fade at the cost of a node that outlives its own close.
              */
             "animate-content-enter",
+            wide && "max-w-64 px-3 py-2",
           )}
         >
           {content}

@@ -216,6 +216,25 @@ test.describe("accessibility", () => {
       await expectNoA11yViolations(page, `create-dialog/${theme}`);
     });
 
+    test(`an open row menu has no violations (${theme})`, async ({ page }) => {
+      /*
+       * A new state, and one nothing had ever scanned: the row's commands used to be
+       * buttons in the page, covered incidentally by the populated-dashboard scan above.
+       * They are portalled menu content now — its own roles, its own surface, its own
+       * contrast pair, and one item drawn in the danger token.
+       */
+      await signIn(page);
+      await spinUp(page, "cache");
+      await setTheme(page, theme);
+
+      await onlyVisible(
+        row(page, "cache").getByRole("button", { name: /^Actions for / }),
+      ).click();
+      await expect(onlyVisible(page.getByRole("menu"))).toBeVisible();
+
+      await expectNoA11yViolations(page, `row-menu/${theme}`);
+    });
+
     test(`destroy dialog has no violations (${theme})`, async ({ page }) => {
       await signIn(page);
       await spinUp(page, "cache");

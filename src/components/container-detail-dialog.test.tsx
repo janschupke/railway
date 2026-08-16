@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerMock } from "@/test/setup-dom";
 import type { ActionResult } from "@/lib/action-result";
-import type { Container } from "@/lib/railway/types";
+import type { Container, ContainerVolume } from "@/lib/railway/types";
 
 const editContainer =
   vi.fn<(prev: unknown, formData: FormData) => Promise<ActionResult>>();
@@ -45,14 +45,14 @@ const container = (over: Partial<Container> = {}): Container => ({
   ...over,
 });
 
-function renderDialog(over: Partial<Container> = {}) {
+function renderDialog(over: Partial<Container> = {}, volume?: ContainerVolume) {
   return render(
     <TooltipProvider>
       <ToastProvider>
         <ContainerDetailDialog
           container={container(over)}
           metrics={undefined}
-          volume={undefined}
+          volume={volume}
           state={over.state ?? "running"}
           projectId="p1"
           environmentId="e1"
@@ -233,6 +233,56 @@ describe("ContainerDetailDialog, editing", () => {
 
     expect(screen.getByLabelText("Name")).toHaveValue("cache");
     expect(screen.getByLabelText("Image reference")).toHaveValue("redis:7-alpine");
+  });
+
+  it("says so when a stateful image is about to run with no storage", async () => {
+    /*
+     * The gap this closes. The spin-up form attaches a volume for the six stateful presets
+     * and warns when it cannot; editing issues no `volumeCreate` at all, so a container
+     * moved onto redis runs on whatever storage it already had — and said nothing about it.
+     * A person who did this in good faith got a working Redis that loses everything on its
+     * next restart, with no signal anywhere that it would.
+     */
+    const user = userEvent.setup();
+    renderDialog({ image: "nginx:alpine" });
+    await openEdit(user);
+
+    await user.clear(screen.getByLabelText("Image reference"));
+    await user.type(screen.getByLabelText("Image reference"), "redis:7-alpine");
+
+    expect(await screen.findByText(/anything it writes is lost/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when the container already has a volume", async () => {
+    // The warning is about storage that will not exist. A service that already has a volume
+    // keeps it through an edit, so the same image is not a risk on that row.
+    const user = userEvent.setup();
+    renderDialog(
+      { image: "nginx:alpine" },
+      {
+        serviceId: "svc_1",
+        volumeId: "vol_1",
+        mountPath: "/data",
+        sizeMB: 5000,
+        currentSizeMB: 12,
+      },
+    );
+    await openEdit(user);
+
+    await user.clear(screen.getByLabelText("Image reference"));
+    await user.type(screen.getByLabelText("Image reference"), "redis:7-alpine");
+
+    expect(screen.queryByText(/anything it writes is lost/i)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about the image the container is already running", async () => {
+    // Somebody who opened this to rename a container is not making a storage decision, and
+    // a warning about the status quo is a warning they can do nothing about.
+    const user = userEvent.setup();
+    renderDialog({ image: "redis:7-alpine" });
+    await openEdit(user);
+
+    expect(screen.queryByText(/anything it writes is lost/i)).not.toBeInTheDocument();
   });
 
   it("shows an existing variable as a name with an empty, explained value", async () => {

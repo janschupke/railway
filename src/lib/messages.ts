@@ -33,6 +33,7 @@ export const MESSAGE_KEYS = [
   "errors.api.auth",
   "errors.api.notAuthorized",
   "errors.api.missingScope",
+  "errors.api.planLimit",
   "errors.api.rateLimit",
   "errors.api.rateLimitRetry",
   "errors.api.network",

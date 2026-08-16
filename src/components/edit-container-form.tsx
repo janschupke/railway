@@ -4,7 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { editContainer } from "@/app/dashboard/actions";
 import type { ActionResult } from "@/lib/action-result";
-import { presetOptions } from "@/lib/presets";
+import { presetFor, presetOptions, presetVolumeFor } from "@/lib/presets";
+import type { ContainerVolume } from "@/lib/railway/types";
 import { isUnattributable, rowErrorFor } from "@/lib/variable-rows";
 import { Banner } from "./ui/banner";
 import { Button } from "./ui/button";
@@ -55,6 +56,7 @@ export function EditContainerForm({
   serviceId,
   displayName,
   image,
+  volume,
   projectId,
   environmentId,
   onDone,
@@ -64,6 +66,16 @@ export function EditContainerForm({
   displayName: string;
   /** Null for a service Railway describes with a repo rather than an image — see ADR-6. */
   image: string | null;
+  /**
+   * The volume this service already has, if it has one. Undefined is most services.
+   *
+   * Needed here because editing an image cannot create one. The spin-up form attaches a
+   * volume for the six stateful presets as part of the create saga; this form issues no
+   * `volumeCreate` at all, so a container moved onto `redis:7-alpine` runs with whatever
+   * storage it already had — usually none. The note below is the difference between that
+   * being a decision and being a surprise.
+   */
+  volume: ContainerVolume | undefined;
   projectId: string;
   environmentId: string;
   onDone: (message: string) => void;
@@ -117,6 +129,34 @@ export function EditContainerForm({
   const fieldError = (field: "name" | "image") =>
     result && !result.ok && result.field === field ? result.error : undefined;
 
+  /*
+   * What the note under the image field says, or null for the cases it says nothing about.
+   *
+   * The same `presetVolumeFor` / `presetFor` pair the spin-up form consults, and for the
+   * same reason: a mount path means the catalog knows this image keeps state and where,
+   * `null` from `presetFor` means it has never heard of the image, and a preset the catalog
+   * knows keeps nothing is this expression being null. Those two undefineds answer
+   * different questions — see the note on `Preset.volume`.
+   *
+   * **But the sentence is not the spin-up form's**, and that is the point of this being its
+   * own block rather than a shared component. A spin-up ATTACHES a volume for a stateful
+   * preset, so its note describes storage the container is about to get. This form issues
+   * no `volumeCreate` at all: an edit onto `redis:7-alpine` runs on whatever the service
+   * already had. The two surfaces say opposite things about the same image, so they cannot
+   * share a key — and the risk is only real when the service has no volume, which is why
+   * `volume` is consulted before anything is said.
+   *
+   * Unchanged image says nothing. Somebody who opened this dialog to rename a container or
+   * add a variable is not making a storage decision, and a warning about the image they
+   * were already running would be a warning about the status quo.
+   */
+  const storage = (() => {
+    if (!imageRef.trim() || imageRef === image) return null;
+    if (volume) return null;
+    if (presetVolumeFor(imageRef)) return "stateful" as const;
+    return presetFor(imageRef) ? null : ("unknown" as const);
+  })();
+
   const submit = (formData: FormData) => {
     startTransition(async () => {
       const outcome = await editContainer(null, formData);
@@ -168,6 +208,12 @@ export function EditContainerForm({
         listLabel={t("imageListLabel")}
         inputClassName="font-mono"
       />
+
+      {storage && (
+        <Banner tone="warning">
+          {storage === "stateful" ? t("statefulNoVolumeNote") : t("unknownStorageNote")}
+        </Banner>
+      )}
 
       {variables.status === "loading" && (
         <Text variant="caption" tone="subtle" className="flex items-center gap-2">

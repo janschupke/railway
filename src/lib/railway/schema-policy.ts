@@ -102,6 +102,19 @@ export const DEGRADING_OPERATIONS: Array<{ operationName: string; note: string }
     operationName: "Deployments",
     note: "an expanded row lists no earlier deployments, and rollback is not offered",
   },
+  /*
+   * The read-back that says what Railway actually stored for a service it just created.
+   *
+   * It feeds an audit line and nothing else — no pixel on any screen depends on it — so a
+   * refusal costs the record its `stored_*` fields and costs the user nothing at all. That
+   * is the strongest form of the trade every entry here makes, and the reason it must never
+   * be able to fail a create: the container exists by the time this runs, and a throw here
+   * would turn a successful spin-up into a reported failure over a diagnostic.
+   */
+  {
+    operationName: "ServiceInstance",
+    note: "the container.created record does not say what Railway stored for region, replicas or restart policy",
+  },
 ];
 
 /**

@@ -12,6 +12,7 @@ import {
   rollbackDeployment,
   stopDeployment,
 } from "@/lib/railway/service-lifecycle";
+import { markStopped } from "@/lib/railway/stopped";
 import { httpPortFor } from "@/lib/presets";
 import { containerRollbackSchema } from "@/lib/validation/schemas";
 import { formField } from "./action-form";
@@ -74,8 +75,22 @@ export function deploymentAction(
         return { ok: false, error: t("actions.nothingRunning") };
       }
 
-      if (verb === "stop") await stopDeployment(context.accessToken, deploymentId);
-      else await restartDeployment(context.accessToken, deploymentId);
+      if (verb === "stop") {
+        await stopDeployment(context.accessToken, deploymentId);
+        /*
+         * Railway leaves the status at SUCCESS forever after a stop — there is no terminal
+         * status for a stopped deployment — so without this the row goes on reading
+         * "Running", keeps counting uptime, and offers Stop and Restart while withholding
+         * the Redeploy that is the only thing that would bring it back. See stopped.ts.
+         *
+         * After the mutation, not before: a refused stop must leave no memory of one.
+         */
+        markStopped(context.target.serviceId, {
+          deploymentId,
+          rawStatus: context.target.rawStatus,
+          deployedAt: context.target.deployedAt,
+        });
+      } else await restartDeployment(context.accessToken, deploymentId);
 
       /*
        * The deployment id is recorded although restart does not change it — that is the

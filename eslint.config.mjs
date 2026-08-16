@@ -426,6 +426,12 @@ const eslintConfig = defineConfig([
               "^(cn|cva|clsx|twMerge)$",
               // A local error-lookup helper keyed by field name, not copy.
               "^fieldError$",
+              /*
+               * Which of a row's dialogs to open, named by a discriminant off `OpenDialog`
+               * — the same class of value as `fieldError`'s field name. The copy for each
+               * is read from the catalog on the item that calls this.
+               */
+              "^openDialog$",
               // A CSS media query is a selector, and the app has to read this one in JS:
               // scrollTo's `behavior` overrides the CSS property the global rule sets.
               "^window\\.matchMedia$",

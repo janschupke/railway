@@ -38,18 +38,22 @@ public address, and a volume attached automatically to the six presets that keep
 submission carries an idempotency key, so a double-click yields one container.
 
 **Six lifecycle verbs** — stop, restart, redeploy, rollback, edit and destroy — every one of them
-gated by the `spun-` ownership marker, re-derived on the server from Railway's own answer.
-Destroy asks you to type the container name and asks whether the volume's data goes too. Bulk
-destroy asks for the count rather than each name. Rollback lists recent deployments by time and
-status and marks the running one. Containers created outside the app are listed as _Not managed
-here_, with no controls and no checkbox.
+gated by the `spun-` ownership marker, re-derived on the server from Railway's own answer. Every
+row carries one **…** menu holding whatever that row may do; rollback stays in the expanded
+history panel, where it belongs to a deployment rather than to the container. Destroy asks you to
+type the container name and asks whether the volume's data goes too. Bulk destroy asks for the
+count rather than each name. Rollback lists recent deployments by time and status and marks the
+current one. Containers created outside the app get the same menu with two commands — look at it,
+or open it on Railway — and no checkbox.
 
 **Watching it happen.** Live build and deploy logs stream into an expandable row panel — SSE
 downstream, GraphQL-ws upstream — with search and match highlighting, next/previous, a wrap
 toggle, copy, download and a severity filter. The status badge advances Queued → Building →
 Deploying → Running / Failed / Removed. Each row reads CPU and memory against the plan ceiling
-("0.25 of 2 vCPU") and a derived uptime, with a workspace usage total under the list. A failed row
-carries a best-effort reason and **Open in Railway**.
+("0.25 of 2 vCPU") and a derived uptime. The count above the list carries a tooltip with two
+totals — what the containers created here are using, and what everything in the environment is —
+and the **Billing** tab, one of the dashboard's three, holds the workspace spend beside them. A
+failed row carries a best-effort reason and **Open in Railway**.
 
 **Noticing changes you did not make.** A container created or destroyed in Railway's own dashboard
 appears here within about fifteen seconds, with no polling from the browser at all — and none from

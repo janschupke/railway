@@ -41,6 +41,8 @@ const {
   generateDomain,
 } = await import("./actions");
 const { __resetIdempotency } = await import("@/lib/idempotency");
+const { applyStopped, __resetStopped } = await import("@/lib/railway/stopped");
+const { getProjectContainers } = await import("@/lib/railway/projects");
 
 const api = graphql.link(railwayApiUrl());
 const server = setupServer();
@@ -58,6 +60,9 @@ beforeEach(() => {
   // Retained results are process-global and outlive the call that made them, so without
   // this a case would be served a previous case's container.
   __resetIdempotency();
+  // Same reason, and the same shape of leak: the stopped map is process-global, so without
+  // this a case would inherit a previous case's stop and read a running container as gone.
+  __resetStopped();
 
   /*
    * `volumeCreate` answering, by default, because since T-491 it is an ordinary step of
@@ -165,6 +170,76 @@ describe("container lifecycle", () => {
         service_name: "spun-cache",
         deployment_id: "dep_svc_managed",
       });
+    });
+
+    it("remembers the stop, because Railway will not", async () => {
+      /*
+       * Measured live: `deploymentStop` answers `true`, the container really stops, and
+       * `deployment.status` stays SUCCESS indefinitely. There is no terminal status for a
+       * stopped deployment. So the app has to remember, or the row goes on reading Running
+       * and `availableActions("running")` never offers the Redeploy that would bring it
+       * back. `projectWith` still answers SUCCESS below — that is the point.
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () =>
+          HttpResponse.json({ data: { deploymentStop: true } }),
+        ),
+      );
+
+      await stopContainer(null, actionForm("svc_managed"));
+
+      const { containers } = await getProjectContainers("token", "p1", "e1");
+      const stopped = applyStopped(containers).find(
+        (c) => c.serviceId === "svc_managed",
+      );
+
+      expect(containers.find((c) => c.serviceId === "svc_managed")?.state).toBe(
+        "running",
+      );
+      expect(stopped?.state).toBe("removed");
+    });
+
+    it("remembers nothing when Railway refused the stop", async () => {
+      // A refusal that left a memory behind would show a container as stopped that is
+      // still running, and take away the Stop control that would actually stop it.
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () =>
+          HttpResponse.json({ errors: [{ message: "Deployment not found" }] }),
+        ),
+      );
+
+      const result = await stopContainer(null, actionForm("svc_managed"));
+      const { containers } = await getProjectContainers("token", "p1", "e1");
+
+      expect(result.ok).toBe(false);
+      expect(applyStopped(containers)[0]?.state).toBe("running");
+    });
+
+    it("forgets it as soon as another verb runs", async () => {
+      /*
+       * A restart keeps the same deployment id and Railway walks the status back to
+       * SUCCESS, so a restarted container is indistinguishable from a stopped one in the
+       * response. `withManagedContainer` clearing on every verb but stop is the only thing
+       * that tells them apart — and without it the row would be stuck offering Redeploy,
+       * which on a running container mints a second deployment of it.
+       */
+      server.use(
+        api.query("Project", () => HttpResponse.json({ data: projectWith() })),
+        api.mutation("DeploymentStop", () =>
+          HttpResponse.json({ data: { deploymentStop: true } }),
+        ),
+        api.mutation("DeploymentRestart", () =>
+          HttpResponse.json({ data: { deploymentRestart: true } }),
+        ),
+      );
+
+      await stopContainer(null, actionForm("svc_managed"));
+      await restartContainer(null, actionForm("svc_managed"));
+
+      const { containers } = await getProjectContainers("token", "p1", "e1");
+      expect(applyStopped(containers)[0]?.state).toBe("running");
     });
 
     it("says so when the service has no deployment to stop", async () => {

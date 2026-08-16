@@ -125,8 +125,10 @@ export const PRESETS: readonly Preset[] = [
   { value: "memcached:1-alpine", labelKey: "memcached", groupKey: "cache" },
 
   // All four serve on 80 out of the box, which is the reason these are the presets: an
-  // image needing a port argument to listen anywhere is an image this app cannot configure
-  // (ADR-6 — image and environment, no command override).
+  // image whose port is only reachable through a command-line argument is one the catalog
+  // cannot describe. Not because this app cannot pass one — the Advanced panel's Start
+  // command does, and ADR-6's claim to the contrary is superseded — but because a preset's
+  // whole promise is that its port is known before anybody types anything.
   { value: "nginx:alpine", labelKey: "nginx", groupKey: "web", httpPort: 80 },
   { value: "httpd:alpine", labelKey: "apache", groupKey: "web", httpPort: 80 },
   { value: "caddy:2-alpine", labelKey: "caddy", groupKey: "web", httpPort: 80 },
@@ -209,8 +211,12 @@ export const PRESETS: readonly Preset[] = [
      */
     httpPort: 15672,
   },
-  // Core NATS is in-memory; JetStream would need a volume, and enabling it needs an
-  // argument this app cannot pass (ADR-6: image and environment, no command override).
+  // Core NATS is in-memory. JetStream is the case the catalog cannot honour: it needs
+  // somewhere to persist, and a volume is attached only to the six presets known to keep
+  // state — so a JetStream preset would be a queue that silently loses what it is handed.
+  // Enabling it also needs a start-command argument, which the Advanced panel can now
+  // supply; the storage half is what still rules it out. See ADR-6, whose "no command
+  // override" consequence is superseded.
   { value: "nats:2-alpine", labelKey: "nats", groupKey: "queue" },
 ] as const;
 
