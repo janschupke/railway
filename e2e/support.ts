@@ -270,11 +270,70 @@ export async function dismissWithEscape(page: Page, layer: Locator) {
  * Escape a render later than it appears.
  */
 export async function openDestroyDialog(page: Page, name: string) {
-  await onlyVisible(
-    row(page, name).getByRole("button", { name: /^destroy$/i }),
-  ).click();
+  await pickRowAction(page, name, /^destroy$/i);
   const dialog = onlyVisible(page.getByRole("alertdialog"));
   return awaitDialogReady(dialog, dialog.getByLabel(/to confirm/i));
+}
+
+/**
+ * Opens a row's `…` menu and picks one command from it.
+ *
+ * Every row action goes through this now: the row used to carry one Radix trigger per verb
+ * and carries one menu trigger instead, so "click the Stop button on this row" is two steps
+ * rather than one. Here rather than in each helper below, so the three that need it —
+ * destroy, the reversible verbs, and details — describe only what they pick.
+ *
+ * `menuitem`, not `button`, and the distinction is load-bearing: a menu item is not a
+ * button to any query, and matching loosely would find the `…` trigger itself.
+ *
+ * No wait between the two clicks. Radix opens the menu in the same discrete event, and the
+ * `findByRole`-equivalent below is Playwright's own actionability check on the item — which
+ * is the honest signal that the layer is mounted and hit-testable.
+ */
+export async function pickRowAction(page: Page, name: string, action: RegExp) {
+  const menu = await openRowMenu(page, name);
+  await onlyVisible(menu.getByRole("menuitem", { name: action })).click();
+}
+
+/**
+ * Opens a row's `…` menu and hands back the menu itself.
+ *
+ * The layer gate rather than `toBeVisible`, for the reason `dismissWithEscape` above argues
+ * at length: a Radix layer attaches its Escape and arrow handlers one render after the node
+ * appears, and `pointer-events: auto` is Radix computing that from the same layer index on
+ * the same render — the style flipping IS the handler attaching.
+ */
+export async function openRowMenu(page: Page, name: string) {
+  await onlyVisible(
+    row(page, name).getByRole("button", { name: /^Actions for / }),
+  ).click();
+  const menu = onlyVisible(page.getByRole("menu"));
+  await expect(menu).toHaveCSS("pointer-events", "auto");
+  return menu;
+}
+
+/**
+ * Every command a row offers, by visible label, with the menu dismissed afterwards.
+ *
+ * The list a row offers used to be readable in place — one Radix trigger per verb, so the
+ * row's buttons WERE the answer. Behind a menu it has to be opened to be seen, and several
+ * specs assert on the whole set rather than on one member: "a stopped row no longer offers
+ * Stop", "a row this app did not create offers only these two".
+ *
+ * **Dismissed before returning, and that is not tidiness.** An open menu is a modal layer:
+ * it holds `pointer-events: none` on the body, so the very next click on anything in the
+ * page is refused rather than delivered. A spec that read the commands and then ran one hung
+ * for its full timeout waiting on a trigger that was there and untouchable, which is what
+ * this line costs to avoid.
+ */
+export async function rowMenuItems(page: Page, name: string): Promise<string[]> {
+  const menu = await openRowMenu(page, name);
+  const items = (await menu.getByRole("menuitem").allInnerTexts()).map((text) =>
+    text.trim(),
+  );
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  return items;
 }
 
 /**
@@ -284,7 +343,7 @@ export async function openDestroyDialog(page: Page, name: string) {
  * same: this one has no field to type into, so the readiness signal is the confirm button
  * rather than the input, and the layer gate is what keeps an Escape from being swallowed.
  *
- * The trigger and the confirm button are matched separately on purpose — "Stop" and "Stop
+ * The menu item and the confirm button are matched separately on purpose — "Stop" and "Stop
  * container" are two controls, and a loose match would click whichever the dialog painted
  * first.
  */
@@ -293,9 +352,7 @@ export async function runRowAction(
   name: string,
   action: "Stop" | "Restart" | "Redeploy",
 ) {
-  await onlyVisible(
-    row(page, name).getByRole("button", { name: new RegExp(`^${action}$`) }),
-  ).click();
+  await pickRowAction(page, name, new RegExp(`^${action}$`));
 
   const dialog = onlyVisible(page.getByRole("alertdialog"));
   const confirm = dialog.getByRole("button", {
@@ -520,7 +577,7 @@ export async function addVariable(
  * an Escape that lands before that is swallowed.
  */
 export async function openDetailDialog(page: Page, name: string) {
-  await onlyVisible(row(page, name).getByRole("button", { name: /^Details$/ })).click();
+  await pickRowAction(page, name, /^Details$/);
 
   const dialog = onlyVisible(page.getByRole("dialog"));
   return awaitDialogReady(dialog);

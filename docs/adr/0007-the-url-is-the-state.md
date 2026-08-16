@@ -7,9 +7,8 @@
 A dashboard over live infrastructure is exactly the shape that usually gets a state library. The
 question is what one would hold here.
 
-The measured shape of client state is one app-authored context, a few dozen `useState`, zero
-`useReducer` and zero `useOptimistic`, counted across `src/**` excluding tests — re-measurable with
-a grep rather than remembered. Every one of those is single-consumer local state. There is no
+The shape of client state across `src/**` is one app-authored context, some `useState`, no
+`useReducer` and no `useOptimistic`. Every one of those is single-consumer local state. There is no
 shared state at all, which is the claim this decision actually makes.
 
 ## Decision
@@ -58,20 +57,20 @@ than the dashboard.
 
 ## Alternatives rejected
 
-| Tempting                                           | Why not                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A `ProjectContext` for `projectId`/`environmentId` | Duplicates the URL as a second source of truth and forces components client-side. The drill is two non-consuming hops (`ContainerRow` → `DestroyContainerDialog`) of values that are constant for the page.                                                                                                                                     |
-| React Query / SWR for containers                   | There is no client fetch to cache, and the live path is push (SSE), not poll.                                                                                                                                                                                                                                                                   |
-| Theme in context or state                          | It is `useSyncExternalStore` over `localStorage`, which is correct on the first client render rather than one render late.                                                                                                                                                                                                                      |
-| Lifting `expanded` / `pinned` / `open`             | All three are single-consumer disclosure state.                                                                                                                                                                                                                                                                                                 |
-| A form store for the advanced resource controls    | Seven write-only values that no other component reads and that must be blank again after a successful submit. See below.                                                                                                                                                                                                                        |
-| Pinning or favouriting rows                        | Considered for T-503 and dropped. A pin is a per-reader preference about ordering, so it is either not shareable — the same argument this ADR makes against scroll depth — or a fourth param that contradicts `sort` whenever both are set. The sort control plus the managed-first default already answers "put what I care about at the top". |
+| Tempting                                           | Why not                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `ProjectContext` for `projectId`/`environmentId` | Duplicates the URL as a second source of truth and forces components client-side. The drill is two non-consuming hops (`ContainerRow` → `DestroyContainerDialog`) of values that are constant for the page.                                                                                                   |
+| React Query / SWR for containers                   | There is no client fetch to cache, and the live path is push (SSE), not poll.                                                                                                                                                                                                                                 |
+| Theme in context or state                          | It is `useSyncExternalStore` over `localStorage`, which is correct on the first client render rather than one render late.                                                                                                                                                                                    |
+| Lifting `expanded` / `pinned` / `open`             | All three are single-consumer disclosure state.                                                                                                                                                                                                                                                               |
+| A form store for the advanced resource controls    | Seven write-only values that no other component reads and that must be blank again after a successful submit. See below.                                                                                                                                                                                      |
+| Pinning or favouriting rows                        | A pin is a per-reader preference about ordering, so it is either not shareable — the same argument this ADR makes against scroll depth — or a fourth param that contradicts `sort` whenever both are set. The sort control plus the managed-first default already answers "put what I care about at the top". |
 
-## The advanced panel, which tested this hardest
+## The advanced panel, and why it needs no store
 
-T-490 put seven resource controls behind an Advanced disclosure on the spin-up form: region,
-replicas, vCPU, memory, restart policy, restart retries and start command. That ticket asked
-outright whether the position above survives it. It does, on four counts.
+Seven resource controls sit behind an Advanced disclosure on the spin-up form: region, replicas,
+vCPU, memory, restart policy, restart retries and start command. It is the densest cluster of
+form state in the app, and the position above holds over it on four counts.
 
 **The state is write-only and it is local.** All seven values live in one `useState` inside
 `AdvancedSettings`. Nothing else on the page reads them, no sibling needs them, and they never
@@ -83,7 +82,7 @@ during render to disable the retries input; and the two dropdowns are Radix Sele
 controlled by construction. Leaving them uncontrolled dropped both choices on a refused
 submission while keeping every number — and because the retries input is disabled unless the
 policy is "On failure", it dropped a retry count that was still legible on screen. Three tests
-now cover that; before this was understood, none could.
+cover that.
 
 **Clearing them on success is a remount, not a reducer.** The form re-mints `submissionKey` on
 success and only on success, so the panel is rendered with `key={submissionKey}` and empties
@@ -101,13 +100,13 @@ same register as clearing the name input. Radix Collapsible was rejected on the 
 content in the DOM, so a field somebody tidied away still submits, and it has no height animation
 to synchronise and therefore none of the mounted/expanded race documented in `container-row.tsx`.
 
-**The genuinely new thing was a second unawaited promise.** The region list is read server-side in
+**An unawaited promise is not a data-fetching library.** The region list is read server-side in
 `data.ts` and handed down as `Promise<RegionOption[]>`, resolved in an effect — the contract
-`managedNames` already carries, including "cannot reject, and must not be made to". This is where
-a data-fetching library would normally appear, and the reason it still does not is the reason
-above: the value arrives from a server render as a prop, so there is no client fetch to cache.
-What changed is that there are now two of them, so the effect is
-[src/hooks/use-resolved.ts](../../src/hooks/use-resolved.ts) rather than written twice.
+`managedNames` also carries, including "cannot reject, and must not be made to". This is where a
+data-fetching library would normally appear, and the reason it does not is the reason above: the
+value arrives from a server render as a prop, so there is no client fetch to cache. Two props
+carry that shape, so the effect lives once in
+[src/hooks/use-resolved.ts](../../src/hooks/use-resolved.ts).
 
 Unlike `managedNames`, the region read is not free: `managedNames` rides `loadContainers`'
 per-render memo, this has no such carrier, and `/dashboard` is `force-dynamic` — so it is memoised

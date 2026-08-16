@@ -136,7 +136,34 @@ test.describe("the project watcher", () => {
     await page.goto("/dashboard?project=proj_demo&environment=env_staging");
     await expect(page.getByText(/nothing running in this environment/i)).toBeVisible();
 
-    const before = (await fixtureStats(page)).operations.ProjectMetrics ?? 0;
+    /*
+     * Settle the counter before reading a baseline off it, because it is global to the
+     * fixture and the fixture outlives the spec.
+     *
+     * The test above this one drives a metrics poll every METRICS_POLL_MS and ends the
+     * moment one lands — so the `stale` it just consumed can still be rendering on the
+     * server when this test resets the counts, and the request that render issues arrives
+     * afterwards. A straggler landing after the baseline is read is indistinguishable from
+     * the nudge this test asserts never happens, and it failed exactly that way in a full
+     * run while passing every time the file was run on its own.
+     *
+     * Two equal readings rather than a fixed pause: what has to be true is that the counter
+     * is quiet, and a pause long enough to guarantee that would have to outlast any server
+     * render. Zero settles on the first read, which is the ordinary case.
+     */
+    let before = 0;
+    await expect
+      .poll(
+        async () => {
+          const now = (await fixtureStats(page)).operations.ProjectMetrics ?? 0;
+          const settled = now === before;
+          before = now;
+          return settled;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
     const staleMs = Number(process.env.METRICS_POLL_MS ?? 2_000);
     await page.waitForTimeout(staleMs * 1.5);
 

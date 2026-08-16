@@ -955,7 +955,11 @@ describe("spinUp, with the advanced resource controls", () => {
   /** The three answers a customised spin-up needs, with what each was sent recorded. */
   const stubs = (
     sent: { settings?: Record<string, unknown>; limits?: Record<string, unknown> },
-    over: { settingsFail?: boolean; limitsFail?: boolean } = {},
+    over: {
+      settingsFail?: boolean;
+      limitsFail?: boolean;
+      readBackFail?: boolean;
+    } = {},
   ) => [
     api.mutation("ServiceCreate", () =>
       HttpResponse.json({
@@ -977,6 +981,31 @@ describe("spinUp, with the advanced resource controls", () => {
     api.mutation("ServiceInstanceDeployV2", () =>
       HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_new" } }),
     ),
+    /*
+     * The read-back, which runs only when the panel was used — so it belongs in this
+     * block's stubs rather than in the file's defaults, where it would be answering for
+     * the uncustomised spin-ups too.
+     *
+     * It answers something OTHER than what it was sent, deliberately: a retry count of 10
+     * where the form asked for 4 is what Railway really returned once, and it is the value
+     * that proves the `stored_` fields in the audit line are Railway's word rather than an
+     * echo of the form's.
+     */
+    api.query("ServiceInstance", () =>
+      over.readBackFail
+        ? HttpResponse.json({ data: null, errors: [{ message: "Not Authorized" }] })
+        : HttpResponse.json({
+            data: {
+              serviceInstance: {
+                id: "si_new",
+                numReplicas: 2,
+                restartPolicyType: "ON_FAILURE",
+                restartPolicyMaxRetries: 10,
+                startCommand: null,
+              },
+            },
+          }),
+    ),
   ];
 
   it("carries the panel's values through to the two mutations", async () => {
@@ -989,7 +1018,7 @@ describe("spinUp, with the advanced resource controls", () => {
     const result = await spinUp(
       null,
       spinUpForm({
-        region: "us-west2",
+        region: "sfo",
         replicas: "2",
         cpu: "0.5",
         memory: "1",
@@ -1001,7 +1030,7 @@ describe("spinUp, with the advanced resource controls", () => {
 
     expect(result).toEqual({ ok: true, message: "Spinning up cache" });
     expect(sent.settings).toEqual({
-      region: "us-west2",
+      multiRegionConfig: { sfo: { numReplicas: 2 } },
       numReplicas: 2,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 4,
@@ -1086,7 +1115,7 @@ describe("spinUp, with the advanced resource controls", () => {
     await spinUp(
       null,
       spinUpForm({
-        region: "us-west2",
+        region: "sfo",
         replicas: "2",
         cpu: "0.5",
         memory: "1",
@@ -1097,7 +1126,7 @@ describe("spinUp, with the advanced resource controls", () => {
     );
 
     expect(record("container.created")).toMatchObject({
-      region: "us-west2",
+      region: "sfo",
       replicas: 2,
       vcpus: 0.5,
       memory_gb: 1,
@@ -1106,6 +1135,63 @@ describe("spinUp, with the advanced resource controls", () => {
       start_command_length: "redis-server --requirepass hunter2".length,
     });
     expect(rawLogLines().join("\n")).not.toContain("hunter2");
+  });
+
+  it("records what Railway stored beside what it was asked for", async () => {
+    /*
+     * The half of the record that is Railway's word rather than the form's, and the reason
+     * it exists: every one of these controls is write-only — none is rendered anywhere
+     * after the create — so a value Railway drops could previously only be found by opening
+     * Railway's own dashboard and comparing by eye. One was found that way, and this stub
+     * reproduces it: a retry count that came back as something other than what was sent.
+     *
+     * There is deliberately no `stored_region` beside the `region`. Railway answers null for
+     * a service instance's region whatever it was told and wherever the container is really
+     * running, so the field would report a dropped setting on every correct spin-up — and a
+     * permanently-failing instrument teaches whoever reads it to ignore the whole block.
+     *
+     * The app cannot correct what it does find. What it can do is say so in the one line
+     * that outlives the container, so the next occurrence is a log query rather than a
+     * manual comparison.
+     */
+    const sent = {};
+    server.use(...stubs(sent));
+
+    await spinUp(
+      null,
+      spinUpForm({
+        region: "ams",
+        replicas: "2",
+        restartPolicy: "ON_FAILURE",
+        restartRetries: "4",
+      }),
+    );
+
+    const created = record("container.created");
+    expect(created).toMatchObject({
+      region: "ams",
+      restart_retries: 4,
+      stored_replicas: 2,
+      stored_restart_retries: 10,
+    });
+    expect(created).not.toHaveProperty("stored_region");
+  });
+
+  it("claims nothing about what Railway stored when it would not say", async () => {
+    /*
+     * Absent rather than zero, and the distinction is the point. A `stored_` field that
+     * defaulted to the same sentinel as the field above it would read as agreement — the
+     * one thing this must never say by accident — so a refused read-back drops the fields
+     * entirely rather than filling them in.
+     */
+    const sent = {};
+    server.use(...stubs(sent, { readBackFail: true }));
+
+    await spinUp(null, spinUpForm({ replicas: "2" }));
+
+    const created = record("container.created");
+    expect(created).toMatchObject({ replicas: 2 });
+    expect(created).not.toHaveProperty("stored_replicas");
   });
 
   it("records zero for every control nobody set", async () => {

@@ -4,11 +4,10 @@
 
 ## Context
 
-Six of the twelve presets keep state, and until T-491 every one of them was handed a generated
-credential and then wrote to a container filesystem that is discarded whenever the container
-moves. A user spun up postgres, put data in it, came back, and it was gone — with nothing anywhere
-in the UI having said that would happen. T-491 named five; rabbitmq is the sixth, because it keeps
-its durable queues and Mnesia schema on disk too.
+Six of the twelve presets keep state: postgres, mysql, mariadb and mongo, plus redis for its
+snapshot and rabbitmq for its durable queues and Mnesia schema. A container filesystem is
+discarded whenever the container moves, so without a volume each of them is handed a generated
+credential and a place to write that will not survive, with nothing in the UI saying so.
 
 So the stateful presets carry a mount path in the catalog and get a volume at create time. That
 part is not the decision. The decision is what destroy does with it.
@@ -61,12 +60,12 @@ name somebody else's.
 
 ## Consequences
 
-**What the app still gets wrong, on purpose.** `environment.volumeInstances` lists a volume a few
-seconds after `volumeCreate` returns (about three, measured; `project.volumes` sees it in under
-one). A container destroyed inside that window has a volume the read cannot see, so the data is
-kept. That is the conservative outcome and the toast states it, which is what makes it acceptable:
-wrong and visible, rather than a silent orphan. Closing it properly would mean matching on
-`project.volumes` by name, which is the weaker ownership claim this ADR just rejected.
+**What the app still gets wrong, on purpose.** `environment.volumeInstances` lists a volume some
+seconds after `volumeCreate` returns, later than `project.volumes` does. A container destroyed
+inside that window has a volume the read cannot see, so the data is kept. That is the conservative
+outcome and the toast states it, which is what makes it acceptable — the failure is visible rather
+than a silent orphan. Closing it properly would mean matching on `project.volumes` by name, which
+is the weaker ownership claim this ADR rejects above.
 
 The same reasoning makes `EnvironmentVolumes` safe to put in `DEGRADING_OPERATIONS`. A refused
 read means no readout and no checkbox, which means no field posted, which means the data is kept

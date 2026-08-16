@@ -24,6 +24,7 @@ import { Card } from "./ui/card";
 import { Checkbox } from "./ui/checkbox";
 import { EmptyState } from "./ui/misc";
 import { Text } from "./ui/text";
+import { Tooltip } from "./ui/tooltip";
 import { LiveRegion } from "./ui/live-region";
 
 /**
@@ -125,43 +126,59 @@ export function ContainerList({
   })();
 
   /*
-   * What the containers created here are using, added up.
+   * What the containers created here are using, added up — and, beside it, what everything
+   * in this environment is using.
    *
-   * Over `matched` rather than `containers`, so the total describes the same set the
-   * sentence above it counts — a filtered list whose total covered the whole environment
-   * would be two numbers on one line that disagree.
+   * The first is over `matched` rather than `containers`, so it describes the same set the
+   * count above it names: a filtered list whose total covered the whole environment would
+   * be two numbers in one tooltip that disagree. The second is deliberately over
+   * `containers`, unfiltered and unrestricted, and that is the whole reason it exists — a
+   * figure with nothing beside it is a figure nobody can tell is large.
+   *
+   * Both are environment totals. There is no per-project or per-service monetary figure
+   * anywhere in Railway's schema; the only money in this app is `spend`, on the Billing
+   * tab, and it covers a whole workspace. See WorkspaceSpend.
    */
   const totals = useMemo(
     () => sumContainerMetrics(matched, metrics),
     [matched, metrics],
   );
-  const totalCpu = formatVcpu(totals.cpuCores, locale);
-  const totalMemory = formatMemoryGb(totals.memoryGb, locale);
+  const overall = useMemo(
+    () => sumContainerMetrics(containers, metrics, { managedOnly: false }),
+    [containers, metrics],
+  );
 
   /*
-   * Rendered only when something actually answered. Nothing running, metrics refused, or a
-   * project with no containers of ours all produce the same nothing here — and a line
-   * reading "— vCPU and — across 0 containers" is a sentence with no content, where the
-   * per-row em dash at least sits under a label that explains it.
+   * One reading, formatted, or null when nothing answered.
+   *
+   * Null rather than zero, which is the invariant `sumContainerMetrics` starts its
+   * accumulators at null to preserve: nothing running, metrics refused, and an environment
+   * with no containers all produce the same nothing here, and "0.00 vCPU across 0
+   * containers" would state that infrastructure is running and idle — a claim about
+   * somebody's bill. The tooltip says so in words instead.
    */
-  const totalsSentence =
-    totalCpu && totalMemory
-      ? t("containerTotals", {
-          /*
-           * A summed trace is still a trace: twenty containers each below a hundredth of a
-           * core add up to something the two-decimal format still cannot show, and "0.00
-           * vCPU across 20 containers" is the same false reading the per-row figure had.
-           */
-          cpu: totalCpu.trace
-            ? tCommon("lessThan", { value: totalCpu.value })
-            : totalCpu.value,
-          memory:
-            totalMemory.unit === "gb"
-              ? tContainers("memoryValueGb", { value: totalMemory.value })
-              : tContainers("memoryValueMb", { value: totalMemory.value }),
-          count: totals.containers,
-        })
-      : null;
+  const readout = (figures: typeof totals) => {
+    const cpu = formatVcpu(figures.cpuCores, locale);
+    const memory = formatMemoryGb(figures.memoryGb, locale);
+    if (!cpu || !memory) return null;
+
+    return t("usageFigures", {
+      /*
+       * A summed trace is still a trace: twenty containers each below a hundredth of a
+       * core add up to something the two-decimal format still cannot show, and "0.00
+       * vCPU across 20 containers" is the same false reading the per-row figure had.
+       */
+      cpu: cpu.trace ? tCommon("lessThan", { value: cpu.value }) : cpu.value,
+      memory:
+        memory.unit === "gb"
+          ? tContainers("memoryValueGb", { value: memory.value })
+          : tContainers("memoryValueMb", { value: memory.value }),
+      count: figures.containers,
+    });
+  };
+
+  const createdHereUsage = readout(totals);
+  const overallUsage = readout(overall);
 
   return (
     // A div, not a section: ContainerSection is already the landmark, and a nested one
@@ -170,29 +187,72 @@ export function ContainerList({
       <ContainerSectionHeader
         heading={heading}
         summary={
-          <>
-            <Text asChild variant="caption" tone="subtle">
-              {/*
-                A bare live region, not role="status": toasts and Banner already own that
-                role, and a third source makes every status assertion ambiguous (see
-                ui/misc.tsx). It stays mounted and empty rather than appearing with its
-                text, which is the classic way an announcement is dropped. The debounce is
-                what keeps it to one announcement per settle rather than one per keystroke.
-              */}
-              <LiveRegion as="p">{summary}</LiveRegion>
-            </Text>
+          <Text asChild variant="caption" tone="subtle">
             {/*
-              Outside the live region on purpose. These numbers move on every metrics
-              refresh, and inside they would be announced each time — the announcement spam
-              live-region.tsx's debounce exists to prevent, arriving from a different
-              direction. The count sentence above is the one worth interrupting for.
+              A bare live region, not role="status": toasts and Banner already own that
+              role, and a third source makes every status assertion ambiguous (see
+              ui/misc.tsx). It stays mounted and empty rather than appearing with its
+              text, which is the classic way an announcement is dropped. The debounce is
+              what keeps it to one announcement per settle rather than one per keystroke.
             */}
-            {totalsSentence && (
-              <Text asChild variant="caption" tone="subtle">
-                <p>{totalsSentence}</p>
-              </Text>
-            )}
-          </>
+            <LiveRegion as="p">
+              {summary &&
+                /*
+                 * The usage figures hang off the count rather than sitting under it as a
+                 * second line, which is what they used to do. Two captions competing for
+                 * one slot read as one sentence continuing, and the numbers are detail
+                 * somebody asks for rather than something they need on every glance.
+                 *
+                 * The button, not the paragraph, is the tooltip trigger. Radix renders
+                 * Trigger `asChild`, so it needs one focusable element — a bare `<p>` gives
+                 * a tooltip no keyboard user can reach. Putting the button INSIDE the live
+                 * region keeps the two roles apart: the region still announces when the
+                 * count changes, and the control is a control. Swapping the `<p>` for a
+                 * button would move the live region onto the control instead.
+                 *
+                 * The figures themselves stay out of the announcement, deliberately. They
+                 * move on every metrics refresh, and inside a live region that is one
+                 * interruption per poll — the spam live-region.tsx's debounce exists to
+                 * prevent, arriving from a different direction. Radix mounts tooltip
+                 * content only while open, so a reader hears them when they ask.
+                 */
+                (createdHereUsage || overallUsage ? (
+                  <Tooltip
+                    wide
+                    content={
+                      <span className="flex flex-col gap-1.5">
+                        <span className="flex flex-col">
+                          {/*
+                            `badge`, which is the catalogued 12px medium — the tooltip's own
+                            text is already `text-caption`, and these two lines are what
+                            makes a figure attributable to a scope rather than floating.
+                          */}
+                          <Text asChild variant="badge">
+                            <strong>{t("usageHere")}</strong>
+                          </Text>
+                          <span>{createdHereUsage ?? t("usageUnknown")}</span>
+                        </span>
+                        <span className="flex flex-col">
+                          <Text asChild variant="badge">
+                            <strong>{t("usageOverall")}</strong>
+                          </Text>
+                          <span>{overallUsage ?? t("usageUnknown")}</span>
+                        </span>
+                      </span>
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="focus-ring cursor-help rounded-xs text-left underline decoration-dotted underline-offset-2"
+                    >
+                      {summary}
+                    </button>
+                  </Tooltip>
+                ) : (
+                  summary
+                ))}
+            </LiveRegion>
+          </Text>
         }
       />
 

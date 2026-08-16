@@ -407,43 +407,68 @@ export type RegionNode = {
 /**
  * The regions worth offering, in the order a select should show them.
  *
- * Two filters, and each drops a row that would be a worse choice than no choice:
+ * **`id` is the value, and it is one option per airport code.** This went round twice, and
+ * the second answer is the measured one. Railway documents `id` as "Region ID (airport
+ * code)" and that is literally what it is — a code shared by every datacentre at that
+ * airport, `ams` three times over — so an earlier revision switched to `name`, which is
+ * unique per row, on the theory that `name` was what the mutation accepted. It is not:
  *
- *   - **No `id`.** The field is nullable on Railway's own type while `name` and `location`
- *     are not, so a region can be listed with nothing to submit. An option posting the empty
- *     string is indistinguishable from the blank one above it, which means Railway picks —
- *     so the user would choose a region and silently get a different one.
+ *   - `serviceInstanceUpdate` accepts both spellings and applies neither, and its refusal
+ *     for an unknown one names the set it does know: *"Available regions are: [pdx, ams,
+ *     sfo, iad, sin]"*. Those are `id` values. The airport code is Railway's own unit of
+ *     placement, and the extra rows sharing one are spellings rather than choices.
+ *   - Asking for `ams` and asking for `europe-west4-drams3a` were measured against real
+ *     deployments and both landed in `europe-west4-drams11a` — the same pool, and neither
+ *     the datacentre the long name asks for. There is no precision to buy by sending it.
+ *
+ * So the duplicates collapse, which is the part a person sees: three rows reading
+ * "Amsterdam" that all place a container the same way are three ways to make one choice.
+ * The tie is broken on `location` first — the string on screen, so the surviving option is
+ * the one a reader can predict — and on `name` after it, because Railway documents no
+ * ordering for this list and an unordered tiebreak reshuffles the picker between reads.
+ *
+ * Two rows are dropped rather than collapsed:
+ *
+ *   - **No `id`.** It is nullable on Railway's own type, and an option posting the empty
+ *     string reads as "let Railway choose" rather than as the choice the person made. The
+ *     blank row at the top of the select already says that, honestly.
  *   - **Deprecated.** Railway carries a replacement region beside the flag, so these are
  *     datacentres with an end date. Offering one is offering a container that stops working
  *     later, at a moment nothing in this app will explain.
  *
- * `location` rather than `name` as the label: `name` is the identifier again in most rows,
- * where `location` is the sentence a person reads. Sorted by country then label, because the
- * country is the `<optgroup>` heading and an unsorted list would repeat headings.
+ * `location` rather than either identifier as the label, which is what makes these fields a
+ * value and a caption rather than two spellings of one thing: `location` is the sentence a
+ * person reads. Sorted by country then label, because the country is the `<optgroup>`
+ * heading and an unsorted list would repeat headings.
  */
 export function toRegionOptions(regions: RegionNode[]): RegionOption[] {
-  return (
-    regions
-      /*
-       * One pass, because the guard and the read have to stay together. `id` is nullable on
-       * the live schema, so this was a `.filter` for null followed four lines later by a
-       * `.map` asserting non-null — two statements holding one invariant between them, and
-       * the compiler checking neither. `flatMap` narrows `id` where it is tested and uses it
-       * in the same expression, which is the same refusal expressed so that it cannot come
-       * apart in a later edit.
-       */
-      .flatMap((region) =>
-        region.id === null ||
-        region.deploymentConstraints?.deprecationInfo?.isDeprecated
-          ? []
-          : [{ id: region.id, label: region.location, country: region.country }],
-      )
-      .sort(
-        (left, right) =>
-          left.country.localeCompare(right.country) ||
-          left.label.localeCompare(right.label),
-      )
-  );
+  const byCode = new Map<string, { option: RegionOption; name: string }>();
+
+  for (const region of regions) {
+    if (region.deploymentConstraints?.deprecationInfo?.isDeprecated) continue;
+    const value = region.id;
+    if (!value) continue;
+
+    const held = byCode.get(value);
+    const beaten =
+      held &&
+      (held.option.label.localeCompare(region.location) ||
+        held.name.localeCompare(region.name)) <= 0;
+    if (beaten) continue;
+
+    byCode.set(value, {
+      option: { value, label: region.location, country: region.country },
+      name: region.name,
+    });
+  }
+
+  return [...byCode.values()]
+    .map((held) => held.option)
+    .sort(
+      (left, right) =>
+        left.country.localeCompare(right.country) ||
+        left.label.localeCompare(right.label),
+    );
 }
 
 /**

@@ -102,6 +102,44 @@ describe("sumContainerMetrics", () => {
     expect(totals).toEqual({ cpuCores: 0.25, memoryGb: null, containers: 1 });
   });
 
+  it("widens to the whole environment when the caller asks, and says which set", () => {
+    /*
+     * The one relaxation of the managed-only scope, and it is safe only because the surface
+     * that uses it labels both figures. A total nobody can attribute to a set is the exact
+     * misreading the copy is written to prevent — so the option exists for the tooltip that
+     * states "created here" and "everything in this environment" side by side, and for
+     * nothing else.
+     */
+    const totals = sumContainerMetrics(
+      [container(), container({ serviceId: "svc_2", managed: false })],
+      {
+        svc_1: usage(),
+        svc_2: usage({ serviceId: "svc_2", cpuCores: 0.75, memoryGb: 1.5 }),
+      },
+      { managedOnly: false },
+    );
+
+    expect(totals).toEqual({ cpuCores: 1, memoryGb: 2, containers: 2 });
+  });
+
+  it("keeps the managed-only scope by default", () => {
+    // Two existing callers pass no options at all, and the default is what stops the wider
+    // scope from leaking into a figure whose copy says "created here".
+    const unmanaged = [container({ managed: false })];
+    const metrics = { svc_1: usage() };
+
+    expect(sumContainerMetrics(unmanaged, metrics)).toEqual({
+      cpuCores: null,
+      memoryGb: null,
+      containers: 0,
+    });
+    expect(sumContainerMetrics(unmanaged, metrics, {})).toEqual({
+      cpuCores: null,
+      memoryGb: null,
+      containers: 0,
+    });
+  });
+
   it("returns nothing for an empty list", () => {
     expect(sumContainerMetrics([], {})).toEqual({
       cpuCores: null,

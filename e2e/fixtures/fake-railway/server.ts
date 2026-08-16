@@ -75,6 +75,12 @@ const readBody = (req: IncomingMessage): Promise<string> =>
  * the re-authorize that would have. `notAuthorized()` in graphql.ts already reproduced this
  * faithfully for a *resolved* field; this is the same shape at the transport knob, so a
  * spec can inject it against any operation rather than only the ones with a path.
+ *
+ * `planLimit` is a third shape wearing the second one's clothes: HTTP 200, the same
+ * `INTERNAL_SERVER_ERROR` code, and only the wording separating "the account is full"
+ * from "the token cannot reach this". It is here because it was measured live — a free
+ * account refusing a sixth service — and because the app used to answer it with "a reason
+ * the app does not recognise" while Railway had said exactly what to do.
  */
 function takeFault(): {
   status: number;
@@ -93,6 +99,22 @@ function takeFault(): {
         data: null,
         errors: [
           { message: "Not Authorized", extensions: { code: "INTERNAL_SERVER_ERROR" } },
+        ],
+      },
+    };
+  }
+  if (store.faults.planLimit > 0) {
+    store.faults.planLimit -= 1;
+    return {
+      status: 200,
+      body: {
+        data: null,
+        errors: [
+          {
+            message:
+              "Free plan resource provision limit exceeded. Please upgrade to provision more resources!",
+            extensions: { code: "INTERNAL_SERVER_ERROR" },
+          },
         ],
       },
     };

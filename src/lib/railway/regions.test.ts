@@ -19,15 +19,21 @@ vi.mock("./client", () => ({ gql: () => gql() }));
 const { cachedRegions, __resetRegionCache } = await import("./regions");
 
 const OREGON: RegionOption = {
-  id: "us-west2",
+  value: "sfo",
   label: "US West (Oregon)",
   country: "United States",
 };
 
-/** What Railway sends for the option above. `toRegionOptions` maps it for real. */
+/**
+ * What Railway sends for the option above. `toRegionOptions` maps it for real.
+ *
+ * `id` and `name` differ, as they do on the live API — `id` is an airport code several
+ * datacentres share, `name` is the identifier the mutation accepts. A fixture that set
+ * both to the same string, which this one used to, passes whichever field the mapper reads.
+ */
 const OREGON_NODE: RegionNode = {
-  id: "us-west2",
-  name: "us-west2",
+  id: "sfo",
+  name: "us-west2-xrhvwla",
   location: "US West (Oregon)",
   country: "United States",
   deploymentConstraints: null,

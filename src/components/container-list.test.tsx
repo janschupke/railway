@@ -44,6 +44,8 @@ vi.mock("./container-row", () => ({
 
 const { ContainerList } = await import("./container-list");
 const { ToastProvider } = await import("./ui/toast");
+// The usage figures hang off a Radix tooltip now, and a bare Tooltip is a Radix error.
+const { TooltipProvider } = await import("./ui/tooltip");
 
 const container = (over: Partial<Container> = {}): Container => ({
   serviceId: "svc_1",
@@ -74,16 +76,18 @@ const renderList = (
 ) =>
   render(
     // The selection toolbar holds a destroy dialog, which toasts its own outcome.
-    <ToastProvider>
-      <ContainerList
-        containers={containers}
-        projectId="proj_1"
-        environmentId="env_1"
-        heading="Containers"
-        metrics={metrics}
-        volumes={volumes}
-      />
-    </ToastProvider>,
+    <TooltipProvider>
+      <ToastProvider>
+        <ContainerList
+          containers={containers}
+          projectId="proj_1"
+          environmentId="env_1"
+          heading="Containers"
+          metrics={metrics}
+          volumes={volumes}
+        />
+      </ToastProvider>
+    </TooltipProvider>,
   );
 
 /** The rows, and only the rows — the toast viewport is a list of list items too. */
@@ -258,11 +262,18 @@ describe("ContainerList", () => {
       sampledAt: 1_760_000_000,
     });
 
+    /** The usage figures live in a tooltip now; this opens it and hands back its content. */
+    const openUsage = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.hover(await screen.findByRole("button", { name: /created here/ }));
+      return screen.findByRole("tooltip");
+    };
+
     it("adds up only the containers this app created", async () => {
       /*
        * The scope the cost story rests on. A total that quietly included services someone
        * else made would be exactly the misreading the copy around it is written to prevent.
        */
+      const user = userEvent.setup();
       renderList(
         [
           container({ serviceId: "svc_1" }),
@@ -274,27 +285,76 @@ describe("ContainerList", () => {
         },
       );
 
+      const tip = await openUsage(user);
+      expect(within(tip).getByText("Created here")).toBeInTheDocument();
       expect(
-        await screen.findByText("0.25 vCPU and 1.5 GB across 1 container created here"),
+        within(tip).getByText("0.25 vCPU and 1.5 GB across 1 container"),
+      ).toBeInTheDocument();
+    });
+
+    it("states the environment total beside it, which is what makes it legible", async () => {
+      /*
+       * A figure with nothing beside it is a figure nobody can tell is large. The second
+       * row covers every service in the environment, managed or not — and it says so, which
+       * is the condition the managed-only invariant is relaxed under.
+       */
+      const user = userEvent.setup();
+      renderList(
+        [
+          container({ serviceId: "svc_1" }),
+          container({ serviceId: "svc_2", managed: false }),
+        ],
+        {
+          svc_1: usage("svc_1", 0.25, 1.5),
+          svc_2: usage("svc_2", 0.75, 2.5),
+        },
+      );
+
+      const tip = await openUsage(user);
+      expect(
+        within(tip).getByText("Everything in this environment"),
+      ).toBeInTheDocument();
+      expect(
+        within(tip).getByText("1.00 vCPU and 4.0 GB across 2 containers"),
       ).toBeInTheDocument();
     });
 
     it("says nothing at all when nothing answered", async () => {
       /*
-       * "— vCPU and — across 0 containers" is a sentence with no content. The per-row em
-       * dash at least sits under a label that explains it; this one would not.
+       * "— vCPU and — across 0 containers" is a sentence with no content, so there is no
+       * tooltip to open: the count stays plain text rather than becoming a control that
+       * reveals nothing.
        */
       renderList([container()], {});
 
+      expect(screen.queryByRole("button", { name: /created here/ })).toBeNull();
       expect(screen.queryByText(/vCPU and/)).toBeNull();
     });
 
-    it("keeps the total outside the live region", async () => {
+    it("says so in words when one scope answered and the other did not", async () => {
+      // Absent is not zero, all the way to the copy: a scope with no samples says nothing
+      // reported rather than showing a figure that would read as running and idle.
+      const user = userEvent.setup();
+      renderList([container({ serviceId: "svc_1", managed: false })], {
+        svc_1: usage("svc_1", 0.25, 1.5),
+      });
+
+      const tip = await openUsage(user);
+      expect(within(tip).getByText("Nothing reported usage.")).toBeInTheDocument();
+      expect(
+        within(tip).getByText("0.25 vCPU and 1.5 GB across 1 container"),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the figures out of the live region", async () => {
       /*
        * These numbers move on every metrics refresh. Inside the live region they would be
        * announced each time — the announcement spam live-region.tsx's debounce exists to
        * prevent, arriving from a different direction. The count sentence is the one worth
-       * interrupting a screen-reader user for.
+       * interrupting a screen-reader user for, and it is still in there.
+       *
+       * Radix mounts tooltip content only while open, which is what makes the trigger
+       * living INSIDE the region safe: the figures are not in the DOM until asked for.
        */
       const { container: root } = renderList([container({ serviceId: "svc_1" })], {
         svc_1: usage("svc_1", 0.25, 1.5),
@@ -303,9 +363,26 @@ describe("ContainerList", () => {
       const live = root.querySelector("[aria-live]");
       expect(live).not.toBeNull();
       expect(live!.textContent).not.toMatch(/vCPU/);
-      expect(await screen.findByText(/0\.25 vCPU and 1\.5 GB/)).toBeInTheDocument();
+      expect(live!.textContent).toMatch(/created here/);
+    });
+
+    it("gives the figures a trigger a keyboard can reach", async () => {
+      // Radix renders Trigger asChild, so a bare paragraph would give this tooltip no
+      // keyboard user at all — the whole reason the count is wrapped in a button.
+      const user = userEvent.setup();
+      renderList([container({ serviceId: "svc_1" })], {
+        svc_1: usage("svc_1", 0.25, 1.5),
+      });
+
+      await user.tab();
+      await user.keyboard("{Tab}");
+
+      expect(
+        await screen.findByRole("button", { name: /created here/ }),
+      ).toBeInTheDocument();
     });
   });
+
   describe("sorting", () => {
     const dated = (name: string, createdAt: string) =>
       container({ serviceId: `svc_${name}`, displayName: name, createdAt });

@@ -19,7 +19,9 @@ const { ToastProvider } = await import("./ui/toast");
 const { TooltipProvider } = await import("./ui/tooltip");
 
 const OREGON = {
-  id: "us-west2",
+  // `value` carries Railway's `name`, which is the identifier the mutation accepts — not
+  // its `id`, which is an airport code several datacentres share. See RegionOption.
+  value: "us-west2-xrhvwla",
   label: "US West (Oregon)",
   country: "United States",
 };
@@ -1023,7 +1025,7 @@ describe("the advanced panel", () => {
 
     await waitFor(() => expect(spinUp).toHaveBeenCalledTimes(1));
     const submitted = spinUp.mock.calls[0]![1];
-    expect(submitted.get("region")).toBe("us-west2");
+    expect(submitted.get("region")).toBe("us-west2-xrhvwla");
     expect(submitted.get("replicas")).toBe("3");
     expect(submitted.get("cpu")).toBe("0.5");
     expect(submitted.get("memory")).toBe("2");
@@ -1267,7 +1269,10 @@ describe("the advanced panel", () => {
   it("offers the regions it was given, grouped by country", async () => {
     const user = userEvent.setup();
     renderForm({
-      regions: [OREGON, { id: "eu-west4", label: "Amsterdam", country: "Netherlands" }],
+      regions: [
+        OREGON,
+        { value: "europe-west4-drams3a", label: "Amsterdam", country: "Netherlands" },
+      ],
     });
 
     await openAdvanced(user);

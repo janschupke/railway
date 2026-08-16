@@ -15,6 +15,7 @@ import { env } from "@/env";
 import { getSession } from "@/lib/auth/server";
 import { getProjectMetrics } from "@/lib/railway/metrics";
 import { getProjectContainers } from "@/lib/railway/projects";
+import { applyStopped } from "@/lib/railway/stopped";
 import { getEnvironmentVolumes } from "@/lib/railway/volumes";
 import { log } from "@/lib/logger";
 import type { ContainerVolume } from "@/lib/railway/types";
@@ -129,7 +130,22 @@ const containerList = cache(
         projectId,
         environmentId,
       );
-      return { containers, error: null, volumes: await storage, ...(await usage) };
+      /*
+       * One of the two places the memory of a stop is applied — the other is the watch
+       * route, which hashes the same reading so a stop reaches every other open tab.
+       *
+       * Here rather than inside `getProjectContainers`, because its other two callers are
+       * the ownership guard and the bulk destroy path, and both state their contract as
+       * Railway's answer to this request rather than anything inferred. This is also the
+       * read that evicts: it is the one that sees Railway's current word on every service.
+       * See lib/railway/stopped.ts.
+       */
+      return {
+        containers: applyStopped(containers),
+        error: null,
+        volumes: await storage,
+        ...(await usage),
+      };
     } catch (error) {
       const t = await getTranslations();
       return {

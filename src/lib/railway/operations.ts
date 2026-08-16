@@ -59,6 +59,8 @@ import type {
   ServiceInstanceDeployV2MutationVariables,
   ServiceInstanceLimitsUpdateMutation,
   ServiceInstanceLimitsUpdateMutationVariables,
+  ServiceInstanceQuery,
+  ServiceInstanceQueryVariables,
   ServiceInstanceUpdateMutation,
   ServiceInstanceUpdateMutationVariables,
   ServiceUpdateMutation,
@@ -352,11 +354,15 @@ export const PROJECT_METRICS_QUERY: TypedDocument<
  * established to be global, and a list that is right for the project the form is pointed at
  * is the only list worth offering.
  *
- * `id` is nullable on `Region` while `name`, `location` and `country` are not, so a region
- * Railway lists can carry no identifier to submit; the mapper drops those rather than
- * offering a choice that posts an empty string. `deprecationInfo` is selected for the same
- * class of reason — a deprecated region is a future failure with a date on it, and offering
- * one is offering a container that stops working later.
+ * **`name` is the value the mutation takes, and `id` is not.** Railway documents `id` as
+ * "Region ID (airport code)" and that is literally what it is — a location code several
+ * datacentres share, `ams` on three separate rows. `name` is unique per row and is what
+ * `serviceInstanceUpdate` accepts. Both are selected because the mapper needs the one and
+ * this comment is the only place the other's role is written down.
+ *
+ * `deprecationInfo` is selected for a different class of reason — a deprecated region is a
+ * future failure with a date on it, and offering one is offering a container that stops
+ * working later.
  */
 export const REGIONS_QUERY: TypedDocument<RegionsQuery, RegionsQueryVariables> =
   /* GraphQL */ `
@@ -503,6 +509,42 @@ export const SERVICE_INSTANCE_UPDATE_MUTATION: TypedDocument<
       environmentId: $environmentId
       input: $input
     )
+  }
+`;
+
+/**
+ * What Railway actually stored for a service instance, read once after a create.
+ *
+ * **These controls are write-only, and that is the problem this closes.** `numReplicas`,
+ * `restartPolicyType`, `restartPolicyMaxRetries` and `startCommand` are all sent by the
+ * spin-up form and none of them is rendered anywhere afterwards, so a value Railway drops
+ * can only be found by opening Railway's own dashboard and comparing by eye. A live
+ * measurement says that is not theoretical: a retry count of 3 came back as 10 once.
+ *
+ * So the create reads its own work back and logs what Railway holds beside what was asked
+ * for. One extra request, on the create path only — not on the dashboard read, which runs
+ * on every render and every watcher poll.
+ *
+ * **`region` is deliberately not selected**, although it is on the type and would look like
+ * the fifth member of the same set. It reads `null` for every service, including ones that
+ * have demonstrably run in a region for months, so selecting it would report a dropped
+ * setting on every correct spin-up. See `StoredSettings` in service-create.ts.
+ *
+ * In DEGRADING_OPERATIONS, read through `gqlPartial`: this exists to enrich an audit line
+ * and must never be the reason a container the user is looking at fails to appear.
+ */
+export const SERVICE_INSTANCE_QUERY: TypedDocument<
+  ServiceInstanceQuery,
+  ServiceInstanceQueryVariables
+> = /* GraphQL */ `
+  query ServiceInstance($serviceId: String!, $environmentId: String!) {
+    serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
+      id
+      numReplicas
+      restartPolicyType
+      restartPolicyMaxRetries
+      startCommand
+    }
   }
 `;
 

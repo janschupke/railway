@@ -24,17 +24,15 @@ projects; `project:admin` appears in the live discovery document's `scopes_suppo
 
 `workspace:viewer` is the second, and it is not optional despite reading as though it were.
 Railway scopes workspaces separately from projects, so a token holding `project:admin` alone has
-`me.workspaces` refused outright — and because the app asked for that field in the same document
-as the personal project list, the refusal used to discard both. Every dashboard load failed with
-a reference id and nothing else. The scope closes the gap; independent per-source documents make
-a future gap survivable.
+`me.workspaces` refused outright — and a refusal in a document that also asked for the personal
+project list discards both. The scope closes that; independent per-source documents keep a future
+refusal from taking a whole dashboard load with it.
 
 **Consent is Railway's decision, not the app's.** `/api/auth/login` sends no `prompt` parameter,
 so the consent screen appears on the first authorization — where no grant exists yet — and is
-skipped afterwards. It previously sent `prompt=consent` on every request, which is an override
-meaning "show it regardless": re-picking every shared project was the price of each sign-in.
-`?consent=1` forces it, and only the explicit "Authorize again" and "Choose projects" controls
-pass it. The one case a silent authorization can fail is a provider that mints refresh tokens
+skipped afterwards. Sending `prompt=consent` is an override meaning "show it regardless", which
+makes re-picking every shared project the price of each sign-in. `?consent=1` forces it, and only
+the explicit "Authorize again" and "Choose projects" controls pass it. The one case a silent authorization can fail is a provider that mints refresh tokens
 only alongside a displayed consent screen; the callback detects a missing refresh token and
 retries once with consent forced, guarded by a cookie so it cannot loop.
 

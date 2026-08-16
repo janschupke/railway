@@ -1,0 +1,43 @@
+# Secret scanning, and the one string it is told to stop reporting.
+#
+# `pnpm`-adjacent tools are configured in package.json; this one is not, because gitleaks
+# runs as a pinned container in CI (see the `gitleaks` step in .github/workflows/ci.yml) and
+# reads its configuration from the repository root of whatever it is pointed at. The same
+# command runs verbatim on a laptop, which is the property that step is written for.
+
+# Every default rule stays on. This file adds an exception, and must never become a way to
+# turn the scanner down: a rule switched off here would be switched off for the whole
+# history, silently, in a file nobody opens twice.
+[extend]
+useDefault = true
+
+# `0123456789abcdef0123456789abcdef` — a counting sequence of the 16 hex digits, twice.
+#
+# It is the idempotency key three test files post, and it is that exact string because
+# `IDEMPOTENCY_KEY_PATTERN` in lib/validation/schemas.ts requires 32 hex characters: a
+# fixture reading "not-a-secret" would be rejected by the schema before reaching the
+# assertion. gitleaks' `generic-api-key` rule sees a long hex literal beside an identifier
+# ending in "key" and reports it at entropy 4.0, which is the rule working correctly on a
+# string that happens to look exactly like what it is looking for.
+#
+# An idempotency key is not a credential in the first place. It is minted by the browser,
+# travels in a form field the user could read off the page, and its only power is to make a
+# second submission of the same form a no-op — see lib/idempotency.ts.
+#
+# Allowlisted by the literal rather than by fingerprint or by path, deliberately:
+#
+#   - **Not by fingerprint.** Two of the three findings are in commits whose files no longer
+#     exist, so the fingerprints are unfixable by editing anything — and a fingerprint is a
+#     commit sha, so the next commit to use this fixture would fail again for the same
+#     reason, in a way that reads like a new finding.
+#   - **Not by path.** Exempting the test files would stop the scanner reporting a real
+#     credential pasted into one, which is a likely place for that to happen and the exact
+#     thing this gate is for.
+#
+# Matched against the whole line rather than the extracted secret, because what is being
+# permitted is this one known string wherever it appears — not some region of a match whose
+# boundaries the rule decides.
+[[allowlists]]
+description = "The 32-hex-digit idempotency key used as a test fixture"
+regexTarget = "line"
+regexes = ['''0123456789abcdef0123456789abcdef''']

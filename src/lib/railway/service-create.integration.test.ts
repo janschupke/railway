@@ -40,6 +40,7 @@ describe("createContainer", () => {
       serviceId: "svc_1",
       deploymentId: "dep_1",
       url: null,
+      stored: null,
       outcome: "deployed",
     });
   });
@@ -159,6 +160,7 @@ describe("createContainer", () => {
       serviceId: "svc_1",
       deploymentId: null,
       url: null,
+      stored: null,
       outcome: "variables_failed",
     });
   });
@@ -190,6 +192,7 @@ describe("createContainer", () => {
       serviceId: "svc_1",
       deploymentId: null,
       url: null,
+      stored: null,
       outcome: "deploy_failed",
     });
 
@@ -263,6 +266,7 @@ describe("createContainer", () => {
       serviceId: "svc_1",
       deploymentId: null,
       url: null,
+      stored: null,
       outcome: "deployed",
     });
   });
@@ -370,6 +374,7 @@ describe("createContainer, attaching a volume", () => {
       serviceId: "svc_1",
       deploymentId: null,
       url: null,
+      stored: null,
       outcome: "volume_failed",
     });
 
@@ -430,6 +435,7 @@ describe("createContainer, applying the advanced resource controls", () => {
       limitsFail?: boolean;
       onSettings?: (variables: Record<string, unknown>) => void;
       onLimits?: (input: Record<string, unknown>) => void;
+      readBackFail?: boolean;
     } = {},
   ) => [
     api.mutation("ServiceCreate", () => {
@@ -455,6 +461,35 @@ describe("createContainer, applying the advanced resource controls", () => {
     api.mutation("ServiceInstanceDeployV2", () => {
       calls.push("deploy");
       return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } });
+    }),
+    /*
+     * The read-back, which runs only when something was asked for — so it belongs here,
+     * beside the two mutations under the same condition, rather than in the file's default
+     * handlers where it would be answering on the no-settings path too.
+     *
+     * It echoes what it was sent, which is what makes the two cases below meaningful: one
+     * overrides this to answer something else, and that is the shape of every finding this
+     * request exists to catch.
+     */
+    api.query("ServiceInstance", () => {
+      calls.push("read-back");
+      if (over.readBackFail) {
+        return HttpResponse.json({
+          data: null,
+          errors: [{ message: "Not Authorized" }],
+        });
+      }
+      return HttpResponse.json({
+        data: {
+          serviceInstance: {
+            id: "si_1",
+            numReplicas: null,
+            restartPolicyType: "ON_FAILURE",
+            restartPolicyMaxRetries: 10,
+            startCommand: null,
+          },
+        },
+      });
     }),
   ];
 
@@ -510,10 +545,13 @@ describe("createContainer, applying the advanced resource controls", () => {
     await create({
       image: "postgres:16-alpine",
       variables: { POSTGRES_PASSWORD: "x" },
-      settings: { region: "us-west2" },
+      settings: { region: "ams" },
       limits: { cpu: 0.5 },
     });
 
+    // The read-back is last, after the deploy, and that is the only place it can be: it
+    // asks what Railway ended up holding, so anything still to be written would make the
+    // answer a guess about a service that is not finished being built.
     expect(calls).toEqual([
       "create",
       "settings",
@@ -521,7 +559,124 @@ describe("createContainer, applying the advanced resource controls", () => {
       "volume",
       "variables",
       "deploy",
+      "read-back",
     ]);
+  });
+
+  it("reads back what Railway stored, which is not always what it was told", async () => {
+    /*
+     * The whole reason this request exists. Every control on the Advanced panel is
+     * write-only — none is rendered anywhere after the create — so a value Railway drops
+     * could only be found by opening Railway's own dashboard and comparing by eye, and one
+     * was: a retry count of 3 came back as 10.
+     *
+     * The stub reproduces it. The point is not that the app corrects it — it cannot — but
+     * that the record says so, so the next occurrence is a log query rather than a manual
+     * comparison against somebody else's dashboard.
+     */
+    const calls: string[] = [];
+    server.use(...stubs(calls));
+
+    const result = await create({
+      settings: { region: "ams", replicas: 2, restartRetries: 3 },
+    });
+
+    expect(result.stored).toEqual({
+      replicas: null,
+      restartPolicy: "ON_FAILURE",
+      restartRetries: 10,
+      startCommand: null,
+    });
+  });
+
+  /*
+   * The field that actually places a container, and the one that only looks like it does.
+   *
+   * `ServiceInstanceUpdateInput.region` is on the schema and answers `true`. It is inert:
+   * containers deployed for real with it set — to an airport code, to a long region name,
+   * to a name on another continent — all ran in the workspace default. Railway names the
+   * replacement itself, in its refusal for an unknown region: `multiRegionConfig`.
+   *
+   * The replica count is asserted inside the entry as well as beside it. A placed service
+   * takes its count from the entry, so the two disagreeing is a container running at a
+   * number nobody asked for.
+   */
+  it("places the container through multiRegionConfig, never through region", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...stubs(calls, {
+        onSettings: (variables) =>
+          (input = (variables as { input: Record<string, unknown> }).input),
+      }),
+    );
+
+    await create({ settings: { region: "ams", replicas: 3 } });
+
+    expect(input).not.toHaveProperty("region");
+    expect(input).toEqual({
+      multiRegionConfig: { ams: { numReplicas: 3 } },
+      numReplicas: 3,
+    });
+  });
+
+  /*
+   * A region with no replica count is still a placement request, so the entry cannot be
+   * empty — `{ ams: {} }` names a region and asks for nothing to run in it. One is what
+   * Railway runs a service at when nobody says otherwise, so one is what the entry states.
+   */
+  it("states one replica in the entry when the form asked for a region alone", async () => {
+    const calls: string[] = [];
+    let input: Record<string, unknown> | undefined;
+    server.use(
+      ...stubs(calls, {
+        onSettings: (variables) =>
+          (input = (variables as { input: Record<string, unknown> }).input),
+      }),
+    );
+
+    await create({ settings: { region: "ams" } });
+
+    expect(input).toEqual({ multiRegionConfig: { ams: { numReplicas: 1 } } });
+  });
+
+  it("does not fail a created container over a refused read-back", async () => {
+    /*
+     * By the time this runs the service exists, is deployed, and is about to be on screen.
+     * `ServiceInstance` is in DEGRADING_OPERATIONS for exactly this: losing a diagnostic
+     * must cost the record its `stored_` fields and cost the user nothing.
+     */
+    const calls: string[] = [];
+    server.use(...stubs(calls, { readBackFail: true }));
+
+    const result = await create({ settings: { replicas: 2 } });
+
+    expect(result).toMatchObject({ outcome: "deployed", stored: null });
+  });
+
+  it("asks nothing back when nothing was customised", async () => {
+    // The round-trip guarantee this file opens with, restated for the new request: a
+    // spin-up that used none of these controls has nothing to compare, and must not pay a
+    // fourth round trip to learn that Railway has defaults.
+    const calls: string[] = [];
+    server.use(
+      api.mutation("ServiceCreate", () => {
+        calls.push("create");
+        return HttpResponse.json({
+          data: { serviceCreate: { id: "svc_1", name: "spun-x" } },
+        });
+      }),
+      api.mutation("ServiceInstanceDeployV2", () => {
+        calls.push("deploy");
+        return HttpResponse.json({ data: { serviceInstanceDeployV2: "dep_1" } });
+      }),
+    );
+
+    // No ServiceInstance handler, and onUnhandledRequest is "error": a read-back here fails
+    // the case rather than being asserted against.
+    await create();
+
+    expect(calls).toEqual(["create", "deploy"]);
   });
 
   it("sends only the members that were asked for", async () => {
@@ -553,7 +708,7 @@ describe("createContainer, applying the advanced resource controls", () => {
 
     await create({
       settings: {
-        region: "us-west2",
+        region: "sfo",
         replicas: 2,
         restartPolicy: "ON_FAILURE",
         restartRetries: 4,
@@ -562,7 +717,7 @@ describe("createContainer, applying the advanced resource controls", () => {
     });
 
     expect(input).toEqual({
-      region: "us-west2",
+      multiRegionConfig: { sfo: { numReplicas: 2 } },
       numReplicas: 2,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 4,
@@ -601,6 +756,7 @@ describe("createContainer, applying the advanced resource controls", () => {
       serviceId: "svc_1",
       deploymentId: null,
       url: null,
+      stored: null,
       outcome: "settings_failed",
     });
     expect(calls).toEqual(["create", "settings"]);
@@ -627,7 +783,7 @@ describe("createContainer, applying the advanced resource controls", () => {
 
     await create({
       settings: {
-        region: "us-west2",
+        region: "sfo",
         replicas: 3,
         restartPolicy: "ALWAYS",
         startCommand: "serve --secret hunter2",
@@ -637,7 +793,7 @@ describe("createContainer, applying the advanced resource controls", () => {
     const record = logRecords().find((line) => line.msg === "railway.settings_failed");
     expect(record).toMatchObject({
       service_id: "svc_1",
-      region: "us-west2",
+      region: "sfo",
       replicas: 3,
       restart_policy: "ALWAYS",
       start_command_length: "serve --secret hunter2".length,
@@ -697,6 +853,7 @@ describe("createContainer, minting a public domain", () => {
       serviceId: "svc_1",
       deploymentId: "dep_1",
       url: "https://spun-web-production.up.railway.app",
+      stored: null,
       outcome: "deployed",
     });
   });
@@ -801,6 +958,7 @@ describe("createContainer, minting a public domain", () => {
       serviceId: "svc_1",
       deploymentId: "dep_1",
       url: null,
+      stored: null,
       outcome: "deployed",
     });
 

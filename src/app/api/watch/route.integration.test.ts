@@ -25,6 +25,7 @@ vi.mock("@/lib/railway/projects", () => ({
 const { GET: watch } = await import("./[projectId]/route");
 const { __resetEnv } = await import("@/env");
 const { RailwayApiError } = await import("@/lib/railway/errors");
+const { markStopped, __resetStopped } = await import("@/lib/railway/stopped");
 
 const container = (over: Partial<Container> = {}): Container => ({
   serviceId: "svc_1",
@@ -94,10 +95,71 @@ async function readFrames(response: Response, count: number): Promise<string[]> 
   return frames;
 }
 
+/*
+ * Collects frames until told to stop, rather than until a count is reached.
+ *
+ * readFrames above waits for N frames and would hang forever here: the cases that use
+ * this assert that a frame is NOT sent, and "nothing arrived" is indistinguishable from
+ * "still waiting" to a reader counting up to a target.
+ *
+ * At module scope rather than inside the staleness-nudge block it was written for: the
+ * stopped-container case below needs the same negative reading, and a second copy of the
+ * settle loop is the last thing this file needs — its whole docblock is about a race that
+ * only shows up under coverage.
+ */
+const collectFrames = (response: Response) => {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const frames: string[] = [];
+
+  const drained = (async () => {
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer = drainFrames(buffer + decoder.decode(value, { stream: true }), frames);
+    }
+  })();
+
+  return {
+    frames,
+    stop: async () => {
+      /*
+       * Settle before cancelling, or the last frame is a coin toss.
+       *
+       * `reader.cancel()` discards whatever is queued and not yet pulled, and the
+       * frame this describe block is usually asserting on is enqueued by the final
+       * timer callback — one microtask turn ahead of the read that would collect it.
+       * Cancelling straight away therefore dropped it whenever the loop happened to
+       * be a turn behind, which is a property of how busy the machine is: these cases
+       * passed on their own and on a plain `vitest run`, and failed under coverage,
+       * where the instrumentation changes the scheduling.
+       *
+       * Flushing microtasks until the count stops moving is deterministic under fake
+       * timers and is not a wait: no clock advances here, and a stream with nothing
+       * queued settles on the first pass. It is also what the negative cases in this
+       * block need — "no frame was sent" is only true once everything that was going
+       * to arrive has.
+       */
+      let settled = 0;
+      for (let turn = 0; turn < 50 && settled < 3; turn++) {
+        const before = frames.length;
+        await Promise.resolve();
+        settled = frames.length === before ? settled + 1 : 0;
+      }
+      await reader.cancel();
+      await drained;
+    },
+  };
+};
+
 beforeEach(() => {
   vi.useFakeTimers();
   requireSession.mockReset().mockResolvedValue(session);
   getProjectContainers.mockReset();
+  // Process-global, so without this one case's stop would silently change what the next
+  // one's fingerprint hashes.
+  __resetStopped();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -145,6 +207,36 @@ describe("GET /api/watch/[projectId]", () => {
 
     // ready, then nothing for the identical poll, then changed.
     expect(await frames).toEqual(["ready", "changed"]);
+  });
+
+  it("tells other tabs about a stop, exactly once", async () => {
+    /*
+     * Railway answers SUCCESS throughout — which is exactly what it does after a stop, and
+     * why this needs asserting. Nothing in the response ever changes, so a watcher hashing
+     * Railway's raw answer would stay silent and a second open tab would go on showing
+     * Running until someone navigated. Hashing the state the page is actually rendered
+     * from is what makes the stop propagate. See lib/railway/stopped.ts.
+     *
+     * And exactly once: the memory has no expiry, deliberately, because an entry that
+     * timed out would flip the hash back and broadcast a still-stopped container returning
+     * to Running.
+     */
+    getProjectContainers.mockResolvedValue({ containers: [container()] });
+
+    const response = await watch(request("/api/watch/p1?environment=e1"), params("p1"));
+    const collected = collectFrames(response);
+
+    // A poll before the stop, so `ready` is taken against the running container.
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    markStopped("svc_1", {
+      deploymentId: "dep_1",
+      rawStatus: "SUCCESS",
+      deployedAt: null,
+    });
+    await vi.advanceTimersByTimeAsync(POLL_MS * 4);
+    await collected.stop();
+
+    expect(collected.frames).toEqual(["ready", "changed"]);
   });
 
   it("names a revoked authorization and stops, instead of burning quota on it", async () => {
@@ -259,62 +351,6 @@ describe("GET /api/watch/[projectId]", () => {
   describe("the staleness nudge", () => {
     /** Ticks needed to cross a staleness window, given the watch interval. */
     const ticksToStale = Math.ceil(env().METRICS_POLL_MS / POLL_MS) + 1;
-
-    /*
-     * Collects frames until told to stop, rather than until a count is reached.
-     *
-     * readFrames above waits for N frames and would hang forever here: half these cases
-     * assert that a frame is NOT sent, and "nothing arrived" is indistinguishable from
-     * "still waiting" to a reader counting up to a target.
-     */
-    const collectFrames = (response: Response) => {
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      const frames: string[] = [];
-
-      const drained = (async () => {
-        let buffer = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer = drainFrames(
-            buffer + decoder.decode(value, { stream: true }),
-            frames,
-          );
-        }
-      })();
-
-      return {
-        frames,
-        stop: async () => {
-          /*
-           * Settle before cancelling, or the last frame is a coin toss.
-           *
-           * `reader.cancel()` discards whatever is queued and not yet pulled, and the
-           * frame this describe block is usually asserting on is enqueued by the final
-           * timer callback — one microtask turn ahead of the read that would collect it.
-           * Cancelling straight away therefore dropped it whenever the loop happened to
-           * be a turn behind, which is a property of how busy the machine is: these cases
-           * passed on their own and on a plain `vitest run`, and failed under coverage,
-           * where the instrumentation changes the scheduling.
-           *
-           * Flushing microtasks until the count stops moving is deterministic under fake
-           * timers and is not a wait: no clock advances here, and a stream with nothing
-           * queued settles on the first pass. It is also what the negative cases in this
-           * block need — "no frame was sent" is only true once everything that was going
-           * to arrive has.
-           */
-          let settled = 0;
-          for (let turn = 0; turn < 50 && settled < 3; turn++) {
-            const before = frames.length;
-            await Promise.resolve();
-            settled = frames.length === before ? settled + 1 : 0;
-          }
-          await reader.cancel();
-          await drained;
-        },
-      };
-    };
 
     const withMetricsPoll = async (value: string, body: () => Promise<void>) => {
       const previous = process.env.METRICS_POLL_MS;

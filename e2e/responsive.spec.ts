@@ -166,15 +166,21 @@ test.describe("the dashboard at phone width", () => {
     const backToTop = button(page, /back to top/i);
     await expect(backToTop).toBeVisible();
 
-    // Bottom-left, and the destroy control on the last row sits to the right of it.
-    // Overlapping would make the last container in the list undestroyable on a phone.
+    /*
+     * Bottom-left, and the last row's actions trigger sits to the right of it. Overlapping
+     * would make the last container in the list unreachable on a phone — which is a wider
+     * claim than it used to be: that one control is now the only way to any of its verbs.
+     */
     const fab = (await backToTop.boundingBox())!;
-    const destroy = (await rows(page).last().getByRole("button").last().boundingBox())!;
+    const actions = (await rows(page)
+      .last()
+      .getByRole("button", { name: /^Actions for / })
+      .boundingBox())!;
     const overlaps =
-      fab.x < destroy.x + destroy.width &&
-      fab.x + fab.width > destroy.x &&
-      fab.y < destroy.y + destroy.height &&
-      fab.y + fab.height > destroy.y;
+      fab.x < actions.x + actions.width &&
+      fab.x + fab.width > actions.x &&
+      fab.y < actions.y + actions.height &&
+      fab.y + fab.height > actions.y;
     expect(overlaps).toBe(false);
   });
 

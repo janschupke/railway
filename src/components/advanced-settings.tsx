@@ -110,7 +110,7 @@ export function AdvancedSettings({
   const regionOptions = [
     { value: "", label: t("regionDefault") },
     ...regions.map((region) => ({
-      value: region.id,
+      value: region.value,
       label: region.label,
       group: region.country,
     })),

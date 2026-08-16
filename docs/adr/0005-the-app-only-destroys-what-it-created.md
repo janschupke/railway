@@ -23,8 +23,8 @@ here_ with no controls and no selection checkbox.
 **The re-derivation happens server-side, and it is shared rather than repeated.**
 `withManagedContainer` parses the ids, re-reads the container list from Railway, and refuses
 before any verb's own work runs. Six copies of "find the service, refuse an unmanaged one" would
-be six chances to write a subtly weaker one, and the weak copy is the one that ships. The callsite
-test asserts `!target.managed` appears exactly once in the actions module.
+be six chances to write a subtly weaker one. The callsite test asserts `!target.managed` appears
+exactly once, in `src/app/dashboard/action-managed.ts`.
 
 **Deployment ids are derived, never posted.** Stop and restart need one, and it comes off the
 container Railway just described — not from the form. Otherwise the ownership check would guard
@@ -41,8 +41,8 @@ request shape at all — there is no refusal path because nothing reaches one. A
 a second place for this decision to live and a first place for it to be got wrong.
 
 **Reversible verbs confirm differently.** Destroy costs a typed container name; stopping does not.
-Friction is priced in what it protects, and spending it on a reversible action is how people learn
-to type container names — which is the habit the destroy dialog depends on them not having.
+Asking for the same friction on a reversible action would teach people to type container names
+without reading the dialog, which is exactly the habit destroy relies on them not having.
 
 ## Consequences
 

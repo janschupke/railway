@@ -58,7 +58,10 @@
     "endOfFilteredList": "That is every container matching these filters.",
     "scrollToTop": "Back to top",
     "prefixNote": "Services named <code>{prefix}…</code> were created here and can be destroyed here. Everything else is shown for context only.",
-    "containerTotals": "{cpu} vCPU and {memory} across {count, plural, one {# container} other {# containers}} created here",
+    "usageFigures": "{cpu} vCPU and {memory} across {count, plural, one {# container} other {# containers}}",
+    "usageHere": "Created here",
+    "usageOverall": "Everything in this environment",
+    "usageUnknown": "Nothing reported usage.",
     "spendHeading": "Workspace spend",
     "spendAmountLabel": "Used this period",
     "spendPeriodLabel": "Billing period",
@@ -153,8 +156,8 @@
   "containers": {
     "noSource": "no source",
     "toggleLogs": "Logs for {name}",
+    "rowActions": "Actions for {name}",
     "selectRow": "Select {name}",
-    "notManagedTooltip": "Only services created in this app can be destroyed here. Manage this one on Railway.",
     "noDeployment": "This service has no deployment yet, so there is nothing to stream.",
     "failedExplanation": "Railway reported this deployment as failed. Its API returns the status and nothing else, so the reason — a missing image, a refused pull, a crash on the first tick — is on Railway's own page for this service.",
     "failedWithReason": "Railway reported this deployment as failed at the {step} step, and said: “{reason}”",
@@ -219,7 +222,7 @@
     "historyFailed": "This service's earlier deployments could not be read, so there is nothing to roll back to here. Railway's own page for the service still lists them.",
     "historyEmpty": "Railway has no deployments recorded for this service.",
     "historyOnlyCurrent": "This is the only deployment this service has had, so there is nothing to roll back to.",
-    "historyCurrent": "Running now",
+    "historyCurrent": "Current",
     "historyNotRollbackable": "Railway will not roll back to this one",
     "historyWhen": "Deployed {when}",
     "historyRollbackLabel": "Roll back to the deployment from {when}"
@@ -297,7 +300,7 @@
     "restartRetriesPlaceholder": "10",
     "startCommandLabel": "Start command",
     "startCommandHint": "Replaces the image's CMD. Its ENTRYPOINT still runs and cannot be changed here.",
-    "startCommandPlaceholder": "redis-server --appendonly yes"
+    "startCommandPlaceholder": "Leave blank to use the image's own command"
   },
   "lifecycle": {
     "stop": {
@@ -374,6 +377,8 @@
     "imageNoMatches": "No preset matches. Any public image reference works here.",
     "imageToggle": "Show preset images",
     "imageListLabel": "Preset images",
+    "statefulNoVolumeNote": "This image keeps data, and this container has no volume. Editing cannot add one, so anything it writes is lost when it restarts. Spin up a new container from this image instead if the data matters.",
+    "unknownStorageNote": "This app does not know where this image stores data, and this container has no volume. Anything it writes is lost when it restarts.",
     "variablesDescription": "Values are never shown here. Leave one blank to keep what is already set, or type a new value to replace it.",
     "loadingVariables": "Reading this container's variables…",
     "variablesUnavailable": "Could not read this container's variables. You can still change its name and image; saving will leave the variables alone.",
@@ -493,6 +498,7 @@
       "auth": "Railway rejected your credentials, so the authorization is no longer valid. Signing in again will restore it. Reference {incident}.",
       "notAuthorized": "Railway refused this request for your account. The authorization is live but does not cover what the app asked for, so retrying will not help — authorize again and approve access. Reference {incident}.",
       "missingScope": "Railway did not grant this app {scope} access, so it cannot read this. Authorize again and approve it on the consent screen. Reference {incident}.",
+      "planLimit": "Railway refused this because the account is at its plan's resource limit. Destroy a container you no longer need, or upgrade the plan on Railway — retrying will not help. Reference {incident}.",
       "rateLimitRetry": "Railway's rate limit was hit. Try again in {seconds, plural, one {# second} other {# seconds}}. Reference {incident}.",
       "rateLimit": "Railway's rate limit was hit. Try again shortly. Reference {incident}.",
       "network": "Could not reach Railway. Check your connection and retry. Reference {incident}.",

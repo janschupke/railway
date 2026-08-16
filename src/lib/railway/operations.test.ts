@@ -61,7 +61,7 @@ describe("the GraphQL documents", () => {
      * an export, or an export that stopped being a string and quietly left the set, is
      * invisible everywhere else.
      */
-    expect(DOCUMENTS).toHaveLength(30);
+    expect(DOCUMENTS).toHaveLength(31);
     expect(DOCUMENTS.map(operationNameOf).toSorted()).toEqual([
       "BuildLogs",
       "Deployment",
@@ -82,6 +82,7 @@ describe("the GraphQL documents", () => {
       "ServiceCreate",
       "ServiceDelete",
       "ServiceDomainCreate",
+      "ServiceInstance",
       "ServiceInstanceDeployV2",
       "ServiceInstanceLimitsUpdate",
       "ServiceInstanceUpdate",
@@ -109,6 +110,25 @@ describe("the GraphQL documents", () => {
     for (const entry of DEGRADING_OPERATIONS) {
       expect(names).toContain(entry.operationName);
     }
+  });
+
+  it("never selects a service instance's region, because it is always null", () => {
+    /*
+     * `ServiceInstance.region` is on the schema, sits beside the four members the read-back
+     * does select, and would validate. It answers `null` for every service Railway has ever
+     * been asked about here — including this app's own deployment, which has run in
+     * `us-west2` for months — so it is not a read-back of placement at all.
+     *
+     * Selecting it would put "Railway stored nothing" on the audit line of every correct
+     * spin-up, and a permanently-failing instrument is worse than no instrument: whoever
+     * reads it learns to ignore it, and the one real finding it might one day carry goes
+     * with it. Asserted here rather than left to a docblock because the field is one word,
+     * in a selection set of five, and adding it back looks like completing the set.
+     */
+    const readBack = DOCUMENTS.find(
+      (document) => operationNameOf(document) === "ServiceInstance",
+    );
+    expect(readBack?.document).not.toMatch(/\bregion\b/);
   });
 
   it("keeps the capability probe to things no document sends", () => {

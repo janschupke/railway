@@ -93,7 +93,7 @@ describe("DeploymentHistory", () => {
     renderHistory("dep_current");
 
     const rows = await screen.findAllByRole("listitem");
-    expect(within(rows[0]!).getByText("Running now")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Current")).toBeInTheDocument();
     expect(
       within(rows[0]!).queryByRole("button", { name: /roll back/i }),
     ).not.toBeInTheDocument();
@@ -184,6 +184,28 @@ describe("DeploymentHistory", () => {
       await screen.findByText(/only deployment this service has had/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+  });
+
+  it("does not call a lone entry current when the service is on a different one", async () => {
+    /*
+     * The sentence claims a fact — "the only deployment this service has had" — and the
+     * branch used to reach it on the count alone, with no check that the entry was the one
+     * the service is on. Railway's list is capped at LIST.DEPLOYMENT_HISTORY and this app
+     * has seen it answer with an id the service has since moved off, so a single entry that
+     * is not current is a real shape rather than a hypothetical one.
+     *
+     * Falling through to the list is what should happen: the row renders with its own
+     * rollback control, which is precisely what somebody in that position wants and what
+     * the early return was silently withholding.
+     */
+    respondWith([entry("dep_old")]);
+    renderHistory("dep_current");
+
+    expect(await screen.findByRole("listitem")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/only deployment this service has had/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /roll back/i })).toBeInTheDocument();
   });
 
   it("says nothing about a failure when the panel closes mid-request", async () => {

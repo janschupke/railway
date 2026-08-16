@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { requireAccessToken } from "@/lib/auth/server";
 import type { ActionResult } from "@/lib/action-result";
 import { getProjectContainers } from "@/lib/railway/projects";
+import { clearStopped } from "@/lib/railway/stopped";
 import { log } from "@/lib/logger";
 import { containerActionSchema } from "@/lib/validation/schemas";
 import type { Container } from "@/lib/railway/types";
@@ -209,6 +210,18 @@ export async function withManagedContainer(
       });
       return { ok: false, error: t("actions.notManaged") };
     }
+
+    /*
+     * Every verb but stop invalidates the memory of a stop — see stopped.ts. Here rather
+     * than in each verb's own callback so restart, redeploy, rollback, edit, destroy and
+     * domain are all covered by construction and a seventh cannot forget; `stop` writes its
+     * own entry after its mutation, so clearing first costs it nothing.
+     *
+     * It has to run before `run`, not after: a redeploy's own read can still see the old
+     * deployment at the old status for a poll or two, and an overlay surviving that window
+     * leaves the row offering Redeploy to someone who just pressed it.
+     */
+    if (verb !== "stop") clearStopped(resolution.target.serviceId);
 
     return await run({
       accessToken,

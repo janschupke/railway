@@ -362,6 +362,21 @@ export type ServiceInstanceUpdateMutationVariables = Exact<{
 
 export type ServiceInstanceUpdateMutation = { serviceInstanceUpdate: boolean };
 
+export type ServiceInstanceQueryVariables = Exact<{
+  serviceId: string;
+  environmentId: string;
+}>;
+
+export type ServiceInstanceQuery = {
+  serviceInstance: {
+    id: string;
+    numReplicas: number | null;
+    restartPolicyType: RestartPolicyType;
+    restartPolicyMaxRetries: number;
+    startCommand: string | null;
+  };
+};
+
 export type ServiceInstanceLimitsUpdateMutationVariables = Exact<{
   input: ServiceInstanceLimitsUpdateInput;
 }>;

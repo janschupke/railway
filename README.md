@@ -81,23 +81,19 @@ base image ships. The deployed image carries OCI labels, including
 `org.opencontainers.image.revision`, taken from `RAILWAY_GIT_COMMIT_SHA`: the same commit the
 logger stamps on every line, on the artefact rather than only in its output.
 
-It ships a **traced** `node_modules` — `output: "standalone"` — rather than an installed one. That
-took the app payload from 504 MB to 44 MB, and the difference was almost entirely other people's
-peer dependencies: pnpm resolves optional peers at lockfile time and writes them into the resolved
-package's identity, so `next` was literally named
-`next@16.3.0(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@20.19.43)…` and
-`pnpm install --prod` could not drop any of them. Playwright and TypeScript were being deployed
-because they are devDependencies of the same package.json. Tracing asks what the server imports
-instead, and the answer is 38 MB of `node_modules` — 44 MB once `.next` and the message catalog are
-counted, which is the number quoted above and everywhere else.
+It ships a **traced** `node_modules` — `output: "standalone"` — rather than an installed one. Two
+consequences to work with:
 
-The cost is that `next start` does not serve a standalone build, so `pnpm start`, the Playwright
-`webServer` and `scripts/serve-e2e.ts` all run `node .next/standalone/server.js` — the same file the
-container runs. `pnpm build` finishes with `scripts/pack-standalone.ts`, which copies in the static
-assets Next deliberately leaves out, checks the message catalog was traced, and deletes the `.env`
-that `next build` otherwise copies next to the server.
+- **`next start` does not serve a standalone build.** `pnpm start`, the Playwright `webServer` and
+  `scripts/serve-e2e.ts` all run `node .next/standalone/server.js` — the same file the container
+  runs — and it takes no arguments, so the port comes from `PORT`.
+- **`pnpm build` is not finished without `postbuild`.** `scripts/pack-standalone.ts` copies in the
+  static assets Next deliberately leaves out, checks the message catalog was traced, and deletes
+  the `.env` that `next build` otherwise copies next to the server. Without it every page answers
+  200 while every chunk, stylesheet and font 404s.
 
-The app deploys itself the same way it deploys containers.
+Why standalone, and what it costs, is argued in
+[.ai/rules/workflow.md](.ai/rules/workflow.md).
 
 ---
 
@@ -111,9 +107,7 @@ pnpm lighthouse     # LHCI: scores + resource budgets, one Chrome
 pnpm verify:schema  # pinned OIDC metadata, and every document against the committed schema
 ```
 
-Two more gates have no local script at all, because what they check is not the source tree. (The
-four above do have one and are simply not part of `pnpm check`; `.ai/rules/workflow.md` sets out
-which count is counting what.)
+Two more gates have no local script at all, because what they check is not the source tree.
 
 ```bash
 docker build -t rw .   # then boot it and curl /api/health; hadolint and Trivy over it
@@ -122,15 +116,13 @@ gitleaks git --log-opts=--all   # the whole history, every run, redacted
 ```
 
 CI runs all of these on every push and pull request to `master`, plus a Monday cron, as six
-parallel jobs behind a single `All checks` gate. `.github/pull_request_template.md` names the same
-commands, so a pull request states which of them ran locally rather than leaving the split to
-prose.
+parallel jobs behind a single `All checks` gate. CodeQL runs alongside them on the same events, in
+its own workflow because it needs a wider permission than the rest.
+`.github/pull_request_template.md` names the same commands, so a pull request states which of them
+ran locally rather than leaving the split to prose.
 
-The image job is the newest and the one worth explaining. Everything above it measures the source;
-none of it produces the artefact that actually deploys, so a broken `Dockerfile` passed every gate
-and failed at Railway — where the failure reads as "Healthcheck failure" and names nothing. That
-job builds the image cold, boots it, waits for `/api/health`, and scans the result. Cold
-deliberately: a cached build here could go green while the build Railway runs does not.
+The image job builds the image cold, boots it, waits for `/api/health`, and scans the result.
+Cold deliberately: a cached build here could go green while the build Railway runs does not.
 
 Enabling branch protection is a GitHub repo setting, not a file — Settings → Branches → Add branch
 protection rule, pattern `master`, _Require status checks to pass before merging_ with **All
@@ -144,22 +136,13 @@ To check it by hand against a real account, work through [docs/verifying.md](doc
 
 ## Everything else
 
-| Document                                   | What it holds                                                                |
-| ------------------------------------------ | ---------------------------------------------------------------------------- |
-| [walkthrough.md](walkthrough.md)           | The tour: features, the code map, the decisions, the rail-yard boundary      |
-| [docs/limitations.md](docs/limitations.md) | What it deliberately does not do, and what I would do next                   |
-| [docs/verifying.md](docs/verifying.md)     | The manual pass against a real Railway account                               |
-| [docs/schema.md](docs/schema.md)           | Typed documents, `verify:schema`, and the probes for when a readout is empty |
-| [docs/testing.md](docs/testing.md)         | The fake Railway, the mobile spec, and the known non-issues                  |
-| [docs/frontend.md](docs/frontend.md)       | Design tokens, the type scale, loading states, i18n and accessibility        |
-| [docs/performance.md](docs/performance.md) | How bundle budgets are measured and what moved them                          |
-| [docs/logs.md](docs/logs.md)               | The log record's fields, and the path to Grafana                             |
-| [docs/adr/](docs/adr/README.md)            | The fourteen decisions, argued in full                                       |
-| [SECURITY.md](SECURITY.md)                 | The threat model, the findings, and the accepted risks                       |
-| [`.ai/rules/`](.ai/rules/)                 | What you must do before writing code here                                    |
+[walkthrough.md](walkthrough.md) indexes every other document — the code map, the fourteen
+decisions in [docs/adr/](docs/adr/README.md), and the long-form reference under [docs/](docs/).
+[SECURITY.md](SECURITY.md) holds the threat model and the accepted risks;
+[`.ai/rules/`](.ai/rules/) holds what you must do before writing code here.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Clone it, run it, take what is useful.
+MIT — see [LICENSE](LICENSE).

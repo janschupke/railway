@@ -288,14 +288,14 @@ export type ContainerVolume = {
  * already did. What is left is what a select needs — the value it posts, the sentence it
  * shows, and the heading it sits under.
  *
- * `id` is `String!` here and nullable on Railway's own type. That narrowing is the mapper's
- * job and it is the reason the mapper exists at all: a region with no id is a row that would
- * post an empty string, which reads as "let Railway choose" rather than as the choice the
- * person made.
+ * **`value` carries Railway's `id`, the airport code, and there is one option per code.**
+ * The field is named `value` rather than `id` because it is not a primary key and several
+ * of Railway's rows share it: it is the string a select posts, and `toRegionOptions` is
+ * where the argument for that lives, measured against real deployments.
  */
 export type RegionOption = {
-  /** The airport code the mutation takes, e.g. `us-west2`. */
-  id: string;
+  /** Railway's own unit of placement — an airport code, e.g. `ams`. */
+  value: string;
   /** Railway's own human string, e.g. "US West (Oregon)". */
   label: string;
   /** The `<optgroup>` heading. Railway's own country name, not a code. */

@@ -324,7 +324,16 @@ export function execute(
       const serviceId = variables.serviceId as string;
       const input = variables.input as {
         source?: { image?: string };
-        region?: string;
+        /*
+         * `multiRegionConfig` and NOT `region`, which is what the app used to send.
+         *
+         * The live API accepts `region` and ignores it — containers created with it set
+         * ran in the workspace default every time — and places a container only from this
+         * map, `{ [airportCode]: { numReplicas } }`. A fixture that kept reading `region`
+         * would go on passing while the app went back to a field that does nothing, which
+         * is the exact failure the region control already shipped once.
+         */
+        multiRegionConfig?: Record<string, { numReplicas?: number }>;
         numReplicas?: number;
         restartPolicyType?: string;
         restartPolicyMaxRetries?: number;
@@ -339,7 +348,14 @@ export function execute(
        * the input is left alone.
        */
       if (input.source?.image) service.image = input.source.image;
-      if (input.region !== undefined) service.settings.region = input.region;
+      if (input.multiRegionConfig !== undefined) {
+        // One entry, because the form offers one region. Recorded with its replica count
+        // beside it: the count inside the entry is what the region actually runs at, so a
+        // spec can prove the two halves of one request agree.
+        const [region, entry] = Object.entries(input.multiRegionConfig)[0] ?? [];
+        service.settings.region = region ?? null;
+        service.settings.regionReplicas = entry?.numReplicas ?? null;
+      }
       if (input.numReplicas !== undefined)
         service.settings.replicas = input.numReplicas;
       if (input.restartPolicyType !== undefined) {
@@ -435,22 +451,46 @@ export function execute(
        * spin-up-form.test.tsx.
        */
       /*
-       * Four rows, two of which exist to be dropped. A region with no id would post an empty
-       * string, and a deprecated one is a datacentre with an end date — so both filters in
-       * `toRegionOptions` run end to end here rather than only in a unit test.
+       * Five rows, and the shape matters as much as the count.
+       *
+       * `id` and `name` are DIFFERENT on every row here, because they are different on the
+       * live API and this fixture used to pretend otherwise — it set both to the same
+       * string, so no assertion anywhere could say which of them the app read. Railway's
+       * `id` is an airport code shared by several datacentres, and it is Railway's own unit
+       * of placement: a deployment asked for `ams` and one asked for `europe-west4-drams3a`
+       * were both measured landing in the same pool.
+       *
+       * So each row here exists to be treated differently, and exactly one of them survives
+       * per outcome:
+       *
+       *   - Two `sfo` rows, which must collapse into one option rather than offering the
+       *     same placement twice under two names. Oregon wins the tie because the tiebreak
+       *     is on the label a reader sees.
+       *   - One `ams` row, which survives on its own.
+       *   - One row with a null `id`, which is dropped: it has no code to post, and an
+       *     option posting the empty string reads as "let Railway choose".
+       *   - One deprecated row, which is dropped: a datacentre with an end date is a
+       *     container that stops working later.
        */
       return {
         data: {
           regions: [
             {
-              id: "us-west2",
-              name: "us-west2",
+              id: "sfo",
+              name: "us-west2-xrhvwla",
               location: "US West (Oregon)",
               country: "United States",
               deploymentConstraints: null,
             },
             {
-              id: "europe-west4-drams3a",
+              id: "sfo",
+              name: "us-west2-xrhvwla2",
+              location: "US West (Portland)",
+              country: "United States",
+              deploymentConstraints: { deprecationInfo: { isDeprecated: false } },
+            },
+            {
+              id: "ams",
               name: "europe-west4-drams3a",
               location: "Europe West (Amsterdam)",
               country: "Netherlands",
@@ -458,15 +498,15 @@ export function execute(
             },
             {
               id: null,
-              name: "unnamed",
-              location: "Somewhere with no identifier",
-              country: "Nowhere",
+              name: "europe-west4-drams3a2",
+              location: "Europe West (Amsterdam 2)",
+              country: "Netherlands",
               deploymentConstraints: null,
             },
             {
-              id: "us-west1",
-              name: "us-west1",
-              location: "US West (retiring)",
+              id: "iad",
+              name: "us-east4-eqdc4a",
+              location: "US East (retiring)",
               country: "United States",
               deploymentConstraints: { deprecationInfo: { isDeprecated: true } },
             },

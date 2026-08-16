@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RailwayApiError } from "./errors";
+import { RailwayApiError, toApiError } from "./errors";
 
 /**
  * The classification, asserted by name.
@@ -68,6 +68,61 @@ describe("the three faces of an auth failure", () => {
     expect(
       error({ kind: "server", path: ["workspaces"] }).missingScope,
     ).toBeUndefined();
+  });
+});
+
+describe("a plan ceiling", () => {
+  it("is classified from the wording, because the code says nothing", () => {
+    /*
+     * Measured live: a free account refused a sixth service with this sentence and
+     * `extensions.code: "INTERNAL_SERVER_ERROR"` — the same code every other Railway
+     * refusal carries. Before this, it fell to `graphqlUnexpected`, which told the user
+     * the app did not recognise the reason. Railway had said exactly what to do.
+     */
+    expect(
+      toApiError(
+        {
+          message:
+            "Free plan resource provision limit exceeded. Please upgrade to provision more resources!",
+          extensions: { code: "INTERNAL_SERVER_ERROR" },
+        },
+        "ServiceCreate",
+        200,
+      ).kind,
+    ).toBe("plan_limit");
+
+    for (const message of [
+      "Hobby plan limit reached",
+      "Service limit exceeded for this workspace",
+      "Please upgrade your plan to add more services",
+    ]) {
+      expect(toApiError({ message }, "ServiceCreate", 200).kind, message).toBe(
+        "plan_limit",
+      );
+    }
+  });
+
+  it("never steals a rate limit or an authorization failure", () => {
+    // A rate limit carries a retry delay this sentence must not suggest, and a dead
+    // credential is the more specific diagnosis — both are classified before this one.
+    expect(toApiError({ message: "Rate limit exceeded" }, "Project", 200).kind).toBe(
+      "graphql",
+    );
+    expect(toApiError({ message: "Not Authorized" }, "Project", 200).kind).toBe("auth");
+    expect(
+      toApiError(
+        {
+          message: "Cannot query field limit on type Plan",
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+        "Project",
+        200,
+      ).kind,
+    ).toBe("graphql");
+  });
+
+  it("names the remedy rather than offering a retry", () => {
+    expect(error({ kind: "plan_limit" }).describe().key).toBe("errors.api.planLimit");
   });
 });
 
@@ -148,6 +203,7 @@ describe("the incident id", () => {
       error({ kind: "auth", status: 401 }),
       error({ kind: "auth", path: ["workspace"] }),
       error({ kind: "auth" }),
+      error({ kind: "plan_limit" }),
       error({ kind: "rate_limit", retryAfterSeconds: 5 }),
       error({ kind: "rate_limit" }),
       error({ kind: "network" }),

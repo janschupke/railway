@@ -63,7 +63,24 @@ service.** Each expanded row reads "0.25 of 2 vCPU", and the denominator is
 Railway is _enforcing_, which is not always what the form asked for: the size mutation is
 gated by the plan behind the token, so a clamped request shows the clamped figure here — the
 more useful of the two numbers, and the only one with a bearing on the bill. The other five
-controls have no such route back and remain write-only.
+controls have no such route back and remain write-only. The create path reads four of them
+back once into the `container.created` log line, which is not the same thing as rendering
+them — it is a record for whoever investigates later, not a readout.
+
+**Region is the fifth, and it is write-only in both directions.** `ServiceInstance.region`
+answers `null` for every service, including ones that have demonstrably run in a region for
+months, so there is nothing to read back and nothing on the audit line either. Live
+introspection of `ServiceInstance` finds no other field that carries it. The only signal
+anywhere is the `REGION` tag on a service's metrics, which names the datacentre a container
+actually ran in — a different request, on a different schedule, for a different purpose, and
+not one this app makes.
+
+Worth knowing if you are reading the mutation: `ServiceInstanceUpdateInput.region` is still on
+the schema, still answers `true`, and does nothing at all. Containers were deployed with it
+set to an airport code, to a long region name and to a name on another continent, and every
+one of them ran in the workspace default. Placement lives in `multiRegionConfig`, a map of
+region to `{ numReplicas }`, which is what this app sends — see `createContainer`. Railway
+names it only in the error text for an unknown region.
 
 **Ports, healthchecks and app sleep are not on that panel.** The target port is on the form
 already, because it belongs to the public address rather than to sizing. The healthcheck path
@@ -174,7 +191,7 @@ over the top of it. An image the catalog does not know gets none, and the spin-u
 this app cannot guess where an arbitrary container writes, and a volume mounted at the wrong
 path is billable storage that stays empty while the data still vanishes.
 
-Four further caveats, none of them oversights. **Size is Railway's plan default** —
+Five further caveats, none of them oversights. **Size is Railway's plan default** —
 `VolumeCreateInput` has no size member, so there is nothing to offer. **A mount path is fixed at
 creation**; `volumeInstanceUpdate` could change it and is deliberately absent, for the reason
 the edit form gives about images. **There are no backups and no point-in-time restore**, both of
@@ -184,6 +201,14 @@ destroyed inside that window keeps its volume. That is the cautious outcome and 
 so, which is the property
 [ADR-14](adr/0014-a-volume-belongs-to-the-service-that-mounts-it.md) rests on: every way of not
 knowing about a volume ends in keeping it and saying it was kept.
+
+And the fifth, measured live: **`volumeDelete` schedules a deletion rather than performing one.**
+The volume answers immediately afterwards with `isPendingDeletion: true` and a `deletedAt` about
+two days out, and it is gone from `environment.volumeInstances` at once — so the app's own view is
+correct and the destroy toast's "and its stored data" is true eventually rather than at the
+moment it is read. What that costs is narrow and worth stating: the data is recoverable through
+Railway for those two days, which is a safety net rather than a defect, and the storage remains
+provisioned until it is not. Nothing in this app can shorten it or read the pending state.
 
 ## Environment variables
 
@@ -252,11 +277,16 @@ last the full duration ceiling and be quieter than before. `DeploymentEvents` is
 whose feed is empty, refused or withdrawn shows exactly what it showed before: the status, the
 sentence, and the link out.
 
-Two things stay unresolved. Which of `payload.error`, `payload.reason` and `payload.detail`
-Railway actually populates has never been observed on a real failed deployment — the schema was
-introspected, not the behaviour — so the app tries all three newest-event-first and
-`pnpm probe:deployment <id>` settles it; see
-[Schema verification](schema.md#when-a-failed-row-does-not-say-why). And the reason arrives on
+One thing stays unresolved, and one has since been answered. **It is `payload.error`.** Measured
+against the live API on a deployment that failed pulling an image that does not exist: the last
+event is step `CREATE_CONTAINER` with `error: "Failed to create deployment."`, and `reason` and
+`detail` both null. So the app's newest-event-first preference order was right, and the field it
+lands on first is the populated one — `pnpm probe:deployment <id>` remains the way to re-check
+it; see [Schema verification](schema.md#when-a-failed-row-does-not-say-why). Worth naming what
+that sentence is worth: it says a container was not created and not why, which is Railway's
+answer rather than a loss in transit.
+
+What stays unresolved is the timing. The reason arrives on
 **expand**, not on page load: the stream only opens for a settled container once its panel is
 open, and fetching per failed row at render time is the cost profile the whole streaming design
 exists to avoid.
@@ -320,10 +350,18 @@ deployment versus a finished one.
 
 ## Single replica, and the state that says so
 
-- **SSE pins a client to one replica**, so this is a single-replica app today. Two pieces of
+- **SSE pins a client to one replica**, so this is a single-replica app today. Three pieces of
   module state say so out loud: the stream cap in
-  [src/lib/stream-slots.ts](../src/lib/stream-slots.ts) and the idempotency map in
-  [src/lib/idempotency.ts](../src/lib/idempotency.ts).
+  [src/lib/stream-slots.ts](../src/lib/stream-slots.ts), the idempotency map in
+  [src/lib/idempotency.ts](../src/lib/idempotency.ts), and the stopped-container map in
+  [src/lib/railway/stopped.ts](../src/lib/railway/stopped.ts).
+- **A stopped container reads as running again after a restart**, because the map that remembers
+  the stop does not survive one. Railway leaves a stopped deployment at `SUCCESS` indefinitely
+  and offers no field anywhere that says one is stopped, so this app remembering what it stopped
+  is the only way the row can say so — and the memory is per replica and per process. It also has
+  no expiry, deliberately: an entry that timed out would flip the watch fingerprint back and tell
+  every open tab that a still-stopped container had returned to Running. Bounded by size instead.
+  [ADR-4](adr/0004-no-database.md) carries the paragraph that admits the exception.
 - **A stream open to its ceiling** outlives nothing: `STREAM.MAX_DURATION_MS` is fifteen minutes,
   clamped further to whatever is left of the access token. Deploys finish well inside that; a
   long-lived streaming session would need mid-stream token rotation.

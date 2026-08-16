@@ -18,6 +18,25 @@ import {
 } from "./world-state";
 import { fitView, toScreenX } from "./view";
 
+/*
+ * A budget proportionate to the work, for the one file that does a lot of it.
+ *
+ * These cases assert liveness properties — no deadlock, no teleport, no train waiting for
+ * ever — and the only way to state those is to run the simulation for a quarter of an hour
+ * of simulated time, which is 45,000 steps. That is around 700ms of arithmetic per case on
+ * an idle machine, well inside the 5s default and nowhere near it once vitest's worker pool
+ * is saturated: the heaviest case here took 5,147ms in a full run and timed out, having
+ * taken 646ms on its own moments earlier.
+ *
+ * Raised rather than trimmed, deliberately. The step count is the property — a shorter run
+ * is a weaker liveness claim — and a per-file budget is the honest way to say "this file
+ * does more work than a component render", where the alternative is a global default that
+ * has to be right for both. Set here rather than per case so the next heavy assertion in
+ * this file inherits it instead of becoming the next flake: three of the cases below are
+ * within 30% of the one that fired.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 /**
  * A JSON-safe deep copy, for the determinism assertions. The graph is scene data.
  *
@@ -131,7 +150,14 @@ describe("the train lifecycle", () => {
       world.trains.map((train) => [train.id, new Set<TrainPhase>()]),
     );
     const bad: string[] = [];
-    let previous = new Map(world.trains.map((train) => [train.id, train.phase]));
+    /*
+     * The previous phase per train, carried in one mutated Map rather than a fresh one per
+     * step. 45,000 steps rebuilding two Maps apiece is 90,000 allocations of bookkeeping
+     * this test does not measure, and it is what put the whole case within reach of the
+     * 5s budget — comfortable run alone, timed out under a full-suite worker pool, which
+     * is a flake waiting for a slower runner rather than a property of the simulation.
+     */
+    const previous = new Map(world.trains.map((train) => [train.id, train.phase]));
 
     for (let index = 0; index < 45_000; index++) {
       step(world, SIM.STEP_MS, rng);
@@ -142,8 +168,8 @@ describe("the train lifecycle", () => {
         const ring = ringFor(train);
         const expected = ring[(ring.indexOf(was) + 1) % ring.length];
         if (train.phase !== expected) bad.push(`${train.id}: ${was} -> ${train.phase}`);
+        previous.set(train.id, train.phase);
       }
-      previous = new Map(world.trains.map((train) => [train.id, train.phase]));
     }
 
     expect(bad).toEqual([]);

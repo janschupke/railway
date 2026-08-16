@@ -77,6 +77,10 @@ export function ConfirmDestroyDialog({
   triggerDisabled,
   copy,
   onDestroyed,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+  startRefresh: callerRefresh,
 }: {
   action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   /**
@@ -106,11 +110,42 @@ export function ConfirmDestroyDialog({
   copy: DestroyCopy;
   /** Runs before the refresh, when the caller holds selection state of its own. */
   onDestroyed?: () => void;
+  /**
+   * Opt-in control of the open state, for a caller that opens this from somewhere other
+   * than the trigger below.
+   *
+   * Opt-in rather than required: the bulk variant still renders its own trigger in the
+   * selection toolbar, and so does every test in this component's three test files. Only
+   * the row menu needs to open one from outside — a trigger rendered inside a menu item
+   * unmounts the moment the menu closes, which breaks both the open and the focus restore.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Suppresses the trigger entirely, for a caller that supplies its own. */
+  hideTrigger?: boolean;
+  /**
+   * The transition the post-destroy list refresh runs inside, when a caller owns one.
+   *
+   * The window this closes is the one `e2e/skeleton.spec.ts` records: "Its trigger used to
+   * stay live, and a second click hit a service that no longer existed." A caller that
+   * replaced the trigger has replaced the thing that carries the busy state, so it has to
+   * own the transition too.
+   */
+  startRefresh?: React.TransitionStartFunction;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const tCommon = useTranslations("common");
-  const [open, setOpen] = useState(false);
+  const [selfOpen, setSelfOpen] = useState(false);
+  /*
+   * The merged value, read by Radix AND by the `{open && …}` body gate below.
+   *
+   * Reading the controlled prop in one and `selfOpen` in the other mounts the dialog with an
+   * empty content — and an empty AlertDialogContent traps no focus, so Tab walks straight
+   * into the page behind it. That is the regression this file's own docblock records above,
+   * and `e2e/keyboard.spec.ts` is what catches it.
+   */
+  const open = controlledOpen ?? selfOpen;
   const [confirmText, setConfirmText] = useState("");
   const [pending, startTransition] = useTransition();
   /*
@@ -119,7 +154,11 @@ export function ConfirmDestroyDialog({
    * exists and answered with an error. The transition makes that window visible and closes
    * it; Button derives aria-busy and disabled from `pending` already.
    */
-  const [refreshing, startRefresh] = useTransition();
+  const [selfRefreshing, startSelfRefresh] = useTransition();
+  // The caller's transition wins when there is one — see `startRefresh` above. `refreshing`
+  // is then always false, and the trigger it would have marked is not rendered anyway.
+  const refresh = callerRefresh ?? startSelfRefresh;
+  const refreshing = callerRefresh ? false : selfRefreshing;
 
   const fold = (value: string) => (matchCase ? value : value.toLowerCase());
   const confirmed = fold(confirmText.trim()) === fold(confirmToken);
@@ -129,14 +168,15 @@ export function ConfirmDestroyDialog({
       const result = await action(null, formData);
       if (result.ok) {
         toast({ title: result.message, tone: "success" });
-        setOpen(false);
+        setSelfOpen(false);
+        onOpenChange?.(false);
         /*
          * Cleared before the refresh rather than after it. The selection is a set of
          * service ids and most of them are about to stop existing; leaving it in place for
          * the round trip would mean the toolbar counting rows that are already gone.
          */
         onDestroyed?.();
-        startRefresh(() => router.refresh());
+        refresh(() => router.refresh());
       } else {
         toast({ title: copy.failedTitle, description: result.error, tone: "error" });
       }
@@ -157,22 +197,28 @@ export function ConfirmDestroyDialog({
        * the dialog was dismissed.
        */
       onOpenChange={(next) => {
-        setOpen(next);
+        setSelfOpen(next);
         setConfirmText("");
+        // The caller's handler is WRAPPED, never replaced: the clear above is what stops a
+        // cancelled dialog reopening with its button already armed, and a controlled caller
+        // must not be able to switch that off by supplying a handler of its own.
+        onOpenChange?.(next);
       }}
     >
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="danger"
-          size="sm"
-          disabled={triggerDisabled}
-          pending={refreshing}
-          pendingLabel={copy.refreshPending}
-        >
-          <Trash2 aria-hidden />
-          {copy.trigger}
-        </Button>
-      </AlertDialogTrigger>
+      {!hideTrigger && (
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={triggerDisabled}
+            pending={refreshing}
+            pendingLabel={copy.refreshPending}
+          >
+            <Trash2 aria-hidden />
+            {copy.trigger}
+          </Button>
+        </AlertDialogTrigger>
+      )}
 
       <AlertDialogContent>
         {/* Mounted only while open, which is also what resets the typed confirmation. */}

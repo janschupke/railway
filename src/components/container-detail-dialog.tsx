@@ -86,6 +86,10 @@ export function ContainerDetailDialog({
   projectId,
   environmentId,
   disabled,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+  startRefresh: callerRefresh,
 }: {
   container: Container;
   metrics: ContainerMetrics | undefined;
@@ -99,6 +103,18 @@ export function ContainerDetailDialog({
   environmentId: string;
   /** Set while the container is on its way out, when there is nothing left to edit. */
   disabled?: boolean;
+  /**
+   * Opt-in control of the open state, for a caller that opens this from somewhere other
+   * than the trigger below — the row menu, whose trigger unmounts when the menu closes.
+   *
+   * Opt-in rather than required so this component's own tests keep clicking a real trigger.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Suppresses the trigger entirely, for a caller that supplies its own. */
+  hideTrigger?: boolean;
+  /** The transition the post-edit list refresh runs inside, when a caller owns one. */
+  startRefresh?: React.TransitionStartFunction;
 }) {
   const t = useTranslations("containerDetail");
   const tContainers = useTranslations("containers");
@@ -108,7 +124,13 @@ export function ContainerDetailDialog({
   const locale = useLocale();
   const router = useRouter();
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [selfOpen, setSelfOpen] = useState(false);
+  /*
+   * The merged value, read by Radix AND by the `{open && …}` body gate below. Splitting the
+   * two mounts an empty DialogContent, which traps no focus — the regression
+   * `confirm-destroy-dialog.tsx` documents and `e2e/keyboard.spec.ts` catches.
+   */
+  const open = controlledOpen ?? selfOpen;
   const [editing, setEditing] = useState(false);
   /*
    * The edit has returned but the row still shows the old name and image until the
@@ -120,7 +142,11 @@ export function ContainerDetailDialog({
    * deployment id reaches the row through this refresh — `useDeploymentStream` keys on the
    * id alone, so it re-attaches on its own once the row re-renders with the new one.
    */
-  const [refreshing, startRefresh] = useTransition();
+  const [selfRefreshing, startSelfRefresh] = useTransition();
+  // The caller's transition wins when there is one. `refreshing` is then always false, and
+  // the trigger it would have marked is not rendered anyway.
+  const refresh = callerRefresh ?? startSelfRefresh;
+  const refreshing = callerRefresh ? false : selfRefreshing;
 
   /** Only a managed container has an edit mode to be in. */
   const canEdit = container.managed && !disabled;
@@ -129,24 +155,29 @@ export function ContainerDetailDialog({
     <DialogRoot
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
+        setSelfOpen(next);
         // A dialog reopened after an edit was abandoned must not still be in edit mode.
         if (!next) setEditing(false);
+        // Wrapped rather than replaced, so the edit-mode reset above cannot be switched off
+        // by a caller that supplies a handler of its own.
+        onOpenChange?.(next);
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          variant="secondary"
-          size="sm"
-          pending={refreshing}
-          pendingLabel={tEdit("refreshPending")}
-        >
-          <Info aria-hidden />
-          {t("trigger")}
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button
+            variant="secondary"
+            size="sm"
+            pending={refreshing}
+            pendingLabel={tEdit("refreshPending")}
+          >
+            <Info aria-hidden />
+            {t("trigger")}
+          </Button>
+        </DialogTrigger>
+      )}
 
-      <DialogContent size="full" closeLabel={tCommon("close")}>
+      <DialogContent size="panel" closeLabel={tCommon("close")}>
         {/* Mounted only while open, which is also what re-reads the variables and resets
             anything typed into a form that was dismissed rather than submitted. */}
         {open && (
@@ -163,13 +194,17 @@ export function ContainerDetailDialog({
                 serviceId={container.serviceId}
                 displayName={container.displayName}
                 image={container.image}
+                // So the form can say when a stateful image is about to run with no
+                // storage — editing cannot attach a volume. See its `volume` prop.
+                volume={volume}
                 projectId={projectId}
                 environmentId={environmentId}
                 onDone={(message) => {
                   toast({ title: message, tone: "success" });
-                  setOpen(false);
+                  setSelfOpen(false);
+                  onOpenChange?.(false);
                   setEditing(false);
-                  startRefresh(() => router.refresh());
+                  refresh(() => router.refresh());
                 }}
                 onError={(message) =>
                   toast({
@@ -189,9 +224,11 @@ export function ContainerDetailDialog({
                   refuses before the verb runs. What a reader saw of it was a row with
                   fewer buttons than its neighbour, which states nothing about why.
 
-                  Its own string rather than the row's `notManagedTooltip`, which answers
-                  the narrower question "where is my Destroy button". This one has to cover
-                  every verb, because this is the view that holds all of them.
+                  It is now the ONLY place that sentence is said. The row used to carry a
+                  tooltip answering the narrower question "where is my Destroy button", on a
+                  control that existed only to hold it — and a tooltip is supplementary
+                  detail by definition, which is the wrong register for a constraint. This
+                  one covers every verb, because this is the view that holds all of them.
 
                   Info rather than warning: nothing is wrong. This is a service the app is
                   showing for context, and Railway's own page is where it can be changed.

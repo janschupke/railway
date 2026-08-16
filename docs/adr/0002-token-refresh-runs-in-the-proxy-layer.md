@@ -23,12 +23,13 @@ anything, so a request that lost a race adopts the winner's session instead of d
 
 ## Consequences
 
-Without those two, one dashboard load puts many requests through the proxy holding the same
-cookie — the document, its RSC payloads, and every open log stream — and each opens its own grant
-with the same refresh token. Railway invalidates that token on first use, so one wins and the
-rest receive `invalid_grant`, conclude the session is dead, and delete the cookie holding the
-refresh that had just succeeded. That is what manufactured the repeated authorizations this
-decision fixed.
+**Both halves of the concurrency handling are load-bearing, and the failure they prevent is
+silent.** One dashboard load puts many requests through the proxy holding the same cookie — the
+document, its RSC payloads, and every open log stream. Without the shared in-flight grant each
+opens its own with the same refresh token; Railway invalidates that token on first use, so one
+wins and the rest receive `invalid_grant`. Without the re-read before clearing, those losers
+conclude the session is dead and delete the cookie holding the refresh that had just succeeded.
+The symptom is being asked to authorize again, repeatedly, for no reason the user can see.
 
 ---
 

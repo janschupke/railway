@@ -15,8 +15,8 @@ import types and pure helpers exclusively.
 ## Decision
 
 **Keep the hand-rolled client.** Apollo Client's value is a normalized cache plus hooks in the
-browser, and there is no browser-side GraphQL here to give them to — it would put ~35 kB gzip into
-a bundle that is already budgeted.
+browser, and there is no browser-side GraphQL here to give them to — it would put a client bundle
+into a budget that has nothing to spend it on.
 
 **A normalized cache would be actively wrong.** The dashboard shows infrastructure that changes
 underneath the user; every request is `cache: "no-store"` on purpose. There are two SSE endpoints
@@ -34,25 +34,19 @@ cross that boundary either way.
 never retried; `Retry-After` and `X-RateLimit-Reset` are honoured against a documented 1,000
 req/hour quota.
 
-## The gap this used to have, and how it closed
+**The types are generated, not asserted.** Railway's schema is dumped by `pnpm schema:pull` and
+committed; `pnpm codegen` derives each document's result and variable types from it; every export
+in `operations.ts` is annotated `TypedDocument<Result, Variables>`, so `gql` and `gqlPartial` infer
+both and no call site states a shape. A renamed nested field fails `pnpm codegen`, and a wrong
+variable fails `pnpm typecheck`. `verify-schema.ts` validates the real documents against Railway's
+live schema rather than a hand-written list of root fields — see
+[Schema verification](../schema.md).
 
-The type parameter on `gql<T>()` was an unchecked assertion, and `verify-schema.ts` proved root
-field and argument _existence_ rather than selection sets or nullability — so a renamed nested
-field surfaced as a runtime `undefined`. That was a real hole, and the answer to it was codegen,
-which Apollo does not provide either.
-
-T-476 acted on it. Railway's schema is dumped by `pnpm schema:pull` and committed, `pnpm codegen`
-generates each document's result and variable types from it, and every export in `operations.ts`
-is annotated `TypedDocument<Result, Variables>` — so `gql` and `gqlPartial` infer both and no call
-site states a shape. A renamed nested field fails `pnpm codegen`; a wrong variable fails
-`pnpm typecheck`. `verify-schema.ts` now validates the real documents against Railway's live
-schema instead of a hand-written list of root fields. See [Schema verification](../schema.md).
-
-That strengthened this decision rather than weakening it. Everything Apollo was rejected for is
-untouched — still no browser-side GraphQL, still no cache to normalize, still a
-`graphql-ws`-to-SSE bridge no link chain crosses — and the one thing it was missing arrived
-without it. What was added is one generated file and one dev dependency that runs at build time;
-`graphql` itself is a peer of `graphql-ws`, which this app already had.
+This is the part a client library is usually reached for, and it is why the hand-rolled client is
+not a weaker position than Apollo. A type parameter that is only an assertion lets a renamed nested
+field reach the render as `undefined`; codegen is the answer to that, and Apollo does not supply it
+either. What it costs here is one generated file and one dev dependency that runs at build time —
+`graphql` itself is already a peer of `graphql-ws`.
 
 ## Consequences
 

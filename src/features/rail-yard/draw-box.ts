@@ -30,6 +30,14 @@ type Point = readonly [x: number, y: number];
 export const visible = (size: number, scale: number): boolean =>
   size * scale >= VIEW.MIN_FEATURE_PX;
 
+/**
+ * How close to edge-on counts as edge-on, in the units of the dot product below.
+ *
+ * Twelve orders of magnitude above the rounding error of a `sin`/`cos` pair — which is
+ * where the ambiguity actually lives — and seven below a face with any pixels in it.
+ */
+const EDGE_ON = 1e-9;
+
 /** Each face's outward normal, as a rotation off the box's own heading. */
 const FACE_NORMAL: Readonly<Record<Face, number>> = {
   front: 0,
@@ -61,6 +69,15 @@ const FACE_NORMAL: Readonly<Record<Face, number>> = {
  * one face is left, which is correct rather than a special case: a zero-area quad fills no
  * pixels either way, and excluding it keeps the count honest for the test.
  *
+ * **The comparison is against `-EDGE_ON`, not against zero, and that is load-bearing.** At
+ * an edge-on heading the expression is zero in exact arithmetic and something within a
+ * rounding step of zero in floating point, and which side of zero it lands on is decided by
+ * the last bit of `Math.sin` and `Math.cos` — implementation-defined in ECMAScript, and
+ * observed differing between two Node builds. A bare `< 0` therefore drew a zero-area quad
+ * on one machine and not on another, which is how this passed locally and failed in CI.
+ * `EDGE_ON` is far above that noise and far below any face with a pixel in it: a face
+ * within 1e-9 radians of edge-on is a quad about a billionth of its own width.
+ *
  * The result needs no depth ordering. Both faces are turned towards the camera on a convex
  * solid under an orthographic projection, so they meet along their shared edge and cannot
  * overlap — which matters here because each face takes a translucent shade pass, and an
@@ -73,7 +90,7 @@ export function visibleFaces(angle: number): readonly Face[] {
   const faces: Face[] = [];
   for (const face of ["front", "back", "left", "right"] as const) {
     const at = angle + FACE_NORMAL[face];
-    if (Math.sin(at) - Math.cos(at) * VIEW.SHEAR < 0) faces.push(face);
+    if (Math.sin(at) - Math.cos(at) * VIEW.SHEAR < -EDGE_ON) faces.push(face);
   }
   return faces;
 }

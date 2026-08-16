@@ -7,13 +7,13 @@ import {
   Copy,
   Download,
   Maximize2,
-  Minimize2,
   Search,
   WrapText,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ToggleGroup } from "radix-ui";
 import { UI } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 import { chip } from "./ui/chip";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -125,7 +125,15 @@ export function LogPaneToolbar({
       aria-label={t("logToolbarLabel")}
       className="mb-2 flex flex-col gap-2"
     >
-      <div className="flex items-center gap-1.5">
+      {/*
+        The gutter is for the dialog's close control, which ./log-pane renders this
+        toolbar inside of while maximised. That control is positioned absolutely into
+        the top-right corner this row ends in, so without the padding it lands on top
+        of whichever button happens to be last — and it paints over them, because the
+        dialog draws it after its children. Reserving the space is the fix; removing
+        the button that was under it only promotes the next one into the same corner.
+      */}
+      <div className={cn("flex items-center gap-1.5", maximized && "pr-9")}>
         <div className="relative min-w-0 grow">
           <Search
             aria-hidden
@@ -229,13 +237,23 @@ export function LogPaneToolbar({
         {/*
           Last on the row, because it is the only control here that does not act on the
           log — it acts on the space the log is read in.
+
+          Absent once maximised, because the dialog already draws a control that does
+          this. ./log-pane names its close `logMinimize`, so the restore affordance is
+          still there and still carries that name — and keeping this one too would put
+          two controls for one action side by side in the same corner. The gutter
+          above is the separate half of the fix: it is what stops whichever button is
+          last from sitting under the dialog's close, and it is needed whether or not
+          this one is rendered.
         */}
-        <IconButton
-          label={maximized ? t("logMinimize") : t("logMaximize")}
-          icon={maximized ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
-          aria-pressed={maximized}
-          onClick={() => onMaximizedChange(!maximized)}
-        />
+        {!maximized && (
+          <IconButton
+            label={t("logMaximize")}
+            icon={<Maximize2 aria-hidden />}
+            aria-pressed={false}
+            onClick={() => onMaximizedChange(true)}
+          />
+        )}
       </div>
 
       {/*

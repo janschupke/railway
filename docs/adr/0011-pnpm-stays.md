@@ -40,11 +40,10 @@ made — an ignore-list decays, a reachability check does not.
 ## Consequences
 
 **The rest is a rename, and that is the point.** `packageManager`, `pnpm exec`,
-`--frozen-lockfile`, `pnpm <script>` all have direct npm equivalents. The migration was priced at
-roughly 140 occurrences across 29 files — six functional, the rest prose in this file,
-`SECURITY.md`, `AGENTS.md` and the rule documents. That is a large documentation change and a
-small config change, in exchange for losing a security control and weakening a gate. Priced, and
-declined.
+`--frozen-lockfile`, `pnpm <script>` all have direct npm equivalents. Only a handful of those
+occurrences are functional; the rest are prose in this file, `SECURITY.md`, `AGENTS.md` and the
+rule documents. So the migration is a large documentation change and a small config change, in
+exchange for losing a security control and weakening a gate.
 
 ---
 

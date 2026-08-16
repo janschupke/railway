@@ -21,7 +21,6 @@ import { useCollapsiblePanel } from "@/hooks/use-collapsible-panel";
 import { useVolumeSize } from "@/hooks/use-memory-figure";
 import { cn } from "@/lib/utils";
 import { ContainerActions } from "./container-actions";
-import { ContainerDetailDialog } from "./container-detail-dialog";
 import { ContainerMetricsReadout } from "./container-metrics";
 import { ContainerUrl } from "./container-url";
 import { DeploymentHistory } from "./deployment-history";
@@ -32,7 +31,6 @@ import { Banner } from "./ui/banner";
 import { Checkbox } from "./ui/checkbox";
 import { Button } from "./ui/button";
 import { ErrorBlock } from "./ui/error-block";
-import { Tooltip } from "./ui/tooltip";
 import { Text } from "./ui/text";
 
 /*
@@ -140,8 +138,25 @@ export function ContainerRow({
   const [phase, setPhase] = useState<LogPhase>(() => phaseFor(container.state));
   const stream = useDeploymentStream(container.deploymentId, phase, shouldStream);
 
-  // The stream is fresher than the last server render; prefer it once it has spoken.
-  const state = stream.state ?? container.state;
+  /*
+   * The stream is fresher than the last server render — while it is open.
+   *
+   * Once it has said `done` it will never speak again, so a terminal server render is by
+   * definition the newer of the two. Without that half of the rule, a stop was invisible:
+   * Railway leaves a stopped deployment at SUCCESS, which is terminal, so the monitor had
+   * already emitted `done` and closed the EventSource *before* Stop was pressed — and its
+   * effect is keyed on the deployment id, which a stop does not change. No second poll is
+   * ever issued, so `stream.state` stayed frozen at `running` and won against a server
+   * render that now correctly said `removed`. See lib/railway/stopped.ts.
+   *
+   * The `isTerminal` guard is what line this replaced was there for: the settle refresh
+   * can race a list read still saying DEPLOYING, and `deploying` is not terminal, so the
+   * stream still wins in exactly that case.
+   */
+  const state =
+    stream.done && isTerminal(container.state)
+      ? container.state
+      : (stream.state ?? container.state);
 
   /*
    * Adjusted during render rather than in an effect. An effect would commit one render
@@ -349,81 +364,38 @@ export function ContainerRow({
           </time>
         </Text>
 
-        {container.managed ? (
+        {/*
+         * One menu, on every row, managed or not.
+         *
+         * `state` rather than `container.state`: the stream is fresher than the last server
+         * render, and a row that has just finished deploying must offer Stop rather than the
+         * Redeploy its stale status would have earned.
+         *
+         * The two branches this replaced are gone rather than merged. A managed row carried
+         * four to six controls and an unmanaged one carried two, so the column ended in a
+         * different shape depending on who made the service — and a reader scanning down it
+         * had to work out why. `ContainerActions` decides what a row may do from
+         * `container.managed`, which is where that decision already lived.
+         *
+         * The tooltip that used to explain an unmanaged row moved with it: the sentence is
+         * in the detail dialog, in visible text, where "where is my Destroy button" is
+         * actually answered rather than hinted at on hover.
+         */}
+        <ContainerActions
+          container={container}
+          metrics={metrics}
+          volume={volume}
+          state={state}
+          projectId={projectId}
+          environmentId={environmentId}
           /*
-           * `state` rather than `container.state`: the stream is fresher than the last
-           * server render, and a row that has just finished deploying must offer Stop
-           * rather than the Redeploy its stale status would have earned.
+           * Undefined when the container has no volume, which is what makes the destroy
+           * dialog render no checkbox and post no field. Formatted here rather than inside
+           * the dialog so that the two places stating this volume's size — the readout below
+           * and the confirmation — go through one hook.
            */
-          <ContainerActions
-            container={container}
-            metrics={metrics}
-            volume={volume}
-            state={state}
-            projectId={projectId}
-            environmentId={environmentId}
-            /*
-             * Undefined when the container has no volume, which is what makes the destroy
-             * dialog render no checkbox and post no field. Formatted here rather than
-             * inside the dialog so that the two places stating this volume's size — the
-             * readout below and the confirmation — go through one hook.
-             */
-            volumeSize={volume && sized(volume.sizeMB)}
-          />
-        ) : (
-          /*
-           * The slot every other row uses to act, holding the one action this row has.
-           *
-           * It used to be a button that said "Not managed here" and did nothing when
-           * pressed — a control whose whole content was an explanation of why it was not
-           * a control. The information is worth keeping and the affordance was a lie:
-           * something that looks like a button and answers a click with nothing is read
-           * as broken long before it is read as a note.
-           *
-           * Railway's own page is genuinely what a reader wants next here, since this
-           * service cannot be destroyed from this app. The name above links to the same
-           * place, which is not a reason to leave this slot dead: the name is navigation
-           * inside a sentence, and this is the row's action, in the column where every
-           * other row keeps one.
-           *
-           * The tooltip still carries the explanation — it is the answer to "where is my
-           * Destroy button", which is the question this row actually raises. As a
-           * description rather than a label, so the accessible name stays the visible
-           * text (WCAG 2.5.3 Label in Name).
-           */
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {/*
-              Two controls now, where there was one.
-
-              Details is offered on every row, managed or not, and this is the row it was
-              missing most: an external container had nowhere at all to show what the app
-              knew about it, and the reason it cannot be changed here was carried entirely
-              by the tooltip on the link beside it. A tooltip is supplementary detail by
-              definition — the dialog is where that sentence belongs, in visible text.
-            */}
-            <ContainerDetailDialog
-              container={container}
-              metrics={metrics}
-              volume={volume}
-              state={state}
-              projectId={projectId}
-              environmentId={environmentId}
-            />
-
-            <Tooltip content={t("notManagedTooltip")}>
-              <Button variant="secondary" size="sm" asChild>
-                <RailwayServiceLink
-                  projectId={projectId}
-                  serviceId={container.serviceId}
-                  environmentId={environmentId}
-                >
-                  <ExternalLink aria-hidden />
-                  {t("openInRailway")}
-                </RailwayServiceLink>
-              </Button>
-            </Tooltip>
-          </div>
-        )}
+          volumeSize={volume && sized(volume.sizeMB)}
+        />
       </div>
 
       {/*

@@ -5,6 +5,7 @@ import {
   injectFaults,
   onlyVisible,
   openNewContainerTab,
+  pickRowAction,
   row,
   settled,
   signIn,
@@ -73,7 +74,7 @@ test("destroy marks its button busy and locks cancel", async ({ page }) => {
   await expect(row(page, "doomed")).toBeVisible();
 
   await injectFaults(page, { slowMs: 1500 });
-  await row(page, "doomed").getByRole("button", { name: "Destroy" }).click();
+  await pickRowAction(page, "doomed", /^Destroy$/);
 
   await onlyVisible(page.getByLabel(/type .doomed. to confirm/i)).fill("doomed");
   const confirm = button(page, /destroy permanently|destroying/i);
@@ -101,5 +102,15 @@ test("switching project reports loading without stealing focus", async ({ page }
   await expect(projectSelect).toBeEnabled();
 
   await injectFaults(page, { slowMs: 0 });
-  await settled(page);
+
+  /*
+   * The destination, not `settled()`. Second Project holds no services, so the switch
+   * lands on the empty state and there is no `ul[aria-label="Containers"]` for
+   * `settled()` to find — it could only ever pass by catching the *previous* project's
+   * list before the transition finished, which is a race it lost roughly half the time
+   * under a full-suite run and won every time in isolation.
+   */
+  await expect(
+    onlyVisible(page.getByText("Nothing running in this environment")),
+  ).toBeVisible();
 });

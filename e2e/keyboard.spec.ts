@@ -67,11 +67,23 @@ test.describe("keyboard operation", () => {
     await signIn(page);
     await spinUp(page, "cache");
 
+    /*
+     * The `…` trigger, which is what the focus restore has to return to now — the destroy
+     * trigger it used to return to is a menu item that unmounts the moment the menu closes.
+     *
+     * That the restore still works is not incidental: closing the menu, waiting a frame and
+     * only then opening the dialog is what leaves the trigger as `document.activeElement`
+     * when the dialog mounts, so the dialog's own focus scope records it. See `openDialog`
+     * in container-actions.tsx.
+     */
     const trigger = onlyVisible(
-      row(page, "cache").getByRole("button", { name: /^destroy$/i }),
+      row(page, "cache").getByRole("button", { name: /^Actions for / }),
     );
     await trigger.focus();
     await page.keyboard.press("Enter");
+    await onlyVisible(
+      page.getByRole("menu").getByRole("menuitem", { name: /^destroy$/i }),
+    ).click();
 
     const dialog = onlyVisible(page.getByRole("alertdialog"));
     await expect(dialog).toBeVisible();
@@ -89,6 +101,79 @@ test.describe("keyboard operation", () => {
     await expect(dialog).toBeHidden();
 
     // Focus returns to what opened the dialog, not to the top of the document.
+    await expect(trigger).toBeFocused();
+  });
+
+  test("opens the row menu with arrows and dismisses it with Escape", async ({
+    page,
+  }) => {
+    /*
+     * The menu is now the only route to every verb on a row, so its own keyboard model is
+     * load-bearing rather than a Radix detail. Arrow-key navigation is the reason a menu
+     * was the right primitive here — `multi-select.tsx` rejected DropdownMenu for the
+     * status filter on exactly that argument: *"its arrow-key model exists because a menu
+     * closes when you pick something."*
+     *
+     * Escape has to leave the row usable, which means focus back on the trigger. A menu
+     * that dismissed to nowhere would strand a keyboard user in the middle of a list.
+     */
+    await signIn(page);
+    await spinUp(page, "cache");
+
+    /*
+     * Settled first, and this is not politeness about timing.
+     *
+     * `availableActions` returns nothing while a container is queued or building, so the
+     * menu at that moment holds Details and Open in Railway and nothing else — and it grows
+     * the lifecycle verbs the instant the row reaches Running. Opening it mid-deploy tests a
+     * list that changes underneath the assertion: it failed exactly that way, with the item
+     * at index 1 resolving to the Railway link on a menu that had two commands in it.
+     *
+     * Worth stating as behaviour rather than only as a wait: a menu left open across that
+     * transition has its items replaced, and focus goes with them. A person is unlikely to
+     * hold one open through a deploy, and the alternative — freezing the commands at the
+     * state they were opened at — would offer Stop on a container that had since crashed.
+     * The wait is here because this test is about the keyboard model, not about that.
+     */
+    await expect(row(page, "cache").getByText("Running")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const trigger = onlyVisible(
+      row(page, "cache").getByRole("button", { name: /^Actions for / }),
+    );
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+
+    const menu = onlyVisible(page.getByRole("menu"));
+    await expect(menu).toHaveCSS("pointer-events", "auto");
+
+    /*
+     * Enter opens the menu with the first command already focused — a menu focuses its
+     * content, which is what separates it from a popover and why arrow keys work at all.
+     *
+     * Asserted through `toBeFocused` on the item rather than through `data-highlighted`,
+     * because focus is the thing a screen reader follows and the attribute is Radix's own
+     * bookkeeping.
+     *
+     * **One press, one item, and the previous version of this was wrong about why.** It
+     * pressed ArrowDown twice to reach the second command and recorded the extra press as
+     * Radix "consuming the first one settling the already-focused item". That is not
+     * Radix's behaviour — it is what a keypress does when it lands while the row is still
+     * re-rendering behind the menu, which is where this test used to send it, straight off
+     * a spin-up. Given a settled row the arrows step one command each, and the doubled
+     * press overshoots: the assertion started failing every run once the wait above made
+     * the page quiet, which is the shape of a test that had been passing on a race.
+     */
+    const items = menu.getByRole("menuitem");
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(2)).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
     await expect(trigger).toBeFocused();
   });
 
@@ -137,10 +222,13 @@ test.describe("keyboard operation", () => {
     await expect(row(page, "db").getByText("Running")).toBeVisible({ timeout: 20_000 });
 
     const trigger = onlyVisible(
-      row(page, "db").getByRole("button", { name: /^details$/i }),
+      row(page, "db").getByRole("button", { name: /^Actions for / }),
     );
     await trigger.focus();
     await page.keyboard.press("Enter");
+    await onlyVisible(
+      page.getByRole("menu").getByRole("menuitem", { name: /^details$/i }),
+    ).click();
 
     const dialog = onlyVisible(page.getByRole("dialog"));
     await expect(dialog).toBeVisible();
@@ -216,8 +304,22 @@ test.describe("keyboard operation", () => {
     await spinUp(page, "cache");
 
     await row(page, "cache")
-      .getByRole("button", { name: /^destroy$/i })
+      .getByRole("button", { name: /^Actions for / })
       .focus();
+    await page.keyboard.press("Enter");
+    /*
+     * Arrowed to rather than clicked: this test is about doing the whole thing from the
+     * keyboard, and the menu is now part of "the whole thing".
+     *
+     * `End` rather than arrows, and not to save keystrokes. Destroy is last, and a menu
+     * that does not loop — Radix's default, and the right one here — means ArrowUp from the
+     * first item goes nowhere. Counting ArrowDowns would encode the item count into this
+     * test, so adding a verb to the menu would break a test about destroying a container.
+     */
+    const menu = onlyVisible(page.getByRole("menu"));
+    await expect(menu).toHaveCSS("pointer-events", "auto");
+    await page.keyboard.press("End");
+    await expect(menu.getByRole("menuitem", { name: /^destroy$/i })).toBeFocused();
     await page.keyboard.press("Enter");
 
     const dialog = onlyVisible(page.getByRole("alertdialog"));

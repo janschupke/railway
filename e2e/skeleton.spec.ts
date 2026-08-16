@@ -179,9 +179,15 @@ test("destroying locks the row's control until the list refreshes", async ({
   /*
    * The row survives until the refreshed list lands. Its trigger used to stay live, and
    * a second click hit a service that no longer existed and answered with an error.
+   *
+   * The `…` trigger now, and the change is more than a locator. Each dialog used to own the
+   * transition for its own verb and mark its own trigger busy. There is one trigger and it
+   * belongs to no dialog, so the transition moved up into `ContainerActions` — which makes
+   * this assertion stronger than it was: the menu cannot be opened at all, so no command on
+   * this row is reachable while a stale list is on screen.
    */
   await expect(
-    row(page, "doomed").getByRole("button", { name: /destroy|removing/i }),
+    row(page, "doomed").getByRole("button", { name: /^Actions for / }),
   ).toHaveAttribute("aria-busy", "true");
 
   await injectFaults(page, { slowMs: 0 });

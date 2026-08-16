@@ -3,6 +3,7 @@ import { requireSessionOrUnauthorized } from "@/lib/auth/route-guard";
 import { log } from "@/lib/logger";
 import { withRequestScope } from "@/lib/log/request-scope";
 import { listServiceDeployments } from "@/lib/railway/service-lifecycle";
+import { applyStoppedToHistory } from "@/lib/railway/stopped";
 import { RAILWAY_ID_PATTERN } from "@/lib/validation/patterns";
 
 export const runtime = "nodejs";
@@ -90,8 +91,15 @@ async function handle(request: NextRequest) {
     refused,
   });
 
+  /*
+   * The same memory of a stop the container list is rendered through. Applied here too, or
+   * the two surfaces contradict each other on one screen: the row badge says Removed and
+   * the newest entry in the panel it expands into says Running, because the history is a
+   * second, independent producer of `ContainerState` from the same raw status.
+   * See lib/railway/stopped.ts.
+   */
   return Response.json(
-    { deployments: entries, refused },
+    { deployments: applyStoppedToHistory(serviceId, entries), refused },
     { headers: { "cache-control": "no-store" } },
   );
 }
