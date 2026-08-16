@@ -97,7 +97,7 @@ jobs:
       - name: Unit, component and integration tests with coverage
         run: pnpm test:coverage
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: coverage
@@ -126,7 +126,7 @@ jobs:
       # A few kB of manifest, not the 100+ MB .next tree. Without it a budget failure
       # cannot be diffed after the fact — the run tells you a route grew and the evidence
       # is discarded with the runner.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: route-bundle-stats
@@ -184,7 +184,7 @@ jobs:
       - name: "Playwright (workers: 1)"
         run: pnpm test:e2e
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: playwright-report
@@ -214,7 +214,7 @@ jobs:
       - name: Lighthouse CI
         run: pnpm lighthouse
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: lighthouse-report
