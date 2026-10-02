@@ -33,7 +33,7 @@
 # reads as a version. src/toolchain.test.ts holds both FROM lines to the same reference,
 # because a build stage and a runtime stage on different base images is a difference
 # nothing else here would notice. Dependabot's `docker` ecosystem bumps it.
-FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
+FROM node:26.10.0-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS base
 # Pinned to the same version as `packageManager`, and asserted equal to it by
 # src/toolchain.test.ts — two literals that must agree, in a repo where nothing else
 # would notice if they stopped.
@@ -96,7 +96,7 @@ RUN pnpm size
 # stage copies .next/standalone, and the build cache is not in it.
 
 
-FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runner
+FROM node:26.10.0-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
